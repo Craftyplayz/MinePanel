@@ -56,8 +56,16 @@ def serviceTest = tasks.register('serviceTest', JavaExec) {
     mainClass = 'dev.craftyplayz.minepanel.service.LocalDashboardServerTest'
 }
 
+def frontendSyntax = tasks.register('frontendSyntax', Exec) {
+    commandLine 'node', '--check', 'src/client/resources/web/app.js'
+}
+
+def frontendTest = tasks.register('frontendTest', Exec) {
+    commandLine 'node', '--test', 'src/test/js/dashboard.test.js'
+}
+
 tasks.named('check') {
-    dependsOn serviceTest
+    dependsOn serviceTest, frontendSyntax, frontendTest
 }
 
 tasks.register('releaseBuild') {
@@ -71,7 +79,8 @@ tasks.register('releaseBuild') {
         }
         def jar = new java.util.jar.JarFile(artifact)
         try {
-            ['fabric.mod.json', 'web/index.html', 'web/app.js', 'web/styles.css'].each { entry ->
+            ['fabric.mod.json', 'web/index.html', 'web/app.js', 'web/styles.css',
+             'dev/craftyplayz/minepanel/MinePanelClient.class'].each { entry ->
                 if (jar.getEntry(entry) == null) {
                     throw new GradleException("Release JAR is missing ${entry}")
                 }
