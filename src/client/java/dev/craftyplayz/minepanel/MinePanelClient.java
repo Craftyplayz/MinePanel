@@ -5,6 +5,7 @@ import dev.craftyplayz.minepanel.telemetry.TelemetryStore;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 
 import java.io.IOException;
 import java.util.concurrent.ExecutorService;
@@ -49,9 +50,9 @@ public final class MinePanelClient implements ClientModInitializer {
             telemetry.updatePlayer(
                     System.currentTimeMillis(),
                     (now - sessionStartedNanos) / 1_000_000_000L,
-                    client.level.dimension().location().toString(),
+                    client.level.dimension().identifier().toString(),
                     player.getX(), player.getY(), player.getZ(),
-                    (double) player.getHealth(), (double) player.getMaxHealth(),
+                    (double) player.getHealth(), player.getAttributeValue(Attributes.MAX_HEALTH),
                     (double) player.getAbsorptionAmount());
         });
 
@@ -68,7 +69,7 @@ public final class MinePanelClient implements ClientModInitializer {
             dashboard = new LocalDashboardServer(telemetry);
             dashboard.start();
             LOGGER.info(() -> "Dashboard available at " + dashboard.getUrl());
-        } catch (IOException exception) {
+        } catch (IOException | RuntimeException exception) {
             LOGGER.log(Level.WARNING, "MinePanel dashboard could not start; gameplay will continue.", exception);
         }
     }

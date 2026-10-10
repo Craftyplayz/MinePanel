@@ -15,7 +15,7 @@ The upstream Litematica and MaLiLib branches inspected do not include a 26.1.2 b
 ## Architecture and component boundaries
 
 1. **Fabric client mod:** lifecycle ownership, client-thread state collection, configuration, optional-mod detection, and immutable snapshots. No server-side installation, command, or inventory mutation.
-2. **Local service:** loopback-only HTTP for bundled assets and narrow read-only APIs, with a per-server random secret delivered in a same-origin response (never in a URL or log), strict origin/host and request validation, bounded work, and clean shutdown. Minecraft state must be copied on the client thread; network work must not run there. The current service still uses HTTP polling; a browser WebSocket server remains outstanding.
+2. **Local service:** loopback-only HTTP for bundled assets plus a bounded browser WebSocket listener for read-only snapshots. A per-server random secret is delivered as an HttpOnly same-origin cookie (never in a URL or log); WebSocket Host/Origin/cookie, handshake and frames are validated. Minecraft state must be copied on the client thread; network work must not run there.
 3. **Bundled browser UI:** offline-capable dashboard assets, accessible dark responsive widgets, and UI-only layout preferences. No remote scripts, APIs, telemetry, or gameplay-history persistence.
 
 Optional integrations are isolated behind adapters and fail closed to an unavailable status. JourneyMap remains the map source of truth. Litematica progress may only be implemented against verified placement/mismatch APIs; inventory ownership is not build progress.
@@ -38,7 +38,7 @@ Every displayed value must identify unavailable data honestly. Server-only facts
 
 - Fabric Loader `0.19.5`, Fabric API `0.155.3+26.1.2`, Loom `1.18-SNAPSHOT`, and Gradle `9.7.1` are pinned to the official 26.1.2 example.
 - Java toolchain/release target: 25. Use current official 26.1 unobfuscated Loom plugin ID.
-- The foundation uses JDK HTTP and authenticated 3-second status polling to avoid a web-server dependency; WebSocket push updates remain a core-telemetry milestone.
+- The service uses JDK HTTP plus a small, narrowly scoped WebSocket server implementation. It sends one initial full snapshot and field-level deltas on changed samples; clients reconnect to receive a new initial snapshot.
 - JourneyMap Webmap and Litematica/Malilib are optional and are not compile-time requirements until exact compatible versions and supported APIs have been verified.
 - Frontend assets must be built locally and embedded in the mod JAR; the runtime must not need internet access.
 
@@ -51,7 +51,7 @@ Every displayed value must identify unavailable data honestly. Server-only facts
 ## Milestones, tests, acceptance
 
 1. **Foundation:** pinned Java/Fabric build, lifecycle, loopback service, bundled offline dashboard, and automated service tests. Accept when the client can start the service, same-origin browser can read a status snapshot, unauthorized requests fail, and shutdown closes the listener.
-2. **Core telemetry (partial):** client tick sampling publishes immutable versioned position/dimension/health/absorption snapshots and session duration, with a 250 ms sampling ceiling and change detection. The dashboard consumes authenticated HTTP state polling. WebSocket push, vanilla statistics, inventory/equipment, warnings, and event history remain outstanding. Exact vanilla accessor signatures and runtime behavior remain unverified because Loom dependencies cannot be downloaded here.
+2. **Core telemetry (partial):** client tick sampling publishes immutable versioned position/dimension/health/absorption snapshots and session duration, with a 250 ms sampling ceiling and change detection. A WebSocket sends initial state and changed-field deltas. Vanilla statistics, inventory/equipment, warnings, and event history remain outstanding. The player getters and dimension identifier are cross-checked against the official Fabric API 26.1.2 source; full mod compilation and runtime behavior remain unverified because Loom dependencies cannot be downloaded here.
 3. **Dashboard:** responsive movable/resizable widgets, named layouts, accessibility, filters, and preference persistence (no history). Test layout recovery and filters.
 4. **JourneyMap:** verified endpoint/status, direct-open fallback, iframe only after real compatibility testing.
 5. **Containers:** read-only visible contents, last snapshot, and session-only pins; test stale/open distinction.

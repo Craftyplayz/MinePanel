@@ -1,6 +1,6 @@
 # MinePanel
 
-MinePanel is a client-side Fabric companion dashboard for Minecraft Java Edition 26.1.2. Its initial foundation is a bundled, offline-capable local dashboard and lifecycle-managed status service. Player telemetry, layouts, and the optional integrations are not implemented yet; see the [implementation plan](docs/IMPLEMENTATION_PLAN.md) for milestones and verified limitations.
+MinePanel is a client-side Fabric companion dashboard for Minecraft Java Edition 26.1.2. The current foundation includes a bundled offline dashboard, lifecycle-managed loopback service, versioned player position/health/session snapshots, and authenticated WebSocket updates. Inventory, statistics, layouts, and optional integrations remain planned; see the [implementation plan](docs/IMPLEMENTATION_PLAN.md) for milestones and verified limitations.
 
 ## Requirements and build
 
@@ -20,10 +20,10 @@ The installable JAR is produced under `build/release/`. The build requires acces
 
 ## Run
 
-Install the JAR in a Fabric 26.1.2 instance's `mods` directory and start the client. MinePanel binds only to `127.0.0.1` on an ephemeral port and prints the dashboard URL in the game log. Open it on the same PC and move the browser to the second monitor. The current dashboard displays sampled player position, dimension, health, absorption, and session duration; it does not yet provide push/WebSocket updates or the other planned widgets.
+Install the JAR in a Fabric 26.1.2 instance's `mods` directory and start the client. MinePanel binds only to `127.0.0.1` on ephemeral ports and prints the dashboard URL in the game log. Open it on the same PC and move the browser to the second monitor. The dashboard displays sampled player position, dimension, health, absorption, and session duration over authenticated WebSocket updates. Inventory, statistics, event history, layouts, containers, and optional integrations are not yet implemented.
 
 JourneyMap plus its separate Webmap addon and Litematica/Malilib are optional, but their MinePanel integrations are not yet implemented. Current compatibility and known limitations are documented in [installation](docs/INSTALLATION.md), [architecture](docs/ARCHITECTURE.md), and [troubleshooting](docs/TROUBLESHOOTING.md).
 
 ## Privacy
 
-The service is loopback-only. MinePanel has no cloud service, telemetry, external API calls, chat archive, or persistent gameplay-history store. The dashboard currently exposes only service/build status.
+The services bind to loopback only. MinePanel has no cloud service, analytics telemetry, external API calls, chat archive, or persistent gameplay-history store. Current game data is sent only to the local browser while the client is running.

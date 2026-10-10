@@ -1,6 +1,6 @@
 # Testing
 
-`./gradlew releaseBuild` runs the Gradle build and `serviceTest` before checking that the production JAR contains mod metadata and the bundled dashboard. The service test covers loopback binding, static resources, token authorization, cross-origin rejection, unsupported operations, method validation, versioned snapshot JSON, escaped values, deduplicated changes, and unavailable values. In this environment those Java tests were compiled/run directly using Java 25 because Loom cannot resolve while Fabric Maven DNS is blocked. Frontend JavaScript syntax can be checked with `node --check src/client/resources/web/app.js`.
+`./gradlew releaseBuild` runs the Gradle build and `serviceTest` before checking that the production JAR contains mod metadata and the bundled dashboard. The service test covers loopback binding, static resources, token authorization, cross-origin rejection, unsupported operations, method validation, WebSocket handshake/authentication/origin validation, initial push and changed-field deltas, versioned snapshot JSON, escaped values, deduplicated changes, and unavailable values. In this environment those Java tests were compiled/run directly using Java 25 because Loom cannot resolve while Fabric Maven DNS is blocked. Frontend JavaScript syntax can be checked with `node --check src/client/resources/web/app.js`.
 
 No Minecraft runtime/manual integration checks have been performed.
 

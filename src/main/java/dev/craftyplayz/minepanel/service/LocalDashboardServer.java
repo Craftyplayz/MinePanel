@@ -25,6 +25,7 @@ public final class LocalDashboardServer implements AutoCloseable {
     private final ExecutorService executor;
     private final String token;
     private final TelemetryStore telemetry;
+    private final LocalWebSocketServer webSocketServer;
 
     public LocalDashboardServer() throws IOException {
         this(new TelemetryStore());
@@ -36,6 +37,12 @@ public final class LocalDashboardServer implements AutoCloseable {
         new SecureRandom().nextBytes(tokenBytes);
         token = HexFormat.of().formatHex(tokenBytes);
         server = HttpServer.create(new InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0), 16);
+        try {
+            webSocketServer = new LocalWebSocketServer(telemetry, token, server.getAddress().getPort());
+        } catch (IOException failure) {
+            server.stop(0);
+            throw failure;
+        }
         executor = new ThreadPoolExecutor(2, 2, 0L, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(32), runnable -> {
             Thread thread = new Thread(runnable, "MinePanel-http");
             thread.setDaemon(true);
@@ -46,6 +53,7 @@ public final class LocalDashboardServer implements AutoCloseable {
     }
 
     public void start() {
+        webSocketServer.start();
         server.start();
     }
 
@@ -53,9 +61,14 @@ public final class LocalDashboardServer implements AutoCloseable {
         return "http://127.0.0.1:" + server.getAddress().getPort() + "/";
     }
 
+    int getWebSocketPort() {
+        return webSocketServer.getPort();
+    }
+
     @Override
     public void close() {
         server.stop(0);
+        webSocketServer.close();
         executor.shutdownNow();
     }
 
@@ -81,7 +94,10 @@ public final class LocalDashboardServer implements AutoCloseable {
                         respond(exchange, 403, "text/plain; charset=utf-8", "Forbidden");
                     } else {
                         exchange.getResponseHeaders().set("Cache-Control", "no-store");
-                        respond(exchange, 200, "application/json; charset=utf-8", "{\"token\":\"" + token + "\"}");
+                        exchange.getResponseHeaders().add("Set-Cookie",
+                                "MinePanelSession=" + token + "; HttpOnly; SameSite=Strict; Path=/");
+                        respond(exchange, 200, "application/json; charset=utf-8",
+                                "{\"websocketPort\":" + getWebSocketPort() + "}");
                     }
                 }
                 case "/api/state" -> {
@@ -119,7 +135,7 @@ public final class LocalDashboardServer implements AutoCloseable {
 
     private boolean authorized(HttpExchange exchange) {
         String authorization = exchange.getRequestHeaders().getFirst("Authorization");
-        if (authorization == null || !authorization.startsWith("Bearer ")) {
+        if (authorization == null || authorization.length() != 71 || !authorization.startsWith("Bearer ")) {
             return false;
         }
         return MessageDigest.isEqual(token.getBytes(StandardCharsets.US_ASCII),
@@ -127,15 +143,16 @@ public final class LocalDashboardServer implements AutoCloseable {
     }
 
     private String statusJson() {
+        var player = telemetry.player();
         String version = LocalDashboardServer.class.getPackage().getImplementationVersion();
         if (version == null) {
             version = "development";
         }
         return "{\"schemaVersion\":1,\"service\":\"connected\",\"game\":"
-                + (telemetry.player().available() ? "\"connected\"" : "\"unavailable\"")
+                + (player.available() ? "\"connected\"" : "\"unavailable\"")
                 + ",\"modVersion\":\"" + version + "\","
                 + "\"message\":\"Player state is read-only and session scoped.\","
-                + "\"player\":" + telemetry.player().toJson() + "}";
+                + "\"player\":" + player.toJson() + "}";
     }
 
     private void serveAsset(HttpExchange exchange, String resource, String contentType) throws IOException {
@@ -162,7 +179,8 @@ public final class LocalDashboardServer implements AutoCloseable {
         exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
         exchange.getResponseHeaders().set("Referrer-Policy", "no-referrer");
         exchange.getResponseHeaders().set("Content-Security-Policy",
-                "default-src 'self'; connect-src 'self'; style-src 'self'; script-src 'self'; "
+                "default-src 'self'; connect-src 'self' ws://127.0.0.1:" + getWebSocketPort()
+                        + "; style-src 'self'; script-src 'self'; "
                         + "frame-src 'none'; frame-ancestors 'none'; object-src 'none'; form-action 'none'; base-uri 'none'");
         exchange.sendResponseHeaders(status, body.length);
         try (OutputStream output = exchange.getResponseBody()) {

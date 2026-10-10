@@ -9,6 +9,9 @@ const healthValue = document.querySelector("#health-value");
 const sessionValue = document.querySelector("#session-value");
 const dimensionValue = document.querySelector("#dimension-value");
 const positionValue = document.querySelector("#position-value");
+let activeSocket;
+let reconnectTimer;
+let currentPlayerState;
 
 function setConnection(online) {
   connection.textContent = online ? "Dashboard connected" : "Disconnected · reconnecting";
@@ -46,33 +49,52 @@ async function connect() {
   try {
     const session = await fetch("/api/session", { cache: "no-store" });
     if (!session.ok) throw new Error("Local session unavailable");
-    const { token } = await session.json();
-    if (typeof token !== "string" || token.length !== 64) throw new Error("Invalid local session");
-
-    const refresh = async () => {
+    const { websocketPort } = await session.json();
+    if (!Number.isInteger(websocketPort) || websocketPort < 1 || websocketPort > 65535) {
+      throw new Error("Invalid local session");
+    }
+    const socket = new WebSocket(`ws://127.0.0.1:${websocketPort}/ws`);
+    activeSocket = socket;
+    socket.addEventListener("open", () => setConnection(true), { once: true });
+    socket.addEventListener("message", event => {
       try {
-        const response = await fetch("/api/state", {
-          headers: { Authorization: "Bearer " + token },
-          cache: "no-store"
-        });
-        if (!response.ok) throw new Error("Local service unavailable");
-        const state = await response.json();
-        if (state.schemaVersion !== 1) throw new Error("Unsupported status version");
+        const message = JSON.parse(event.data);
+        if (message.schemaVersion !== 1 || !["initial", "update"].includes(message.type)
+            || message.state?.schemaVersion !== 1) return;
+        if (message.type === "initial") {
+          currentPlayerState = message.state;
+        } else {
+          if (!currentPlayerState) return;
+          currentPlayerState = {
+            ...currentPlayerState,
+            ...message.state,
+            position: { ...currentPlayerState.position, ...message.state.position }
+          };
+        }
         setConnection(true);
-        stateMessage.textContent = state.message;
-        renderPlayer(state.player);
-        version.textContent = `v${state.modVersion || "0.1.0"}`;
+        stateMessage.textContent = "Live read-only client telemetry.";
+        renderPlayer(currentPlayerState);
+        version.textContent = `v${message.modVersion || "0.1.0"}`;
       } catch {
-        setConnection(false);
+        socket.close(1002, "Invalid dashboard message");
       }
-    };
-
-    await refresh();
-    window.setInterval(refresh, 500);
+    });
+    socket.addEventListener("close", () => {
+      setConnection(false);
+      if (activeSocket === socket) {
+        reconnectTimer = window.setTimeout(connect, 2000);
+      }
+    }, { once: true });
+    socket.addEventListener("error", () => socket.close(), { once: true });
   } catch {
     setConnection(false);
-    window.setTimeout(connect, 3000);
+    reconnectTimer = window.setTimeout(connect, 3000);
   }
 }
+
+window.addEventListener("pagehide", () => {
+  window.clearTimeout(reconnectTimer);
+  if (activeSocket) activeSocket.close();
+});
 
 connect();

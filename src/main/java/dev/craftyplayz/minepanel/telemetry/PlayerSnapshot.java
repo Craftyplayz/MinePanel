@@ -28,7 +28,7 @@ public record PlayerSnapshot(
             Objects.requireNonNull(health, "health");
             Objects.requireNonNull(maxHealth, "maxHealth");
             Objects.requireNonNull(absorption, "absorption");
-            if (sessionSeconds < 0 || !finite(x, y, z, health, maxHealth, absorption)
+            if (dimension.length() > 256 || sessionSeconds < 0 || !finite(x, y, z, health, maxHealth, absorption)
                     || health < 0 || maxHealth < 0 || absorption < 0) {
                 throw new IllegalArgumentException("available player values must be finite and non-negative");
             }
@@ -54,6 +54,42 @@ public record PlayerSnapshot(
                 + ",\"absorption\":" + number(absorption) + "}";
     }
 
+    public String toDeltaJson(PlayerSnapshot previous) {
+        if (previous == null || available != previous.available) {
+            return toJson();
+        }
+        StringBuilder json = new StringBuilder("{\"schemaVersion\":1,\"revision\":")
+                .append(revision).append(",\"capturedAt\":").append(capturedAt);
+        if (!Objects.equals(sessionSeconds, previous.sessionSeconds)) {
+            appendField(json, "sessionSeconds", number(sessionSeconds));
+        }
+        if (!Objects.equals(dimension, previous.dimension)) {
+            appendField(json, "dimension", string(dimension));
+        }
+        if (!Objects.equals(x, previous.x) || !Objects.equals(y, previous.y) || !Objects.equals(z, previous.z)) {
+            json.append(",\"position\":{");
+            boolean separator = false;
+            if (!Objects.equals(x, previous.x)) {
+                json.append("\"x\":").append(number(x));
+                separator = true;
+            }
+            if (!Objects.equals(y, previous.y)) {
+                if (separator) json.append(',');
+                json.append("\"y\":").append(number(y));
+                separator = true;
+            }
+            if (!Objects.equals(z, previous.z)) {
+                if (separator) json.append(',');
+                json.append("\"z\":").append(number(z));
+            }
+            json.append('}');
+        }
+        if (!Objects.equals(health, previous.health)) appendField(json, "health", number(health));
+        if (!Objects.equals(maxHealth, previous.maxHealth)) appendField(json, "maxHealth", number(maxHealth));
+        if (!Objects.equals(absorption, previous.absorption)) appendField(json, "absorption", number(absorption));
+        return json.append('}').toString();
+    }
+
     public boolean sameValues(PlayerSnapshot other) {
         return other != null && available == other.available
                 && Objects.equals(sessionSeconds, other.sessionSeconds)
@@ -74,6 +110,10 @@ public record PlayerSnapshot(
 
     private static String number(Number value) {
         return value == null ? "null" : value.toString();
+    }
+
+    private static void appendField(StringBuilder json, String name, String value) {
+        json.append(",\"").append(name).append("\":").append(value);
     }
 
     private static String string(String value) {
