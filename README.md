@@ -20,7 +20,7 @@ The installable JAR is produced under `build/release/`. The build requires acces
 
 ## Run
 
-Install the JAR in a Fabric 26.1.2 instance's `mods` directory and start the client. MinePanel binds only to `127.0.0.1` on an ephemeral port and prints the dashboard URL in the game log. Open it on the same PC and move the browser to the second monitor. The current dashboard is a connection/status foundation; it does not yet display live player data.
+Install the JAR in a Fabric 26.1.2 instance's `mods` directory and start the client. MinePanel binds only to `127.0.0.1` on an ephemeral port and prints the dashboard URL in the game log. Open it on the same PC and move the browser to the second monitor. The current dashboard displays sampled player position, dimension, health, absorption, and session duration; it does not yet provide push/WebSocket updates or the other planned widgets.
 
 JourneyMap plus its separate Webmap addon and Litematica/Malilib are optional, but their MinePanel integrations are not yet implemented. Current compatibility and known limitations are documented in [installation](docs/INSTALLATION.md), [architecture](docs/ARCHITECTURE.md), and [troubleshooting](docs/TROUBLESHOOTING.md).
 

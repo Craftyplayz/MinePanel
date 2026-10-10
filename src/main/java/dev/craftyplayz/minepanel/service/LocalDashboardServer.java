@@ -1,5 +1,6 @@
 package dev.craftyplayz.minepanel.service;
 
+import dev.craftyplayz.minepanel.telemetry.TelemetryStore;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
@@ -23,8 +24,14 @@ public final class LocalDashboardServer implements AutoCloseable {
     private final HttpServer server;
     private final ExecutorService executor;
     private final String token;
+    private final TelemetryStore telemetry;
 
     public LocalDashboardServer() throws IOException {
+        this(new TelemetryStore());
+    }
+
+    public LocalDashboardServer(TelemetryStore telemetry) throws IOException {
+        this.telemetry = telemetry;
         byte[] tokenBytes = new byte[32];
         new SecureRandom().nextBytes(tokenBytes);
         token = HexFormat.of().formatHex(tokenBytes);
@@ -124,9 +131,11 @@ public final class LocalDashboardServer implements AutoCloseable {
         if (version == null) {
             version = "development";
         }
-        return "{\"schemaVersion\":1,\"service\":\"connected\",\"game\":\"unavailable\","
-                + "\"modVersion\":\"" + version + "\","
-                + "\"message\":\"Live Minecraft telemetry is not implemented yet.\"}";
+        return "{\"schemaVersion\":1,\"service\":\"connected\",\"game\":"
+                + (telemetry.player().available() ? "\"connected\"" : "\"unavailable\"")
+                + ",\"modVersion\":\"" + version + "\","
+                + "\"message\":\"Player state is read-only and session scoped.\","
+                + "\"player\":" + telemetry.player().toJson() + "}";
     }
 
     private void serveAsset(HttpExchange exchange, String resource, String contentType) throws IOException {

@@ -27,7 +27,12 @@
       <article class="card">
         <div class="card-heading"><div><p class="eyebrow">SESSION</p><h2>Player status</h2></div><span class="badge muted" id="game-status">Unavailable</span></div>
         <p class="card-copy" id="state-message">Waiting for MinePanel.</p>
-        <div class="placeholder-stats"><div><span>Health</span><strong>—</strong></div><div><span>Playtime</span><strong>—</strong></div><div><span>Dimension</span><strong>—</strong></div></div>
+        <div class="placeholder-stats">
+          <div><span>Health</span><strong id="health-value">—</strong></div>
+          <div><span>Session</span><strong id="session-value">—</strong></div>
+          <div><span>Dimension</span><strong id="dimension-value">—</strong></div>
+        </div>
+        <p class="position" id="position-value">Position unavailable</p>
       </article>
       <article class="card integration-card">
         <div class="card-heading"><div><p class="eyebrow">INTEGRATIONS</p><h2>Build progress</h2></div><span class="badge muted">Unavailable</span></div>

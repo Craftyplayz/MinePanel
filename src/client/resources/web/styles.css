@@ -43,6 +43,7 @@ h2 { margin: 0; font-size: 17px; font-weight: 620; }
 .placeholder-stats div { display: grid; gap: 5px; }
 .placeholder-stats span { color: #74828a; font-size: 10px; }
 .placeholder-stats strong { color: #c5cfce; font-size: 13px; font-weight: 550; }
+.position { margin: 12px 0 0; color: #84938d; font-size: 10px; font-variant-numeric: tabular-nums; }
 footer { display: flex; justify-content: space-between; border-top: 1px solid var(--line); padding: 16px 0 24px; color: #728078; font-size: 10px; }
 @media (max-width: 760px) { .shell { padding: 0 19px; } .welcome { padding-top: 39px; } .grid { grid-template-columns: 1fr; } .map-card { grid-row: auto; min-height: 345px; } .empty-state { min-height: 220px; } footer { gap: 10px; flex-wrap: wrap; } }
 @media (min-width: 761px) and (max-width: 1050px) { .shell { padding: 0 25px; } }
