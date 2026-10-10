@@ -1,0 +1,262 @@
+name: Build and release MinePanel
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing version tag to build (diagnostics only; does not publish)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: minepanel-release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      source-sha: ${{ steps.source.outputs.sha }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - name: Validate version tag
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+            echo "::error::Expected a version tag such as v0.1.0 or v0.1.0-beta.1"
+            exit 1
+          fi
+
+      - name: Check out exact tagged source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Record source provenance
+        id: source
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_SHA: ${{ github.sha }}
+        run: |
+          sha=$(git rev-parse HEAD)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          test "$sha" = "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+          if [[ "$EVENT_NAME" == push ]]; then
+            test "$sha" = "$(git rev-parse "$PUSH_SHA^{commit}")"
+          fi
+          {
+            echo "### MinePanel release build"
+            echo "- Tag: $RELEASE_TAG"
+            echo "- Git commit: \`$sha\`"
+            echo "- Manual runs build an existing tag but never publish."
+            echo "- No in-game testing is performed by this workflow."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install Java 25
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Install Node for existing frontend tests
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+
+      - name: Compile, test, and package with the Gradle wrapper
+        run: |
+          mkdir -p build/ci-logs
+          for phase in compilation tests packaging; do
+            case "$phase" in
+              compilation) tasks=(classes clientClasses testClasses) ;;
+              tests) tasks=(check) ;;
+              packaging) tasks=(releaseBuild) ;;
+            esac
+            echo "::group::Gradle $phase: ${tasks[*]}"
+            set +e
+            ./gradlew --no-daemon --stacktrace --console=plain "${tasks[@]}" 2>&1 | tee "build/ci-logs/$phase.log"
+            statuses=("${PIPESTATUS[@]}")
+            set -e
+            echo "::endgroup::"
+            status=${statuses[0]}
+            if (( status != 0 )); then
+              if grep -Eq 'Could not resolve|Could not GET|UnknownHostException|Plugin .* was not found|Could not download' "build/ci-logs/$phase.log"; then
+                echo "::error::Dependency resolution failed during $phase; inspect $phase.log for DNS, firewall, or repository errors."
+              else
+                echo "::error::Gradle $phase failed; inspect $phase.log and test reports."
+              fi
+              echo "- Failed phase: $phase (Gradle exit $status)" >> "$GITHUB_STEP_SUMMARY"
+              exit "$status"
+            fi
+            if (( statuses[1] != 0 )); then
+              echo "::error::Could not preserve the $phase build log."
+              exit "${statuses[1]}"
+            fi
+          done
+
+      - name: Validate and name distributable mod JAR
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import subprocess
+          import zipfile
+
+          tag = os.environ["RELEASE_TAG"]
+          properties = {}
+          for line in pathlib.Path("gradle.properties").read_text().splitlines():
+              if "=" in line and not line.lstrip().startswith("#"):
+                  key, value = line.split("=", 1)
+                  properties[key.strip()] = value.strip()
+          version = properties["mod_version"]
+          if tag != f"v{version}":
+              raise SystemExit("Tag must match mod_version in the tagged gradle.properties")
+
+          # releaseBuild copies the production jar, not a sources or development jar.
+          source = pathlib.Path("build/release") / f"minepanel-{version}.jar"
+          candidates = sorted(pathlib.Path("build/release").glob("*.jar"))
+          if candidates != [source] or not source.is_file() or source.stat().st_size == 0:
+              raise SystemExit(f"Expected exactly one nonempty release JAR: {source}; found {candidates}")
+          required = (
+              "fabric.mod.json", "minepanel.client.mixins.json",
+              "web/index.html", "web/app.js", "web/styles.css",
+              "dev/craftyplayz/minepanel/MinePanelClient.class",
+              "dev/craftyplayz/minepanel/mixin/StatisticsSyncMixin.class",
+          )
+          with zipfile.ZipFile(source) as jar:
+              if jar.testzip() is not None:
+                  raise SystemExit("JAR integrity check failed")
+              for entry in required:
+                  if not jar.read(entry):
+                      raise SystemExit(f"Empty required JAR entry: {entry}")
+              metadata = json.loads(jar.read("fabric.mod.json"))
+          if metadata["id"] != "minepanel" or metadata["version"] != version:
+              raise SystemExit("Packaged mod identity/version does not match the tag")
+          compatibility = metadata["depends"]
+          sha = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          output = pathlib.Path("build/verified-release")
+          output.mkdir(parents=True, exist_ok=True)
+          destination = output / f"MinePanel-{tag}.jar"
+          original = source.read_bytes()
+          destination.write_bytes(original)
+          digest = hashlib.sha256(original).hexdigest()
+          if hashlib.sha256(destination.read_bytes()).hexdigest() != digest:
+              raise SystemExit("Renamed JAR differs from the validated artifact")
+          notes = (
+              f"MinePanel {tag}\n\n"
+              f"Built from Git commit `{sha}`.\n\n"
+              f"- Minecraft: `{compatibility['minecraft']}`\n"
+              f"- Fabric Loader: `{compatibility['fabricloader']}`\n"
+              f"- Fabric API: `{compatibility['fabric-api']}`\n"
+              f"- Java: `{compatibility['java']}`\n\n"
+              f"Download `{destination.name}` and place it in your Fabric client's `mods` directory.\n\n"
+              f"JAR SHA-256: `{digest}`\n\n"
+              "Compilation, automated tests, and packaging are required by this workflow. "
+              "No in-game testing is performed; runtime compatibility is not certified.\n"
+          )
+          (output / "release-notes.md").write_text(notes)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write(f"\n### Validated artifact\n\n{notes}")
+          PY
+
+      - name: Upload verified JAR and release metadata
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: verified-release
+          path: build/verified-release/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Preserve build diagnostics even on failure
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: build-diagnostics
+          path: |
+            build/ci-logs/
+            build/reports/
+            build/test-results/
+          if-no-files-found: warn
+          retention-days: 14
+
+  publish:
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOURCE_SHA: ${{ needs.build.outputs.source-sha }}
+    steps:
+      - name: Download only the validated artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: verified-release
+          path: verified-release
+
+      - name: Refuse to overwrite an existing release
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          url = (
+              f"{os.environ['GITHUB_API_URL']}/repos/{os.environ['GH_REPO']}/releases/tags/"
+              + urllib.parse.quote(os.environ["RELEASE_TAG"], safe="")
+          )
+          request = urllib.request.Request(url, headers={
+              "Authorization": "Bearer " + os.environ["GH_TOKEN"],
+              "Accept": "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28",
+          })
+          try:
+              with urllib.request.urlopen(request, timeout=30):
+                  raise SystemExit("Release already exists (published or draft); refusing to overwrite it")
+          except urllib.error.HTTPError as error:
+              if error.code != 404:
+                  raise SystemExit(f"Release preflight failed: HTTP {error.code}") from None
+          PY
+
+      - name: Create, attach, and publish release
+        shell: bash
+        run: |
+          jar="verified-release/MinePanel-$RELEASE_TAG.jar"
+          test -s "$jar"
+          test -s verified-release/release-notes.md
+          current_sha=$(gh api "repos/$GH_REPO/commits/$RELEASE_TAG" --jq '.sha')
+          if [[ "$current_sha" != "$SOURCE_SHA" ]]; then
+            echo "::error::Remote tag moved after checkout; refusing to publish."
+            exit 1
+          fi
+          options=()
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            options+=(--prerelease)
+          fi
+          # Keep the release draft until the verified asset has uploaded successfully.
+          gh release create "$RELEASE_TAG" "$jar" \
+            --verify-tag --draft --generate-notes \
+            --title "MinePanel $RELEASE_TAG" \
+            --notes-file verified-release/release-notes.md "${options[@]}"
+          gh release edit "$RELEASE_TAG" --draft=false
+          echo "Published MinePanel $RELEASE_TAG with the validated JAR." >> "$GITHUB_STEP_SUMMARY"
