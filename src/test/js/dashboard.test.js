@@ -455,3 +455,35 @@ test("session failure, invalid ports and socket error clear data and retry", asy
   h.sockets[0].emit("close");
   assert.equal(h.timers.size, 1);
 });
+
+test("persisted pageshow restores a fresh socket without accepting pre-pagehide events", async () => {
+  const h = harness();
+  await h.flush();
+  const old = h.sockets[0];
+  old.message(initial());
+  h.events.pagehide();
+  old.emit("close");
+  assert.equal(h.timers.size, 0);
+  h.events.pageshow({ persisted: false });
+  await h.flush();
+  assert.equal(h.sockets.length, 1);
+  h.events.pageshow({ persisted: true });
+  await h.flush();
+  assert.equal(h.sockets.length, 2);
+  const fresh = h.sockets[1];
+  assert.equal(h.state(), undefined);
+  fresh.message(initial(snapshot({ revision: 30 })));
+  old.message(update());
+  old.emit("open");
+  old.emit("error");
+  old.emit("close");
+  assert.equal(h.state().revision, 30);
+  assert.equal(h.timers.size, 0);
+  h.events.pageshow({ persisted: true });
+  await h.flush();
+  assert.equal(h.sockets.length, 2);
+  fresh.emit("close");
+  assert.equal(h.timers.size, 1);
+  h.events.pagehide();
+  assert.equal(h.timers.size, 0);
+});

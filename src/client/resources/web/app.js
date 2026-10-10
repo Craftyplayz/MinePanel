@@ -87,10 +87,8 @@ function validateInventory(inventory) {
 }
 
 function patchInventory(previous, patch) {
-  if (patch === null) return null;
-  // Inventory can become available independently of the player telemetry.
-  if (previous === null) return validateInventory(patch);
-  requireValid(object(patch) && (!has(patch, "slots") || Array.isArray(patch.slots)));
+  requireValid(object(previous) && object(patch)
+    && (!has(patch, "slots") || Array.isArray(patch.slots)));
   const slots = previous.slots.slice();
   const seen = new Set();
   for (const entry of patch.slots ?? []) {
@@ -297,6 +295,13 @@ window.addEventListener("pagehide", () => {
   setConnection(false);
   if (activeSocket) activeSocket.close();
   activeSocket = undefined;
+});
+
+window.addEventListener("pageshow", event => {
+  if (event.persisted && pageHidden) {
+    pageHidden = false;
+    connect();
+  }
 });
 
 connect();

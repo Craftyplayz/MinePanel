@@ -18,6 +18,10 @@ The Java suite covers immutable inventory transformation, explicit empty slots, 
 
 The implementation agent's executed Java check used `javac --release 25 -d .protocol-test-classes` with the main telemetry/service and test Java sources, followed by both `InventorySnapshotTest` and `LocalDashboardServerTest` using that directory plus `src/client/resources` on the classpath; both passed. That temporary directory was removed and is not packaged. The commands above use `/tmp` for reproducible clean checks. The real WebSocket suite also verifies complete outgoing frames larger than 65,535 bytes for bounded item metadata.
 
+Final frontend validation: both `node --check src/client/resources/web/app.js` and `node --check src/test/js/dashboard.test.js` passed; `node --test src/test/js/dashboard.test.js` passed all 21 tests, including back/forward-cache restoration. `git diff --check` passed. Secret scanning found no secrets. Independent read-only code review identified the restoration bug, which was fixed and tested.
+
+Final automated validation was incomplete: the packaged code-review runner could not load its configured model; CodeQL completed JavaScript with zero alerts but timed out before all languages finished. This is not a clean full Java/security scan. Minecraft runtime checks remain not run.
+
 ## Build audit (2026-10-10)
 
 With `JAVA_HOME=/usr/lib/jvm/temurin-25-jdk-amd64` and its `bin` directory on `PATH`, `./gradlew releaseBuild --stacktrace` failed at plugin resolution (`build.gradle:2`), before source compilation, with `org.gradle.api.plugins.UnknownPluginException` for `net.fabricmc.fabric-loom:net.fabricmc.fabric-loom.gradle.plugin:1.18-SNAPSHOT`. The complete stack trace contained no nested `Caused by:` exception. Direct repository probing failed with curl exit 6, `Could not resolve host: maven.fabricmc.net`, before TLS or HTTP. Mojang metadata/data/library hosts also failed DNS. Plugin Portal redirected the marker lookup to Maven Central, where it returned 404; Central is not a replacement for Fabric Maven.
