@@ -10,6 +10,7 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.client.multiplayer.ClientPacketListener;
 
 import java.io.IOException;
 import java.util.concurrent.ExecutorService;
@@ -27,6 +28,7 @@ public final class MinePanelClient implements ClientModInitializer {
     private long sessionStartedNanos;
     private long lastSampleNanos;
     private long lastStatsRequestNanos;
+    private ClientPacketListener playConnection;
     private boolean samplingFailureReported;
     private final ExecutorService lifecycleExecutor = Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(runnable, "MinePanel-lifecycle");
@@ -44,21 +46,27 @@ public final class MinePanelClient implements ClientModInitializer {
             samplingFailureReported = false;
         });
         ClientPlayConnectionEvents.JOIN.register((listener, sender, client) -> {
+            playConnection = listener;
             sessionStartedNanos = System.nanoTime();
             lastStatsRequestNanos = sessionStartedNanos;
             history.start(System.currentTimeMillis());
             MinecraftStatisticsCollector.request(listener);
         });
         ClientPlayConnectionEvents.DISCONNECT.register((listener, client) -> {
-            MinecraftStatisticsCollector.reset(null);
-            statistics.reset();
-            sessionStartedNanos = 0;
-            history.disconnect(System.currentTimeMillis());
-            telemetry.markUnavailable(System.currentTimeMillis(), history.snapshot());
+            client.execute(() -> {
+                if (playConnection != listener) return;
+                playConnection = null;
+                MinecraftStatisticsCollector.reset(null);
+                statistics.reset();
+                sessionStartedNanos = 0;
+                history.disconnect(System.currentTimeMillis());
+                telemetry.markUnavailable(System.currentTimeMillis(), history.snapshot());
+            });
         });
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             long now = System.nanoTime();
-            if (client.player != null && client.level != null) {
+            if (playConnection != null && playConnection == client.getConnection()
+                    && client.player != null && client.level != null) {
                 history.observe(System.currentTimeMillis(), client.level.dimension().identifier().toString(),
                         client.player.isDeadOrDying());
             }
@@ -67,7 +75,8 @@ public final class MinePanelClient implements ClientModInitializer {
             }
             lastSampleNanos = now;
 
-            if (client.player == null || client.level == null) {
+            if (playConnection == null || playConnection != client.getConnection()
+                    || client.player == null || client.level == null) {
                 var events = history.snapshot();
                 telemetry.markUnavailable(System.currentTimeMillis(),
                         new GameplayHistory(events.sessionId(), false, events.events()));
