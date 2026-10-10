@@ -4,14 +4,16 @@
 
 The repository initially contained only a short README; there was no build, application, or test setup. The supported target in this project is Minecraft Java Edition 26.1.2 with Java 25 and Fabric only.
 
-The official [Fabric 26.1.2 Loom documentation](https://github.com/FabricMC/fabric-docs/blob/main/versions/26.1.2/develop/loom/index.md) says Minecraft 26.1 and newer use `net.fabricmc.fabric-loom` (the game is unobfuscated). The [26.1 porting guide](https://github.com/FabricMC/fabric-docs/blob/main/versions/26.1.2/develop/porting/index.md) requires Java 25 and advises using the Fabric Develop site for version coordinates. The official [Fabric example mod for 26.1](https://github.com/FabricMC/fabric-example-mod/tree/26.1) uses Java 25 and the new Loom plugin ID. This verifies the 26.1 build approach, but not that any particular Loader/API/Loom release or optional-mod release supports **26.1.2**. Maven metadata was unreachable in this environment; do not infer patch compatibility from the example.
+The official [Fabric 26.1.2 example mod](https://github.com/FabricMC/fabric-example-mod/tree/26.1.2) pins Minecraft `26.1.2`, Loader `0.19.5`, Fabric API `0.155.3+26.1.2`, Loom `1.18-SNAPSHOT`, Gradle `9.7.1`, and Java 25. These are example pins, not minimum versions. The [versioned Loom docs](https://github.com/FabricMC/fabric-docs/blob/main/versions/26.1.2/develop/loom/index.md) say 26.1+ uses `net.fabricmc.fabric-loom` because Minecraft is unobfuscated. The [porting guide](https://github.com/FabricMC/fabric-docs/blob/main/versions/26.1.2/develop/porting/index.md) requires Java 25 and lists the 26.1 build changes. This project follows the matching official example configuration; the Fabric Maven metadata endpoint itself was unreachable in this environment.
 
-JourneyMap's [official Webmap installation guide](https://github.com/TeamJM/journeymap-docs/blob/6.0.x/docs/en/webmap/installing.md) confirms that Webmap is a separate, client-side addon and requires JourneyMap. Its URL, configured port, access controls, browser headers, and iframe behavior must be discovered/tested against the actual compatible addon before claiming iframe support. No endpoint is assumed.
+JourneyMap's [official Webmap installation guide](https://github.com/TeamJM/journeymap-docs/blob/6.0.x/docs/en/webmap/installing.md) confirms that Webmap is a separate, client-side addon and requires JourneyMap. Webmap's upstream `26.1` branch targets Minecraft 26.1.2; its docs say its resolved endpoint is announced in chat/log, with a configured port and possible fallback port. No official endpoint-discovery API or iframe guarantee is documented. A direct-open fallback is required.
+
+The upstream Litematica and MaLiLib branches inspected do not include a 26.1.2 branch. Older source exposes placement/material-list structures but does not establish a stable supported API or 26.1.2 compatibility. Do not ship a Litematica adapter until an actually compatible build and API are verified.
 
 ## Architecture and component boundaries
 
 1. **Fabric client mod:** lifecycle ownership, client-thread state collection, configuration, optional-mod detection, and immutable snapshots. No server-side installation, command, or inventory mutation.
-2. **Local service:** loopback-only HTTP for bundled assets and narrow read-only APIs, with a per-process random secret delivered in a same-origin response (never in a URL or log), strict origin/host and request validation, bounded work, and clean shutdown. Minecraft state must be copied on the client thread; network work must not run there.
+2. **Local service:** loopback-only HTTP for bundled assets and narrow read-only APIs, with a per-server random secret delivered in a same-origin response (never in a URL or log), strict origin/host and request validation, bounded work, and clean shutdown. Minecraft state must be copied on the client thread; network work must not run there.
 3. **Bundled browser UI:** offline-capable dashboard assets, accessible dark responsive widgets, and UI-only layout preferences. No remote scripts, APIs, telemetry, or gameplay-history persistence.
 
 Optional integrations are isolated behind adapters and fail closed to an unavailable status. JourneyMap remains the map source of truth. Litematica progress may only be implemented against verified placement/mismatch APIs; inventory ownership is not build progress.
@@ -32,23 +34,22 @@ Every displayed value must identify unavailable data honestly. Server-only facts
 
 ## Dependencies and compatibility decisions
 
-- Fabric Loader, Fabric API, Loom, and Gradle versions must be pinned to versions verified for Minecraft 26.1.2, not merely 26.1. Current official 26.1 example coordinates are reference evidence only.
+- Fabric Loader `0.19.5`, Fabric API `0.155.3+26.1.2`, Loom `1.18-SNAPSHOT`, and Gradle `9.7.1` are pinned to the official 26.1.2 example.
 - Java toolchain/release target: 25. Use current official 26.1 unobfuscated Loom plugin ID.
-- Prefer JDK facilities for the local transport and avoid a runtime web-server dependency unless a tested WebSocket implementation becomes necessary.
+- The foundation uses JDK HTTP and authenticated 3-second status polling to avoid a web-server dependency; WebSocket push updates remain a core-telemetry milestone.
 - JourneyMap Webmap and Litematica/Malilib are optional and are not compile-time requirements until exact compatible versions and supported APIs have been verified.
 - Frontend assets must be built locally and embedded in the mod JAR; the runtime must not need internet access.
 
 ## Integration limitations to resolve
 
-- Verify exact Fabric Loader, API, and Loom artifacts for 26.1.2 from authoritative metadata before release.
-- Confirm JourneyMap and Webmap versions for 26.1.2, local endpoint discovery/configuration, and browser iframe policy. Until tested, provide a direct-open fallback and report embedding as unverified.
-- Confirm Litematica/Malilib 26.1.2 versions and stable placement/mismatch APIs before implementing the optional adapter. No reflection-based guesswork.
+- Confirm a published JourneyMap/Webmap 26.1.2 artifact and test endpoint/iframe behavior with it; source branch compatibility alone is not runtime verification.
+- Confirm whether a Litematica/Malilib port for 26.1.2 exists, plus stable placement/mismatch APIs, before implementing the optional adapter. No reflection-based guesswork.
 - Exercise the actual client APIs and test singleplayer/multiplayer; compilation alone cannot establish game behavior.
 
 ## Milestones, tests, acceptance
 
 1. **Foundation:** pinned Java/Fabric build, lifecycle, loopback service, bundled offline dashboard, and automated service tests. Accept when the client can start the service, same-origin browser can read a status snapshot, unauthorized requests fail, and shutdown closes the listener.
-2. **Core telemetry:** immutable player/inventory/equipment/health/stat snapshots and session playtime/events/warnings. Test deltas, thresholds, de-duplication, and invalid/unavailable data.
+2. **Core telemetry:** immutable player/inventory/equipment/health/stat snapshots and session playtime/events/warnings, with coalesced push updates replacing foundation polling. Test deltas, thresholds, de-duplication, and invalid/unavailable data.
 3. **Dashboard:** responsive movable/resizable widgets, named layouts, accessibility, filters, and preference persistence (no history). Test layout recovery and filters.
 4. **JourneyMap:** verified endpoint/status, direct-open fallback, iframe only after real compatibility testing.
 5. **Containers:** read-only visible contents, last snapshot, and session-only pins; test stale/open distinction.

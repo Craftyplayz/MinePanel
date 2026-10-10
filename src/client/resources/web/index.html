@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>MinePanel</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="MinePanel dashboard home"><span class="brand-mark" aria-hidden="true">M</span><span>MinePanel</span></a>
+      <div class="connection"><span id="connection-dot" class="dot" aria-hidden="true"></span><span id="connection-status" role="status">Connecting</span></div>
+    </header>
+    <section class="welcome" aria-labelledby="welcome-title">
+      <p class="eyebrow">LOCAL DASHBOARD · MINECRAFT CLIENT</p>
+      <h1 id="welcome-title">Your world,<br><span>at a glance.</span></h1>
+      <p class="intro">A private companion for your Minecraft session. MinePanel runs on this computer and does not send data to external services.</p>
+    </section>
+    <section class="grid" aria-label="Dashboard widgets">
+      <article class="card map-card">
+        <div class="card-heading"><div><p class="eyebrow">WORLD</p><h2>JourneyMap</h2></div><span class="badge" id="map-status">Not connected</span></div>
+        <div class="empty-state"><span class="empty-icon" aria-hidden="true">⌖</span><p>JourneyMap Webmap integration is not available yet.</p><small>When configured, the map will be opened from its actual local Webmap endpoint.</small></div>
+      </article>
+      <article class="card">
+        <div class="card-heading"><div><p class="eyebrow">SESSION</p><h2>Player status</h2></div><span class="badge muted" id="game-status">Unavailable</span></div>
+        <p class="card-copy" id="state-message">Waiting for MinePanel.</p>
+        <div class="placeholder-stats"><div><span>Health</span><strong>—</strong></div><div><span>Playtime</span><strong>—</strong></div><div><span>Dimension</span><strong>—</strong></div></div>
+      </article>
+      <article class="card integration-card">
+        <div class="card-heading"><div><p class="eyebrow">INTEGRATIONS</p><h2>Build progress</h2></div><span class="badge muted">Unavailable</span></div>
+        <p class="card-copy">Litematica support requires a compatible 26.1.2 release and a verified placement API.</p>
+      </article>
+      <article class="card integration-card">
+        <div class="card-heading"><div><p class="eyebrow">INVENTORY</p><h2>Equipment</h2></div><span class="badge muted">Unavailable</span></div>
+        <p class="card-copy">Read-only inventory and equipment widgets are planned. No dashboard action will modify items.</p>
+      </article>
+    </section>
+    <footer><span>MinePanel <span id="version">·</span></span><span>Loopback only · No cloud · Session data not stored</span></footer>
+  </main>
+</body>
+</html>

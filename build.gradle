@@ -1,0 +1,88 @@
+plugins {
+    id 'net.fabricmc.fabric-loom' version "${loom_version}"
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+    archivesName = 'minepanel'
+}
+
+loom {
+    splitEnvironmentSourceSets()
+
+    mods {
+        minepanel {
+            sourceSet sourceSets.main
+            sourceSet sourceSets.client
+        }
+    }
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+}
+
+processResources {
+    inputs.property 'version', project.version
+    filesMatching('fabric.mod.json') {
+        expand version: project.version
+    }
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(25)
+    sourceCompatibility = JavaVersion.VERSION_25
+    targetCompatibility = JavaVersion.VERSION_25
+    withSourcesJar()
+}
+
+tasks.jar {
+    manifest {
+        attributes('Implementation-Version': project.version)
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 25
+}
+
+def serviceTest = tasks.register('serviceTest', JavaExec) {
+    dependsOn tasks.testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.craftyplayz.minepanel.service.LocalDashboardServerTest'
+}
+
+tasks.named('check') {
+    dependsOn serviceTest
+}
+
+tasks.register('releaseBuild') {
+    group = 'build'
+    description = 'Builds, tests, and validates the installable MinePanel release JAR.'
+    dependsOn tasks.build
+    doLast {
+        def artifact = tasks.jar.archiveFile.get().asFile
+        if (!artifact.isFile()) {
+            throw new GradleException("Release JAR was not created: ${artifact}")
+        }
+        def jar = new java.util.jar.JarFile(artifact)
+        try {
+            ['fabric.mod.json', 'web/index.html', 'web/app.js', 'web/styles.css'].each { entry ->
+                if (jar.getEntry(entry) == null) {
+                    throw new GradleException("Release JAR is missing ${entry}")
+                }
+            }
+        } finally {
+            jar.close()
+        }
+        copy {
+            from artifact
+            into layout.buildDirectory.dir('release')
+        }
+        logger.lifecycle("Validated release artifact: ${layout.buildDirectory.file("release/${artifact.name}").get().asFile}")
+    }
+}

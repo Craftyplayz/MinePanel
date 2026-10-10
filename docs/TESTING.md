@@ -1,6 +1,8 @@
 # Testing
 
-Automated tests and executable commands will be documented here as the corresponding build and test infrastructure is implemented. No Minecraft runtime/manual integration checks have been performed.
+`./gradlew releaseBuild` runs the Gradle build and `serviceTest` before checking that the production JAR contains mod metadata and the bundled dashboard. The service test covers loopback binding, static resources, token authorization, cross-origin rejection, unsupported operations, and method validation. Frontend JavaScript syntax can be checked with `node --check src/client/resources/web/app.js`.
+
+No Minecraft runtime/manual integration checks have been performed.
 
 ## Manual checklist (not yet performed)
 

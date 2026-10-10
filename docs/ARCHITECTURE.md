@@ -6,6 +6,6 @@ The client adapter owns lifecycle and reads Minecraft state on the client thread
 
 Gameplay events, open/last-viewed containers, and pins exist only in active-session memory. Chat is not retained. Dashboard layout/preferences may persist separately from gameplay data.
 
-Transport authentication must use an unguessable per-process token in a header, not a URL, and enforce loopback binding, Host and Origin checks, bounded request handling, and supported-operation validation. No network, disk, or expensive calculation belongs on the Minecraft tick/render thread.
+The initial service currently uses authenticated HTTP status polling; live WebSocket updates are not implemented. Transport authentication uses an unguessable per-server token in a header, not a URL, and enforces loopback binding, Host and Origin checks, bounded resource serving, and supported-operation validation. No network, disk, or expensive calculation belongs on the Minecraft tick/render thread.
 
 JourneyMap is the only map source; MinePanel does not render terrain. Litematica completion is based on verified placement state, never carried inventory. Their compatible versions, APIs, and iframe behavior remain unverified until tested against Minecraft 26.1.2.
