@@ -45,5 +45,13 @@ h2 { margin: 0; font-size: 17px; font-weight: 620; }
 .placeholder-stats strong { color: #c5cfce; font-size: 13px; font-weight: 550; }
 .position { margin: 12px 0 0; color: #84938d; font-size: 10px; font-variant-numeric: tabular-nums; }
 footer { display: flex; justify-content: space-between; border-top: 1px solid var(--line); padding: 16px 0 24px; color: #728078; font-size: 10px; }
+.inventory-card { grid-column: 1 / -1; }
+.inventory-card h3 { color: #a8bab1; font-size: 12px; font-weight: 600; margin: 20px 0 10px; }
+.inventory-grid { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 7px; }
+.equipment-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 7px; }
+.inventory-slot, .equipment-slot { padding: 10px; min-height: 90px; border: 1px solid var(--line); border-radius: 7px; background: #0c1419; color: #a9b8b2; font-size: 11px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.inventory-slot.selected { border-color: var(--accent); background: #73e0b110; color: #edf2f5; }
+.held-summary { color: var(--accent); font-size: 12px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 1050px) { .inventory-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } .equipment-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .shell { padding: 0 19px; } .welcome { padding-top: 39px; } .grid { grid-template-columns: 1fr; } .map-card { grid-row: auto; min-height: 345px; } .empty-state { min-height: 220px; } footer { gap: 10px; flex-wrap: wrap; } }
 @media (min-width: 761px) and (max-width: 1050px) { .shell { padding: 0 25px; } }
