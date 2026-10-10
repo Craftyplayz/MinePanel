@@ -29,6 +29,7 @@ public final class MinePanelClient implements ClientModInitializer {
     private long lastSampleNanos;
     private long lastStatsRequestNanos;
     private ClientPacketListener playConnection;
+    private ClientPacketListener initializedConnection;
     private boolean samplingFailureReported;
     private final ExecutorService lifecycleExecutor = Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(runnable, "MinePanel-lifecycle");
@@ -40,6 +41,7 @@ public final class MinePanelClient implements ClientModInitializer {
     public void onInitializeClient() {
         lifecycleExecutor.execute(this::startDashboard);
         ClientPlayConnectionEvents.INIT.register((listener, client) -> {
+            initializedConnection = listener;
             MinecraftStatisticsCollector.reset(listener);
             statistics.reset();
             sessionStartedNanos = 0;
@@ -54,7 +56,8 @@ public final class MinePanelClient implements ClientModInitializer {
         });
         ClientPlayConnectionEvents.DISCONNECT.register((listener, client) -> {
             client.execute(() -> {
-                if (playConnection != listener) return;
+                if (initializedConnection != listener) return;
+                initializedConnection = null;
                 playConnection = null;
                 MinecraftStatisticsCollector.reset(null);
                 statistics.reset();
