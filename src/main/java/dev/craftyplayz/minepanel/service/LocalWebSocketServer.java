@@ -301,16 +301,19 @@ final class LocalWebSocketServer implements AutoCloseable {
     }
 
     private void writeFrame(OutputStream output, int opcode, byte[] payload) throws IOException {
-        if (payload.length > 65535) {
-            throw new IOException("Server WebSocket message too large");
-        }
         output.write(0x80 | opcode);
         if (payload.length < 126) {
             output.write(payload.length);
-        } else {
+        } else if (payload.length <= 65535) {
             output.write(126);
             output.write((payload.length >>> 8) & 0xff);
             output.write(payload.length & 0xff);
+        } else {
+            output.write(127);
+            long length = payload.length;
+            for (int shift = 56; shift >= 0; shift -= 8) {
+                output.write((int) (length >>> shift) & 0xff);
+            }
         }
         output.write(payload);
         output.flush();

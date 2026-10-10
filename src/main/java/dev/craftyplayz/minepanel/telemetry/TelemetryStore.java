@@ -13,14 +13,21 @@ public final class TelemetryStore {
     public boolean updatePlayer(long capturedAt, Long sessionSeconds, String dimension,
                                 Double x, Double y, Double z, Double health, Double maxHealth,
                                 Double absorption) {
+        return updatePlayer(capturedAt, sessionSeconds, dimension, x, y, z, health, maxHealth,
+                absorption, InventorySnapshot.empty());
+    }
+
+    public boolean updatePlayer(long capturedAt, Long sessionSeconds, String dimension,
+                                Double x, Double y, Double z, Double health, Double maxHealth,
+                                Double absorption, InventorySnapshot inventory) {
         PlayerSnapshot current = player.get();
         PlayerSnapshot candidate = new PlayerSnapshot(current.revision(), capturedAt, true,
-                sessionSeconds, dimension, x, y, z, health, maxHealth, absorption);
+                sessionSeconds, dimension, x, y, z, health, maxHealth, absorption, inventory);
         if (current.sameValues(candidate)) {
             return false;
         }
         player.set(new PlayerSnapshot(current.revision() + 1, capturedAt, true,
-                sessionSeconds, dimension, x, y, z, health, maxHealth, absorption));
+                sessionSeconds, dimension, x, y, z, health, maxHealth, absorption, inventory));
         return true;
     }
 
