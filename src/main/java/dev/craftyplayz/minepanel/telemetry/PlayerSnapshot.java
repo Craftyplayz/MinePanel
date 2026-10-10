@@ -14,8 +14,17 @@ public record PlayerSnapshot(
         Double health,
         Double maxHealth,
         Double absorption,
-        InventorySnapshot inventory
+        InventorySnapshot inventory,
+        StatisticsSnapshot statistics,
+        GameplayHistory history
 ) {
+    public PlayerSnapshot(long revision, long capturedAt, boolean available, Long sessionSeconds, String dimension,
+                          Double x, Double y, Double z, Double health, Double maxHealth, Double absorption,
+                          InventorySnapshot inventory) {
+        this(revision, capturedAt, available, sessionSeconds, dimension, x, y, z, health, maxHealth, absorption,
+                inventory, null, GameplayHistory.empty());
+    }
+
     public PlayerSnapshot(long revision, long capturedAt, boolean available, Long sessionSeconds, String dimension,
                           Double x, Double y, Double z, Double health, Double maxHealth, Double absorption) {
         this(revision, capturedAt, available, sessionSeconds, dimension, x, y, z, health, maxHealth, absorption,
@@ -23,6 +32,7 @@ public record PlayerSnapshot(
     }
 
     public PlayerSnapshot {
+        Objects.requireNonNull(history, "history");
         if (revision < 0 || capturedAt < 0) {
             throw new IllegalArgumentException("revision and capturedAt must be non-negative");
         }
@@ -41,7 +51,8 @@ public record PlayerSnapshot(
                 throw new IllegalArgumentException("available player values must be finite and non-negative");
             }
         } else if (sessionSeconds != null || dimension != null || x != null || y != null || z != null
-                || health != null || maxHealth != null || absorption != null || inventory != null) {
+                || health != null || maxHealth != null || absorption != null || inventory != null || statistics != null
+                || history.active()) {
             throw new IllegalArgumentException("unavailable player values must be null");
         }
     }
@@ -50,8 +61,13 @@ public record PlayerSnapshot(
         return new PlayerSnapshot(revision, capturedAt, false, null, null, null, null, null, null, null, null);
     }
 
+    public static PlayerSnapshot unavailable(long revision, long capturedAt, GameplayHistory history) {
+        return new PlayerSnapshot(revision, capturedAt, false, null, null, null, null, null, null, null, null,
+                null, null, history);
+    }
+
     public String toJson() {
-        return "{\"schemaVersion\":1,\"revision\":" + revision
+        return "{\"schemaVersion\":2,\"revision\":" + revision
                 + ",\"capturedAt\":" + capturedAt
                 + ",\"available\":" + available
                 + ",\"sessionSeconds\":" + number(sessionSeconds)
@@ -60,7 +76,9 @@ public record PlayerSnapshot(
                 + ",\"health\":" + number(health)
                 + ",\"maxHealth\":" + number(maxHealth)
                 + ",\"absorption\":" + number(absorption)
-                + ",\"inventory\":" + (inventory == null ? "null" : inventory.toJson()) + "}";
+                + ",\"inventory\":" + (inventory == null ? "null" : inventory.toJson())
+                + ",\"statistics\":" + (statistics == null ? "null" : statistics.toJson())
+                + ",\"history\":" + history.toJson() + "}";
     }
 
     public String toDeltaJson(PlayerSnapshot previous) {
@@ -71,7 +89,7 @@ public record PlayerSnapshot(
             String full = toJson();
             return full.substring(0, full.length() - 1) + ",\"baseRevision\":" + previous.revision + "}";
         }
-        StringBuilder json = new StringBuilder("{\"schemaVersion\":1,\"revision\":")
+        StringBuilder json = new StringBuilder("{\"schemaVersion\":2,\"revision\":")
                 .append(revision).append(",\"baseRevision\":").append(previous.revision)
                 .append(",\"capturedAt\":").append(capturedAt);
         if (!Objects.equals(sessionSeconds, previous.sessionSeconds)) {
@@ -104,6 +122,10 @@ public record PlayerSnapshot(
         if (!Objects.equals(inventory, previous.inventory)) {
             appendField(json, "inventory", inventory == null ? "null" : inventory.toDeltaJson(previous.inventory));
         }
+        if (!Objects.equals(statistics, previous.statistics)) {
+            appendField(json, "statistics", statistics == null ? "null" : statistics.toJson());
+        }
+        if (!Objects.equals(history, previous.history)) appendField(json, "history", history.toJson());
         return json.append('}').toString();
     }
 
@@ -114,7 +136,9 @@ public record PlayerSnapshot(
                 && Objects.equals(x, other.x) && Objects.equals(y, other.y) && Objects.equals(z, other.z)
                 && Objects.equals(health, other.health) && Objects.equals(maxHealth, other.maxHealth)
                 && Objects.equals(absorption, other.absorption)
-                && Objects.equals(inventory, other.inventory);
+                && Objects.equals(inventory, other.inventory)
+                && Objects.equals(statistics, other.statistics)
+                && Objects.equals(history, other.history);
     }
 
     private static boolean finite(Double... values) {

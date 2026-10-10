@@ -24,34 +24,58 @@ function inventory() {
       offhand: empty(), mainhand: item() } };
 }
 
+function statistics(entries = [counter()]) {
+  return { entries };
+}
+
+function counter(overrides = {}) {
+  return { id: "minecraft:jump", label: "Jumps", category: "Movement", unit: "count",
+    cumulative: 40, session: 3, ...overrides };
+}
+
+function history(overrides = {}) {
+  return { sessionId: 1, active: true, events: [
+    { id: 1, timestamp: 100, category: "lifecycle", label: "Joined world", details: "Overworld" },
+    { id: 2, timestamp: 90, category: "death", label: "Player died", details: "Fell from a height" }
+  ], ...overrides };
+}
+
 function snapshot(overrides = {}) {
-  return { schemaVersion: 1, revision: 4, capturedAt: 100, available: true,
+  return { schemaVersion: 2, revision: 4, capturedAt: 100, available: true,
     sessionSeconds: 3665, dimension: "minecraft:overworld", position: { x: 1, y: 64, z: -3 },
-    health: 18, maxHealth: 20, absorption: 2, inventory: inventory(), ...overrides };
+    health: 18, maxHealth: 20, absorption: 2, inventory: inventory(),
+    statistics: statistics(), history: history(), ...overrides };
 }
 
 function initial(state = snapshot()) {
-  return { schemaVersion: 1, type: "initial", modVersion: "0.1.0", state };
+  return { schemaVersion: 2, type: "initial", modVersion: "0.1.0", state };
 }
 
 function update(state = {}) {
-  return { schemaVersion: 1, type: "update",
-    state: { schemaVersion: 1, baseRevision: 4, revision: 7, capturedAt: 101, ...state } };
+  return { schemaVersion: 2, type: "update",
+    state: { schemaVersion: 2, baseRevision: 4, revision: 7, capturedAt: 101, ...state } };
 }
 
 function unavailable(overrides = {}) {
   return snapshot({ available: false, sessionSeconds: null, dimension: null,
     position: { x: null, y: null, z: null }, health: null, maxHealth: null,
-    absorption: null, inventory: null, ...overrides });
+    absorption: null, inventory: null, statistics: null, history: history({ active: false }), ...overrides });
 }
 
 function harness(fetchImpl = async () => ({ ok: true, json: async () => ({ websocketPort: 8765 }) })) {
   class Element {
-    constructor() { this.children = []; this.dataset = {}; this.className = ""; this.writes = 0; this.text = ""; }
-    get textContent() { return this.text; }
-    set textContent(value) { this.text = value; this.writes++; }
+    constructor(tagName = "div") {
+      this.tagName = tagName; this.children = []; this.dataset = {}; this.className = "";
+      this.writes = 0; this.text = ""; this.value = ""; this.open = false;
+      this.listeners = {}; this.replacements = 0;
+    }
+    get textContent() { return this.text + this.children.map(child => child.textContent).join(""); }
+    set textContent(value) { this.text = value; this.children = []; this.writes++; }
     set innerHTML(value) { throw new Error(`Unsafe HTML: ${value}`); }
     appendChild(child) { this.children.push(child); }
+    replaceChildren(...children) { this.children = children; this.text = ""; this.replacements++; }
+    addEventListener(type, listener) { (this.listeners[type] ||= []).push(listener); }
+    emit(type) { for (const listener of this.listeners[type] || []) listener({ target: this }); }
   }
   const elements = new Map();
   const sockets = [];
@@ -77,7 +101,7 @@ function harness(fetchImpl = async () => ({ ok: true, json: async () => ({ webso
         if (!elements.has(selector)) elements.set(selector, new Element());
         return elements.get(selector);
       },
-      createElement: () => new Element()
+      createElement: tagName => new Element(tagName)
     },
     window: {
       setTimeout(callback, delay) { timers.set(++timerId, { callback, delay }); return timerId; },
@@ -216,7 +240,7 @@ test("availability transitions require full snapshots and baseline", () => {
   assert.equal(back.inventory.slots.length, 36);
   assert.throws(() => h.apply(snapshot(), update({ available: false, inventory: null })));
   const missing = unavailable({ revision: 7 });
-  assert.throws(() => h.apply(snapshot(), { schemaVersion: 1, type: "update", state: missing }));
+  assert.throws(() => h.apply(snapshot(), { schemaVersion: 2, type: "update", state: missing }));
   assert.throws(() => h.apply(snapshot(), update({ inventory: null })));
   assert.throws(() => h.apply(undefined, initial(snapshot({ inventory: null }))));
 });
@@ -226,7 +250,7 @@ test("schema, missing baseline, outdated and duplicate revisions are rejected", 
   const invalid = [
     update({ baseRevision: undefined }), update({ baseRevision: 3 }),
     update({ revision: 4 }), update({ revision: 3 }), update({ revision: 1.5 }),
-    update({ schemaVersion: 2 }), { ...update(), schemaVersion: 2 },
+    update({ schemaVersion: 1 }), { ...update(), schemaVersion: 1 },
     { ...update(), type: "other" }, update({ capturedAt: undefined })
   ];
   for (const message of invalid) assert.throws(() => h.apply(snapshot(), message));
@@ -348,7 +372,7 @@ test("unavailable and socket close clear all live values and reconnect needs fre
 });
 
 test("invalid JSON/schema/baseline clear live data, close and reconnect", async () => {
-  for (const data of ["{", JSON.stringify(update({ baseRevision: 0 })), JSON.stringify({ ...update(), schemaVersion: 2 })]) {
+  for (const data of ["{", JSON.stringify(update({ baseRevision: 0 })), JSON.stringify({ ...update(), schemaVersion: 1 })]) {
     const h = harness();
     await h.flush();
     const socket = h.sockets[0];
@@ -486,4 +510,267 @@ test("persisted pageshow restores a fresh socket without accepting pre-pagehide 
   assert.equal(h.timers.size, 1);
   h.events.pagehide();
   assert.equal(h.timers.size, 0);
+});
+
+test("statistics accepts nullable values, zero, Java integer bounds and all units", () => {
+  const h = harness();
+  for (const unit of ["count", "cm", "ticks"]) {
+    for (const cumulative of [null, 0, 2147483647]) {
+      for (const session of [null, 0, 2147483647].filter(value =>
+        value === null || cumulative !== null && value <= cumulative)) {
+        const state = snapshot({ statistics: statistics([counter({ unit, cumulative, session })]) });
+        assert.deepEqual(plain(h.apply(undefined, initial(state)).statistics), state.statistics);
+      }
+    }
+  }
+  assert.equal(h.apply(undefined, initial(snapshot({ statistics: null }))).statistics, null);
+  assert.equal(h.apply(undefined, initial(snapshot({ statistics: statistics([]) }))).statistics.entries.length, 0);
+  const entries = Array.from({ length: 32 }, (_, index) => counter({ id: `minecraft:counter_${index}` }));
+  assert.equal(h.apply(undefined, initial(snapshot({ statistics: statistics(entries) }))).statistics.entries.length, 32);
+});
+
+test("statistics validates required entry fields, unique ids, bounded entries and numeric values", () => {
+  const h = harness();
+  const invalid = [undefined, {}, { entries: null },
+    statistics(Array.from({ length: 33 }, (_, index) => counter({ id: `minecraft:counter_${index}` }))),
+    statistics([counter(), counter()])];
+  for (const key of Object.keys(counter())) {
+    const entry = counter();
+    delete entry[key];
+    invalid.push(statistics([entry]));
+  }
+  for (const overrides of [
+    { id: "not-an-identifier" }, { id: "minecraft:😀" }, { label: "" },
+    { label: "x".repeat(257) }, { label: "\uD800" }, { category: "" },
+    { category: "x".repeat(257) }, { category: null }, { category: "movement" },
+    { category: "Other" }, { unit: "seconds" },
+    { unit: null }, { cumulative: -1 }, { cumulative: 0.5 }, { cumulative: "3" },
+    { cumulative: 2147483648 }, { cumulative: Number.MAX_SAFE_INTEGER },
+    { cumulative: Number.MAX_SAFE_INTEGER + 1 }, { cumulative: null, session: 0 },
+    { cumulative: null, session: 1 }, { cumulative: 0, session: 1 },
+    { cumulative: 40, session: 41 }, { session: -1 }, { session: 0.5 },
+    { session: "3" }, { session: Number.MAX_SAFE_INTEGER + 1 }
+  ]) invalid.push(statistics([counter(overrides)]));
+  for (const value of invalid) {
+    assert.throws(() => h.apply(undefined, initial(snapshot({ statistics: value }))));
+  }
+  assert.throws(() => h.apply(undefined, initial(unavailable({ statistics: statistics() }))));
+});
+
+test("history permits empty details, nonmonotonic timestamps, all categories and 100 ordered events", () => {
+  const h = harness();
+  const events = Array.from({ length: 100 }, (_, index) => ({
+    id: index + 1, timestamp: 100 - index,
+    category: ["lifecycle", "death", "dimension", "kill"][index % 4],
+    label: "Event", details: index % 2 ? "" : "Details"
+  }));
+  const value = history({ events });
+  assert.deepEqual(plain(h.apply(undefined, initial(snapshot({ history: value }))).history), value);
+  assert.deepEqual(plain(h.apply(undefined, initial(snapshot({
+    history: history({ sessionId: 0, active: false, events: [] })
+  }))).history), { sessionId: 0, active: false, events: [] });
+  assert.equal(h.apply(undefined, initial(snapshot({
+    history: history({ sessionId: Number.MAX_SAFE_INTEGER, events: [{
+      id: Number.MAX_SAFE_INTEGER, timestamp: Number.MAX_SAFE_INTEGER,
+      category: "kill", label: "Kill", details: ""
+    }] })
+  }))).history.sessionId, Number.MAX_SAFE_INTEGER);
+});
+
+test("history rejects null, missing fields, oversized arrays, unordered ids and malformed events", () => {
+  const h = harness();
+  const invalid = [null, undefined, {}, history({ events: null }),
+    history({ events: Array.from({ length: 101 }, (_, index) => ({ ...history().events[0], id: index + 1 })) })];
+  for (const key of Object.keys(history())) {
+    const value = history();
+    delete value[key];
+    invalid.push(value);
+  }
+  for (const key of Object.keys(history().events[0])) {
+    const event = { ...history().events[0] };
+    delete event[key];
+    invalid.push(history({ events: [event] }));
+  }
+  for (const overrides of [
+    { id: 0 }, { id: -1 }, { id: 0.5 }, { id: Number.MAX_SAFE_INTEGER + 1 },
+    { timestamp: -1 }, { timestamp: 0.5 }, { timestamp: "2" },
+    { timestamp: Number.MAX_SAFE_INTEGER + 1 }, { category: "chat" },
+    { label: "" }, { label: null }, { label: "x".repeat(257) },
+    { details: null }, { details: "x".repeat(257) }, { details: "\uDC00" }
+  ]) invalid.push(history({ events: [{ ...history().events[0], ...overrides }] }));
+  invalid.push(history({ events: [history().events[0], history().events[0]] }),
+    history({ events: [...history().events].reverse() }),
+    history({ sessionId: -1 }), history({ sessionId: 0.5 }), history({ active: "true" }));
+  for (const value of invalid) {
+    assert.throws(() => h.apply(undefined, initial(snapshot({ history: value }))));
+  }
+  assert.throws(() => h.apply(undefined, initial(unavailable({ history: history() }))));
+});
+
+test("statistics and history deltas replace whole fields and leave omitted fields unchanged", () => {
+  const h = harness();
+  const previous = snapshot();
+  const before = JSON.stringify(previous);
+  const value = statistics([counter({ cumulative: null, session: null })]);
+  const events = history({ events: [] });
+  const next = h.apply(previous, update({ statistics: value, history: events }));
+  assert.deepEqual(plain(next.statistics), value);
+  assert.deepEqual(plain(next.history), events);
+  assert.equal(JSON.stringify(previous), before);
+  const healthOnly = h.apply(next, update({ baseRevision: 7, revision: 8, health: 1 }));
+  assert.deepEqual(plain(healthOnly.statistics), value);
+  assert.deepEqual(plain(healthOnly.history), events);
+  assert.equal(h.apply(previous, update({ statistics: null })).statistics, null);
+  for (const fields of [
+    { statistics: { entries: [{ id: "minecraft:jump", session: 1 }] } },
+    { history: { events: [] } }, { history: null }, { history: { active: false } }
+  ]) assert.throws(() => h.apply(previous, update(fields)));
+});
+
+test("availability transition snapshots require statistics and history even with an existing baseline", () => {
+  const h = harness();
+  for (const key of ["statistics", "history"]) {
+    const gone = unavailable({ revision: 7, baseRevision: 4 });
+    delete gone[key];
+    assert.throws(() => h.apply(snapshot(), update(gone)));
+    const back = snapshot({ revision: 8, baseRevision: 7 });
+    delete back[key];
+    assert.throws(() => h.apply(unavailable({ revision: 7 }), update(back)));
+  }
+});
+
+test("statistics renders categorized cumulative and session counters with units and unavailable values", async () => {
+  const h = harness();
+  await h.flush();
+  h.sockets[0].message(initial(snapshot({ statistics: statistics([
+    counter(), counter({ id: "minecraft:walk_one_cm", label: "Distance", unit: "cm", cumulative: 12345, session: 50 }),
+    counter({ id: "minecraft:play_time", label: "Play time", category: "General", unit: "ticks",
+      cumulative: 73200, session: 1220 }),
+    counter({ id: "minecraft:deaths", label: "Deaths", category: "Combat", cumulative: null, session: null }),
+    counter({ id: "minecraft:mob_kills", label: "Kills", category: "Combat", cumulative: 0, session: 0 })
+  ]) })));
+  const rendered = h.get("#statistics-entries");
+  assert.equal(rendered.children.length, 3);
+  assert.match(rendered.textContent, /Movement[\s\S]*Jumps\nCumulative: 40 · Session: 3/);
+  assert.match(rendered.textContent, /Distance\nCumulative: 123.45 m · Session: 0.5 m/);
+  assert.match(rendered.textContent, /General[\s\S]*Play time\nCumulative: 1h 1m · Session: 1m 1s/);
+  assert.match(rendered.textContent, /Deaths\nCumulative: Unavailable · Session: Unavailable/);
+  assert.match(rendered.textContent, /Kills\nCumulative: 0 · Session: 0/);
+  const replacements = rendered.replacements;
+  h.sockets[0].message(update({ health: 17 }));
+  assert.equal(rendered.replacements, replacements);
+  h.sockets[0].message(update({ baseRevision: 7, revision: 8, statistics: null }));
+  assert.equal(h.get("#statistics-status").textContent, "Unavailable");
+  assert.equal(rendered.textContent, "Statistics unavailable.");
+});
+
+test("history newest-first filters and search preserve expandable safe text details without unchanged rebuilds", async () => {
+  const h = harness();
+  await h.flush();
+  const socket = h.sockets[0];
+  const label = "<img src=x onerror=attack>";
+  const details = "<script>attack()</script>";
+  const events = [...history().events, { id: 3, timestamp: 1, category: "kill", label, details }];
+  socket.message(initial(snapshot({ history: history({ events }) })));
+  const list = h.get("#history-entries");
+  assert.equal(h.get("#history-status").textContent, "Current session 1");
+  assert.equal(list.children.length, 3);
+  const newest = list.children[0];
+  assert.equal(newest.tagName, "details");
+  assert.equal(newest.children[0].tagName, "summary");
+  assert.match(newest.children[0].textContent, /kill · <img src=x onerror=attack>/);
+  assert.equal(newest.children[1].textContent, details);
+  assert.match(list.children[1].children[0].textContent, /death · Player died/);
+  newest.open = true;
+  const replacements = list.replacements;
+  const writes = newest.children[0].writes;
+  socket.message(update({ health: 16 }));
+  assert.equal(list.replacements, replacements);
+  assert.equal(newest.children[0].writes, writes);
+  assert.equal(newest.open, true);
+  h.get("#history-category").value = "death";
+  h.get("#history-category").emit("change");
+  assert.equal(list.children.length, 1);
+  assert.match(list.textContent, /Player died/);
+  h.get("#history-search").value = "HEIGHT";
+  h.get("#history-search").emit("input");
+  assert.equal(list.children.length, 1);
+  assert.equal(h.get("#history-empty").textContent, "");
+  const filteredReplacements = list.replacements;
+  h.get("#history-search").value = " height ";
+  h.get("#history-search").emit("input");
+  assert.equal(list.replacements, filteredReplacements);
+  h.get("#history-search").value = "no match";
+  h.get("#history-search").emit("input");
+  assert.equal(list.children.length, 0);
+  assert.equal(h.get("#history-empty").textContent, "No matching events.");
+  h.get("#history-category").value = "all";
+  h.get("#history-search").value = "attack()";
+  h.get("#history-search").emit("input");
+  assert.equal(list.children[0], newest);
+  assert.equal(newest.open, true);
+});
+
+test("history changed events retain expansion, evict old nodes, and session changes reset expansion", async () => {
+  const h = harness();
+  await h.flush();
+  const socket = h.sockets[0];
+  socket.message(initial());
+  const list = h.get("#history-entries");
+  const death = list.children[0];
+  death.open = true;
+  socket.message(update({ history: history({ events: [
+    { ...history().events[1], details: "Updated details" },
+    { id: 3, timestamp: 102, category: "dimension", label: "Nether", details: "" }
+  ] }) }));
+  assert.equal(list.children[1], death);
+  assert.equal(death.open, true);
+  assert.equal(death.children[1].textContent, "Updated details");
+  assert.equal(list.children[0].children[1].textContent, "No additional details.");
+  socket.message(update({ baseRevision: 7, revision: 8, history: history({ sessionId: 2 }) }));
+  assert.equal(h.get("#history-status").textContent, "Current session 2");
+  assert.notEqual(list.children[0], death);
+  assert.equal(list.children[0].open, false);
+});
+
+test("history stays stale on world exit but clears with counters on disconnect and resets on reconnect", async () => {
+  const h = harness();
+  await h.flush();
+  const socket = h.sockets[0];
+  socket.message(initial());
+  const retained = h.get("#history-entries").children[0];
+  retained.open = true;
+  socket.message(update(unavailable({ revision: 7, baseRevision: 4 })));
+  assert.equal(h.get("#history-status").textContent, "Stale session 1");
+  assert.equal(h.get("#history-entries").children[0], retained);
+  assert.equal(retained.open, true);
+  assert.equal(h.get("#statistics-status").textContent, "Unavailable");
+  socket.emit("close");
+  assert.equal(h.get("#history-status").textContent, "No session");
+  assert.equal(h.get("#history-entries").children.length, 0);
+  assert.equal(h.get("#history-empty").textContent, "No gameplay events.");
+  assert.equal(h.get("#statistics-entries").textContent, "Statistics unavailable.");
+  await h.reconnect();
+  h.sockets[1].message(initial(snapshot({ history: history({ sessionId: 0, active: false, events: [] }) })));
+  assert.equal(h.get("#history-status").textContent, "No session");
+  h.sockets[1].message(update());
+  assert.equal(h.get("#history-entries").children.length, 0);
+});
+
+test("statistics and history unsafe labels use only text and malformed replacements clear live data atomically", async () => {
+  const h = harness();
+  await h.flush();
+  const socket = h.sockets[0];
+  socket.message(initial(snapshot({ statistics: statistics([
+    counter({ label: "<img onerror=attack>", category: "Combat" })
+  ]) })));
+  assert.match(h.get("#statistics-entries").textContent, /Combat/);
+  assert.match(h.get("#statistics-entries").textContent, /<img onerror=attack>/);
+  socket.message(update({ statistics: statistics([counter({ label: "Must not appear" })]),
+    history: history({ events: [{ ...history().events[0], id: 0 }] }) }));
+  assert.equal(h.state(), undefined);
+  assert.equal(h.get("#statistics-status").textContent, "Unavailable");
+  assert.doesNotMatch(h.get("#statistics-entries").textContent, /Must not appear/);
+  assert.equal(h.get("#history-entries").children.length, 0);
+  assert.equal(socket.closed[0][0], 1002);
 });

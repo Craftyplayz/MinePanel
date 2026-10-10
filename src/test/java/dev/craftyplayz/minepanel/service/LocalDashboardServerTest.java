@@ -5,6 +5,8 @@ import dev.craftyplayz.minepanel.telemetry.TelemetryStore;
 import dev.craftyplayz.minepanel.telemetry.InventorySnapshot;
 import dev.craftyplayz.minepanel.telemetry.InventorySnapshotTest;
 import dev.craftyplayz.minepanel.telemetry.ItemSnapshot;
+import dev.craftyplayz.minepanel.telemetry.StatisticsAndHistoryTest;
+import dev.craftyplayz.minepanel.telemetry.ItemExtractorTest;
 
 import java.net.URI;
 import java.net.Socket;
@@ -22,6 +24,8 @@ public final class LocalDashboardServerTest {
 
     public static void main(String[] args) throws Exception {
         InventorySnapshotTest.main(args);
+        ItemExtractorTest.main(args);
+        StatisticsAndHistoryTest.main(args);
         testTelemetrySnapshots();
         testWebSocketPush();
         testShutdown();
@@ -69,9 +73,9 @@ public final class LocalDashboardServerTest {
                     .GET()
                     .build();
             HttpResponse<String> state = CLIENT.send(authorizedRequest, HttpResponse.BodyHandlers.ofString());
-            check(state.statusCode() == 200 && state.body().contains("\"schemaVersion\":1")
+            check(state.statusCode() == 200 && state.body().contains("\"schemaVersion\":2")
                             && state.body().contains("\"modVersion\"")
-                            && state.body().contains("\"player\":{\"schemaVersion\":1")
+                            && state.body().contains("\"player\":{\"schemaVersion\":2")
                             && state.body().contains("\"available\":false"),
                     "authorized client receives a versioned initial status");
 

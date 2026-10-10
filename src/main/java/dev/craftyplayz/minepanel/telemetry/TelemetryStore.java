@@ -20,23 +20,36 @@ public final class TelemetryStore {
     public boolean updatePlayer(long capturedAt, Long sessionSeconds, String dimension,
                                 Double x, Double y, Double z, Double health, Double maxHealth,
                                 Double absorption, InventorySnapshot inventory) {
+        return updatePlayer(capturedAt, sessionSeconds, dimension, x, y, z, health, maxHealth, absorption,
+                inventory, null, GameplayHistory.empty());
+    }
+
+    public boolean updatePlayer(long capturedAt, Long sessionSeconds, String dimension,
+                                Double x, Double y, Double z, Double health, Double maxHealth,
+                                Double absorption, InventorySnapshot inventory, StatisticsSnapshot statistics,
+                                GameplayHistory history) {
         PlayerSnapshot current = player.get();
         PlayerSnapshot candidate = new PlayerSnapshot(current.revision(), capturedAt, true,
-                sessionSeconds, dimension, x, y, z, health, maxHealth, absorption, inventory);
+                sessionSeconds, dimension, x, y, z, health, maxHealth, absorption, inventory, statistics, history);
         if (current.sameValues(candidate)) {
             return false;
         }
         player.set(new PlayerSnapshot(current.revision() + 1, capturedAt, true,
-                sessionSeconds, dimension, x, y, z, health, maxHealth, absorption, inventory));
+                sessionSeconds, dimension, x, y, z, health, maxHealth, absorption, inventory, statistics, history));
         return true;
     }
 
     public boolean markUnavailable(long capturedAt) {
+        GameplayHistory current = player.get().history();
+        return markUnavailable(capturedAt, new GameplayHistory(current.sessionId(), false, current.events()));
+    }
+
+    public boolean markUnavailable(long capturedAt, GameplayHistory history) {
         PlayerSnapshot current = player.get();
-        if (!current.available()) {
+        if (!current.available() && current.history().equals(history)) {
             return false;
         }
-        player.set(PlayerSnapshot.unavailable(current.revision() + 1, capturedAt));
+        player.set(PlayerSnapshot.unavailable(current.revision() + 1, capturedAt, history));
         return true;
     }
 }
