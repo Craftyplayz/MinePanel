@@ -13,8 +13,15 @@ public record PlayerSnapshot(
         Double z,
         Double health,
         Double maxHealth,
-        Double absorption
+        Double absorption,
+        InventorySnapshot inventory
 ) {
+    public PlayerSnapshot(long revision, long capturedAt, boolean available, Long sessionSeconds, String dimension,
+                          Double x, Double y, Double z, Double health, Double maxHealth, Double absorption) {
+        this(revision, capturedAt, available, sessionSeconds, dimension, x, y, z, health, maxHealth, absorption,
+                available ? InventorySnapshot.empty() : null);
+    }
+
     public PlayerSnapshot {
         if (revision < 0 || capturedAt < 0) {
             throw new IllegalArgumentException("revision and capturedAt must be non-negative");
@@ -28,12 +35,13 @@ public record PlayerSnapshot(
             Objects.requireNonNull(health, "health");
             Objects.requireNonNull(maxHealth, "maxHealth");
             Objects.requireNonNull(absorption, "absorption");
+            Objects.requireNonNull(inventory, "inventory");
             if (dimension.length() > 256 || sessionSeconds < 0 || !finite(x, y, z, health, maxHealth, absorption)
                     || health < 0 || maxHealth < 0 || absorption < 0) {
                 throw new IllegalArgumentException("available player values must be finite and non-negative");
             }
         } else if (sessionSeconds != null || dimension != null || x != null || y != null || z != null
-                || health != null || maxHealth != null || absorption != null) {
+                || health != null || maxHealth != null || absorption != null || inventory != null) {
             throw new IllegalArgumentException("unavailable player values must be null");
         }
     }
@@ -51,15 +59,21 @@ public record PlayerSnapshot(
                 + ",\"position\":{\"x\":" + number(x) + ",\"y\":" + number(y) + ",\"z\":" + number(z) + "}"
                 + ",\"health\":" + number(health)
                 + ",\"maxHealth\":" + number(maxHealth)
-                + ",\"absorption\":" + number(absorption) + "}";
+                + ",\"absorption\":" + number(absorption)
+                + ",\"inventory\":" + (inventory == null ? "null" : inventory.toJson()) + "}";
     }
 
     public String toDeltaJson(PlayerSnapshot previous) {
-        if (previous == null || available != previous.available) {
+        if (previous == null) {
             return toJson();
         }
+        if (available != previous.available) {
+            String full = toJson();
+            return full.substring(0, full.length() - 1) + ",\"baseRevision\":" + previous.revision + "}";
+        }
         StringBuilder json = new StringBuilder("{\"schemaVersion\":1,\"revision\":")
-                .append(revision).append(",\"capturedAt\":").append(capturedAt);
+                .append(revision).append(",\"baseRevision\":").append(previous.revision)
+                .append(",\"capturedAt\":").append(capturedAt);
         if (!Objects.equals(sessionSeconds, previous.sessionSeconds)) {
             appendField(json, "sessionSeconds", number(sessionSeconds));
         }
@@ -87,6 +101,9 @@ public record PlayerSnapshot(
         if (!Objects.equals(health, previous.health)) appendField(json, "health", number(health));
         if (!Objects.equals(maxHealth, previous.maxHealth)) appendField(json, "maxHealth", number(maxHealth));
         if (!Objects.equals(absorption, previous.absorption)) appendField(json, "absorption", number(absorption));
+        if (!Objects.equals(inventory, previous.inventory)) {
+            appendField(json, "inventory", inventory == null ? "null" : inventory.toDeltaJson(previous.inventory));
+        }
         return json.append('}').toString();
     }
 
@@ -96,7 +113,8 @@ public record PlayerSnapshot(
                 && Objects.equals(dimension, other.dimension)
                 && Objects.equals(x, other.x) && Objects.equals(y, other.y) && Objects.equals(z, other.z)
                 && Objects.equals(health, other.health) && Objects.equals(maxHealth, other.maxHealth)
-                && Objects.equals(absorption, other.absorption);
+                && Objects.equals(absorption, other.absorption)
+                && Objects.equals(inventory, other.inventory);
     }
 
     private static boolean finite(Double... values) {
@@ -116,7 +134,7 @@ public record PlayerSnapshot(
         json.append(",\"").append(name).append("\":").append(value);
     }
 
-    private static String string(String value) {
+    static String string(String value) {
         if (value == null) {
             return "null";
         }

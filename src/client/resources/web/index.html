@@ -38,9 +38,16 @@
         <div class="card-heading"><div><p class="eyebrow">INTEGRATIONS</p><h2>Build progress</h2></div><span class="badge muted">Unavailable</span></div>
         <p class="card-copy">Litematica support requires a compatible 26.1.2 release and a verified placement API.</p>
       </article>
-      <article class="card integration-card">
-        <div class="card-heading"><div><p class="eyebrow">INVENTORY</p><h2>Equipment</h2></div><span class="badge muted">Unavailable</span></div>
-        <p class="card-copy">Read-only inventory and equipment widgets are planned. No dashboard action will modify items.</p>
+      <article class="card inventory-card">
+        <div class="card-heading"><div><p class="eyebrow">INVENTORY</p><h2>Inventory &amp; equipment</h2></div><span class="badge muted" id="inventory-status">Unavailable</span></div>
+        <p class="card-copy">Read-only client inventory. No dashboard action will modify items.</p>
+        <p class="held-summary" id="held-value">Held item unavailable</p>
+        <h3>Hotbar</h3>
+        <div class="inventory-grid" id="hotbar-slots" aria-label="Hotbar slots"></div>
+        <h3>Main inventory</h3>
+        <div class="inventory-grid" id="main-slots" aria-label="Main inventory slots"></div>
+        <h3>Equipment</h3>
+        <div class="equipment-grid" id="equipment-slots" aria-label="Equipment slots"></div>
       </article>
     </section>
     <footer><span>MinePanel <span id="version">·</span></span><span>Loopback only · No cloud · Session data not stored</span></footer>

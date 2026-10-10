@@ -20,6 +20,7 @@ public final class MinePanelClient implements ClientModInitializer {
     private LocalDashboardServer dashboard;
     private long sessionStartedNanos;
     private long lastSampleNanos;
+    private boolean samplingFailureReported;
     private final ExecutorService lifecycleExecutor = Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(runnable, "MinePanel-lifecycle");
         thread.setDaemon(true);
@@ -47,13 +48,22 @@ public final class MinePanelClient implements ClientModInitializer {
             }
 
             var player = client.player;
-            telemetry.updatePlayer(
-                    System.currentTimeMillis(),
-                    (now - sessionStartedNanos) / 1_000_000_000L,
-                    client.level.dimension().identifier().toString(),
-                    player.getX(), player.getY(), player.getZ(),
-                    (double) player.getHealth(), player.getAttributeValue(Attributes.MAX_HEALTH),
-                    (double) player.getAbsorptionAmount());
+            try {
+                var snapshot = MinecraftInventoryCollector.collect(player);
+                telemetry.updatePlayer(
+                        System.currentTimeMillis(),
+                        (now - sessionStartedNanos) / 1_000_000_000L,
+                        client.level.dimension().identifier().toString(),
+                        player.getX(), player.getY(), player.getZ(),
+                        (double) player.getHealth(), player.getAttributeValue(Attributes.MAX_HEALTH),
+                        (double) player.getAbsorptionAmount(), snapshot);
+            } catch (RuntimeException exception) {
+                telemetry.markUnavailable(System.currentTimeMillis());
+                if (!samplingFailureReported) {
+                    samplingFailureReported = true;
+                    LOGGER.warning("Player telemetry unavailable: unsupported or invalid item metadata.");
+                }
+            }
         });
 
         ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {

@@ -2,6 +2,9 @@ package dev.craftyplayz.minepanel.service;
 
 import dev.craftyplayz.minepanel.telemetry.PlayerSnapshot;
 import dev.craftyplayz.minepanel.telemetry.TelemetryStore;
+import dev.craftyplayz.minepanel.telemetry.InventorySnapshot;
+import dev.craftyplayz.minepanel.telemetry.InventorySnapshotTest;
+import dev.craftyplayz.minepanel.telemetry.ItemSnapshot;
 
 import java.net.URI;
 import java.net.Socket;
@@ -18,6 +21,7 @@ public final class LocalDashboardServerTest {
     private static final HttpClient CLIENT = HttpClient.newHttpClient();
 
     public static void main(String[] args) throws Exception {
+        InventorySnapshotTest.main(args);
         testTelemetrySnapshots();
         testWebSocketPush();
         testShutdown();
@@ -188,16 +192,50 @@ public final class LocalDashboardServerTest {
                 while (!(line = readLine(input)).isEmpty()) {
                     // Consume upgrade response headers before reading the first data frame.
                 }
-                check(readWebSocketText(input).contains("\"type\":\"initial\""),
+                String initial = readWebSocketText(input);
+                check(initial.contains("\"type\":\"initial\"") && initial.contains("\"inventory\":{\"slots\":[")
+                                && !initial.contains("baseRevision"),
                         "WebSocket sends an initial versioned state");
+                HttpRequest stateRequest = HttpRequest.newBuilder(base.resolve("api/state"))
+                        .header("Authorization", "Bearer " + cookie.substring(cookie.indexOf('=') + 1))
+                        .GET().build();
+                HttpResponse<String> state = CLIENT.send(stateRequest, HttpResponse.BodyHandlers.ofString());
+                check(state.statusCode() == 200 && state.body().contains("\"inventory\":{\"slots\":[")
+                                && state.body().contains("\"selectedHotbarSlot\":0")
+                                && state.body().contains("\"equipment\":{\"head\":"),
+                        "authenticated HTTP state exposes the same additive inventory snapshot");
 
                 telemetry.updatePlayer(3000, 1L, "minecraft:overworld", 1.0, 65.0, 2.0,
                         19.0, 20.0, 0.0);
                 String update = readWebSocketText(input);
                 check(update.contains("\"type\":\"update\"")
                                 && update.contains("\"health\":19.0")
+                                && update.contains("\"baseRevision\":1")
                                 && !update.contains("\"maxHealth\""),
                         "changed snapshots are pushed without a client request");
+                var slots = InventorySnapshotTest.emptySlots();
+                slots.set(0, InventorySnapshotTest.item(4));
+                InventorySnapshot inventory = InventorySnapshot.collect(slots::get, 0,
+                        key -> ItemSnapshot.emptyItem());
+                telemetry.updatePlayer(3100, 1L, "minecraft:overworld", 1.0, 65.0, 2.0,
+                        19.0, 20.0, 0.0, inventory);
+                String inventoryUpdate = readWebSocketText(input);
+                check(inventoryUpdate.contains("\"baseRevision\":2")
+                               && inventoryUpdate.contains("\"index\":0,\"item\":")
+                               && inventoryUpdate.contains("\"equipment\":{\"mainhand\":")
+                               && !inventoryUpdate.contains("\"index\":1")
+                               && !inventoryUpdate.contains("\"health\""),
+                        "real WebSocket sends sparse inventory-only changes");
+                telemetry.markUnavailable(3200);
+                String disconnect = readWebSocketText(input);
+                check(disconnect.contains("\"baseRevision\":3") && disconnect.contains("\"available\":false")
+                               && disconnect.contains("\"inventory\":null"), "disconnect clears inventory over WebSocket");
+                telemetry.updatePlayer(3300, 1L, "minecraft:overworld", 1.0, 65.0, 2.0,
+                        19.0, 20.0, 0.0, inventory);
+                String restored = readWebSocketText(input);
+                check(restored.contains("\"baseRevision\":4") && restored.contains("\"available\":true")
+                               && restored.contains("\"inventory\":{\"slots\":[{\"empty\":false"),
+                        "player reconnect sends a complete inventory with baseline");
             }
 
             try (Socket reconnect = new Socket("127.0.0.1", port)) {
@@ -221,8 +259,22 @@ public final class LocalDashboardServerTest {
                 }
                 String initial = readWebSocketText(input);
                 check(initial.contains("\"type\":\"initial\"")
-                                && initial.contains("\"health\":19.0"),
+                               && initial.contains("\"health\":19.0")
+                               && initial.contains("\"inventory\":{\"slots\":[{\"empty\":false")
+                               && !initial.contains("baseRevision"),
                         "reconnected browser receives the latest full snapshot");
+                var enchantments = java.util.Collections.nCopies(64,
+                        new ItemSnapshot.Enchantment("minecraft:unbreaking", "E".repeat(256), 255));
+                ItemSnapshot largeItem = new ItemSnapshot(false, "minecraft:stone", "S".repeat(256),
+                        64, 64, null, null, enchantments);
+                InventorySnapshot largeInventory = InventorySnapshot.collect(index -> largeItem, 0, key -> largeItem);
+                telemetry.updatePlayer(3400, 1L, "minecraft:overworld", 1.0, 65.0, 2.0,
+                        19.0, 20.0, 0.0, largeInventory);
+                String largeUpdate = readWebSocketText(input);
+                check(largeUpdate.getBytes(StandardCharsets.UTF_8).length > 65535
+                               && largeUpdate.contains("\"index\":35")
+                               && largeUpdate.endsWith("}}}"),
+                        "bounded large inventory deltas use complete 64-bit outgoing frames");
             }
         }
     }
@@ -270,12 +322,23 @@ public final class LocalDashboardServerTest {
         int first = input.read();
         int second = input.read();
         check(first >= 0 && second >= 0 && (first & 0x0f) == 0x1, "server sends a text WebSocket frame");
-        int length = second & 0x7f;
+        check((first & 0x80) != 0 && (second & 0x80) == 0, "server frames are final and unmasked");
+        long length = second & 0x7f;
         if (length == 126) {
             length = (input.read() << 8) | input.read();
+        } else if (length == 127) {
+            length = 0;
+            for (int index = 0; index < 8; index++) {
+                int next = input.read();
+                check(next >= 0, "64-bit frame length is complete");
+                length = (length << 8) | next;
+            }
+            check(length > 65535, "64-bit frame encoding used only for large payloads");
         }
-        check(length < 65536, "WebSocket message stays bounded");
-        return new String(input.readNBytes(length), StandardCharsets.UTF_8);
+        check(length >= 0 && length < 2 * 1024 * 1024, "WebSocket metadata stays bounded");
+        byte[] payload = input.readNBytes((int) length);
+        check(payload.length == length, "complete WebSocket payload received");
+        return new String(payload, StandardCharsets.UTF_8);
     }
 
     private static String readLine(BufferedInputStream input) throws Exception {
