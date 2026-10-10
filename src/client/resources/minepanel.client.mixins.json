@@ -1,0 +1,9 @@
+{
+  "required": true,
+  "package": "dev.craftyplayz.minepanel.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": ["StatisticsSyncMixin"],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

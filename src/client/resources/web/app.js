@@ -11,6 +11,13 @@ const dimensionValue = document.querySelector("#dimension-value");
 const positionValue = document.querySelector("#position-value");
 const inventoryStatus = document.querySelector("#inventory-status");
 const heldValue = document.querySelector("#held-value");
+const statisticsStatus = document.querySelector("#statistics-status");
+const statisticsEntries = document.querySelector("#statistics-entries");
+const historyStatus = document.querySelector("#history-status");
+const historyEntries = document.querySelector("#history-entries");
+const historyEmpty = document.querySelector("#history-empty");
+const historyCategory = document.querySelector("#history-category");
+const historySearch = document.querySelector("#history-search");
 const equipmentKeys = ["head", "chest", "legs", "feet", "offhand", "mainhand"];
 const slotElements = Array.from({ length: 36 }, (_, index) => {
   const element = document.createElement("div");
@@ -29,6 +36,11 @@ let reconnectTimer;
 let currentPlayerState;
 let generation = 0;
 let pageHidden = false;
+let statisticsKey;
+let displayedHistory;
+let historySessionId;
+let historyNodes = new Map();
+let historyViewKey;
 
 const has = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -109,10 +121,44 @@ function patchInventory(previous, patch) {
   });
 }
 
+function validateStatistics(statistics) {
+  if (statistics === null) return null;
+  requireValid(object(statistics) && Array.isArray(statistics.entries) && statistics.entries.length <= 32);
+  const ids = new Set();
+  const entries = statistics.entries.map(entry => {
+    requireValid(object(entry) && validIdentifier(entry.id) && !ids.has(entry.id)
+      && validText(entry.label) && ["Movement", "Combat", "General"].includes(entry.category)
+      && ["count", "cm", "ticks"].includes(entry.unit)
+      && (entry.cumulative === null || integer(entry.cumulative) && entry.cumulative <= 2147483647)
+      && (entry.session === null || integer(entry.session) && entry.cumulative !== null
+        && entry.session <= entry.cumulative));
+    ids.add(entry.id);
+    return { id: entry.id, label: entry.label, category: entry.category, unit: entry.unit,
+      cumulative: entry.cumulative, session: entry.session };
+  });
+  return { entries };
+}
+
+function validateHistory(history) {
+  requireValid(object(history) && integer(history.sessionId) && typeof history.active === "boolean"
+    && Array.isArray(history.events) && history.events.length <= 100);
+  let previousId = 0;
+  const events = history.events.map(event => {
+    requireValid(object(event) && integer(event.id) && event.id > previousId && integer(event.timestamp)
+      && ["lifecycle", "death", "dimension", "kill"].includes(event.category)
+      && validText(event.label) && typeof event.details === "string"
+      && (event.details === "" || validText(event.details)));
+    previousId = event.id;
+    return { id: event.id, timestamp: event.timestamp, category: event.category,
+      label: event.label, details: event.details };
+  });
+  return { sessionId: history.sessionId, active: history.active, events };
+}
+
 function validatePlayer(state) {
-  requireValid(object(state) && state.schemaVersion === 1 && integer(state.revision)
+  requireValid(object(state) && state.schemaVersion === 2 && integer(state.revision)
     && integer(state.capturedAt) && typeof state.available === "boolean" && object(state.position)
-    && has(state, "inventory"));
+    && has(state, "inventory") && has(state, "statistics") && has(state, "history"));
   if (state.available) {
     requireValid(state.inventory !== null && integer(state.sessionSeconds) && typeof state.dimension === "string"
       && ["x", "y", "z"].every(key => finite(state.position[key]))
@@ -120,15 +166,17 @@ function validatePlayer(state) {
   } else {
     requireValid(["sessionSeconds", "dimension", "health", "maxHealth", "absorption"]
       .every(key => state[key] === null)
-      && ["x", "y", "z"].every(key => state.position[key] === null) && state.inventory === null);
+      && ["x", "y", "z"].every(key => state.position[key] === null) && state.inventory === null
+      && state.statistics === null && state.history?.active === false);
   }
-  return { ...state, inventory: validateInventory(state.inventory) };
+  return { ...state, inventory: validateInventory(state.inventory),
+    statistics: validateStatistics(state.statistics), history: validateHistory(state.history) };
 }
 
 function applyMessage(previous, message) {
-  requireValid(object(message) && message.schemaVersion === 1
+  requireValid(object(message) && message.schemaVersion === 2
     && ["initial", "update"].includes(message.type) && object(message.state)
-    && message.state.schemaVersion === 1);
+    && message.state.schemaVersion === 2);
   const state = message.state;
   if (message.type === "initial") {
     requireValid(!previous);
@@ -192,8 +240,90 @@ function formatDuration(seconds) {
   return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m ${remaining}s`;
 }
 
+function formatCounter(value, unit) {
+  if (value === null) return "Unavailable";
+  if (unit === "cm") return `${(value / 100).toLocaleString(undefined, { maximumFractionDigits: 2 })} m`;
+  if (unit === "ticks") return formatDuration(value / 20);
+  return value.toLocaleString();
+}
+
+function renderStatistics(statistics) {
+  writeText(statisticsStatus, statistics ? "Client counters" : "Unavailable");
+  const key = JSON.stringify(statistics);
+  if (key === statisticsKey) return;
+  statisticsKey = key;
+  const groups = new Map();
+  for (const entry of statistics?.entries ?? []) {
+    if (!groups.has(entry.category)) {
+      const section = document.createElement("section");
+      section.className = "statistics-group";
+      const heading = document.createElement("h3");
+      heading.textContent = entry.category;
+      section.appendChild(heading);
+      groups.set(entry.category, section);
+    }
+    const row = document.createElement("p");
+    row.className = "counter-row";
+    row.textContent = `${entry.label}\nCumulative: ${formatCounter(entry.cumulative, entry.unit)} · Session: ${formatCounter(entry.session, entry.unit)}`;
+    groups.get(entry.category).appendChild(row);
+  }
+  if (!groups.size) {
+    const empty = document.createElement("p");
+    empty.className = "card-copy";
+    empty.textContent = statistics ? "No counters available." : "Statistics unavailable.";
+    statisticsEntries.replaceChildren(empty);
+  } else {
+    statisticsEntries.replaceChildren(...groups.values());
+  }
+}
+
+function renderHistory(history) {
+  displayedHistory = history;
+  writeText(historyStatus, !history || history.sessionId === 0
+    ? "No session" : `${history.active ? "Current" : "Stale"} session ${history.sessionId}`);
+  if (historySessionId !== history?.sessionId) {
+    historyNodes = new Map();
+    historySessionId = history?.sessionId;
+    historyViewKey = undefined;
+  }
+  const events = history?.events ?? [];
+  const retained = new Set(events.map(event => event.id));
+  for (const id of historyNodes.keys()) {
+    if (!retained.has(id)) historyNodes.delete(id);
+  }
+  for (const event of events) {
+    let node = historyNodes.get(event.id);
+    if (!node) {
+      node = document.createElement("details");
+      node.className = "history-event";
+      node.appendChild(document.createElement("summary"));
+      node.appendChild(document.createElement("p"));
+      historyNodes.set(event.id, node);
+    }
+    const date = new Date(event.timestamp);
+    const timestamp = Number.isNaN(date.getTime()) ? String(event.timestamp) : date.toISOString();
+    writeText(node.children[0], `${timestamp} · ${event.category} · ${event.label}`);
+    writeText(node.children[1], event.details || "No additional details.");
+  }
+  const query = historySearch.value.trim().toLowerCase();
+  const category = historyCategory.value;
+  const visible = events.filter(event => (!category || category === "all" || event.category === category)
+    && `${event.label} ${event.details} ${event.category}`.toLowerCase().includes(query)).reverse();
+  const viewKey = JSON.stringify([history?.sessionId, visible.map(event => event.id)]);
+  if (viewKey !== historyViewKey) {
+    historyViewKey = viewKey;
+    historyEntries.replaceChildren(...visible.map(event => historyNodes.get(event.id)));
+  }
+  writeText(historyEmpty, visible.length ? "" : events.length ? "No matching events." : "No gameplay events.");
+}
+
+historyCategory.addEventListener("change", () => renderHistory(displayedHistory));
+historySearch.addEventListener("input", () => renderHistory(displayedHistory));
+
 function renderPlayer(player) {
   renderInventory(player?.available ? player.inventory : null);
+  renderStatistics(player?.available ? player.statistics : null);
+  renderHistory(player?.history);
   if (!player?.available) {
     gameStatus.textContent = "No active world";
     healthValue.textContent = "—";

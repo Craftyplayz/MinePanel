@@ -52,6 +52,16 @@ footer { display: flex; justify-content: space-between; border-top: 1px solid va
 .inventory-slot, .equipment-slot { padding: 10px; min-height: 90px; border: 1px solid var(--line); border-radius: 7px; background: #0c1419; color: #a9b8b2; font-size: 11px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .inventory-slot.selected { border-color: var(--accent); background: #73e0b110; color: #edf2f5; }
 .held-summary { color: var(--accent); font-size: 12px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+.statistics-group h3 { color: var(--accent); font-size: 13px; margin: 20px 0 10px; }
+.counter-row { padding: 10px 0; margin: 0; border-top: 1px solid var(--line); color: #b8c7c0; font-size: 12px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.history-filters { display: flex; flex-wrap: wrap; gap: 12px; }
+.history-filters label { display: grid; flex: 1; gap: 6px; color: var(--muted); font-size: 12px; }
+.history-filters input, .history-filters select { width: 100%; min-width: 140px; padding: 9px; border: 1px solid #3a4c43; border-radius: 6px; background: #0c1419; color: #edf2f5; font: inherit; }
+.history-filters input:focus-visible, .history-filters select:focus-visible, .history-event summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#history-entries { max-height: 460px; overflow-y: auto; }
+.history-event { padding: 12px 0; border-top: 1px solid var(--line); font-size: 12px; line-height: 1.65; overflow-wrap: anywhere; }
+.history-event summary { cursor: pointer; color: #c5cfce; }
+.history-event p { margin: 10px 0 0; color: var(--muted); white-space: pre-wrap; }
 @media (max-width: 1050px) { .inventory-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } .equipment-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .shell { padding: 0 19px; } .welcome { padding-top: 39px; } .grid { grid-template-columns: 1fr; } .map-card { grid-row: auto; min-height: 345px; } .empty-state { min-height: 220px; } footer { gap: 10px; flex-wrap: wrap; } }
 @media (min-width: 761px) and (max-width: 1050px) { .shell { padding: 0 25px; } }

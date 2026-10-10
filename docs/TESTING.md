@@ -48,8 +48,101 @@ No Minecraft runtime/manual integration checks have been performed.
 - [ ] Litematica and Malilib compatible versions; placement progress.
 - [ ] Sodium and REI each present and absent.
 - [ ] Inventory: move/split/consume, selected slot, custom names, enchantments, durability, armour and offhand in real Minecraft.
-- [ ] Container open/close/pinning, warnings, statistics and events (future features).
+- [ ] Container open/close/pinning and warnings (future features).
+- [ ] Statistics and session event history using the reproducible checklist below.
 - [ ] Browser refresh/reconnect, service unavailable, and port conflict.
 - [ ] Fullscreen/borderless gameplay with dashboard on a second monitor.
 
 Do not mark these checks complete without running them on the target client.
+
+## Inventory/statistics/history milestone verification (2026-10-10)
+
+Initial working tree was clean at `3820237` (inventory/dashboard merge); no repository `AGENTS.md` was present. Configured dependency pins are unchanged. Baseline commands, run from `/home/runner/work/MinePanel/MinePanel`:
+
+```sh
+mkdir -p /tmp/minepanel-baseline
+javac -d /tmp/minepanel-baseline $(find src/main/java src/test/java -name '*.java')
+java -cp /tmp/minepanel-baseline:src/client/resources dev.craftyplayz.minepanel.telemetry.InventorySnapshotTest
+java -cp /tmp/minepanel-baseline:src/client/resources dev.craftyplayz.minepanel.service.LocalDashboardServerTest
+node --check src/client/resources/web/app.js
+node --test src/test/js/dashboard.test.js
+```
+
+All exited 0 with default Java 17; baseline browser suite: **21 passed, 0 failed**. Java tests use synthetic models plus actual local HTTP/WebSocket connections, not Minecraft.
+
+Final Java 25 checks executed by the collector validation agent:
+
+```sh
+mkdir -p .minepanel-final-java
+/usr/lib/jvm/temurin-25-jdk-amd64/bin/javac --release 25 -d .minepanel-final-java $(find src/main/java src/test/java -name '*.java')
+/usr/lib/jvm/temurin-25-jdk-amd64/bin/java -cp .minepanel-final-java:src/client/resources dev.craftyplayz.minepanel.service.LocalDashboardServerTest
+/usr/lib/jvm/temurin-25-jdk-amd64/bin/java -cp .minepanel-final-java:src/client/resources dev.craftyplayz.minepanel.telemetry.ItemExtractorTest
+/usr/lib/jvm/temurin-25-jdk-amd64/bin/java -cp .minepanel-final-java:src/client/resources dev.craftyplayz.minepanel.telemetry.InventorySnapshotTest
+/usr/lib/jvm/temurin-25-jdk-amd64/bin/java -cp .minepanel-final-java:src/client/resources dev.craftyplayz.minepanel.telemetry.StatisticsAndHistoryTest
+rm -rf .minepanel-final-java
+```
+
+All passed (exit 0); the temporary classes were removed. After the counter-decrease regression was added, the same compilation and standalone `StatisticsAndHistoryTest` were repeated successfully. For future local reproduction use `/tmp/minepanel-final-java` instead of the removed scratch path. `serviceTest` now invokes inventory, extraction, statistics/history and service runners together.
+
+Final frontend checks executed by the dashboard agent:
+
+```sh
+node --check src/client/resources/web/app.js
+node --check src/test/js/dashboard.test.js
+node --test src/test/js/dashboard.test.js
+git diff --check
+```
+
+All passed; **32 dashboard tests passed, 0 failed**. No configured lint/type-check tool exists.
+
+`ItemExtractorTest` uses **fake read-only views** to exercise production extraction shared by `MinecraftInventoryCollector`, including empty/populated slots, all 36 slots, selection/held equality, all armour and offhand, stack counts/limits, durability, applied/stored enchantments, text bounds, read counts and changes between samples. It does **not** call `MinecraftInventoryCollector.collect` with a real player or stack. `StatisticsAndHistoryTest` uses synthetic observed counters/transitions for null values, first-sync and decreased-counter baselines, serialization, field deltas, immutability, bounded eviction, duplicate-death suppression, reported aggregate kills and connection reset. Dashboard tests use a synthetic DOM and messages, including filters/search, details expansion, unsafe-text rendering, bounds, versioning and disconnect clearing.
+
+No Fabric game-test or headless Minecraft client infrastructure is configured; there are no game-test source sets or launcher fixtures. Adding a speculative game test while dependencies are unavailable would not demonstrate compatibility. Missing player/world handling and real API bridging remain source-reviewed only.
+
+### Release failure and artifacts
+
+Executed `./gradlew releaseBuild --stacktrace --console=plain` first with default Java, then with:
+
+```sh
+JAVA_HOME=/usr/lib/jvm/temurin-25-jdk-amd64 PATH=/usr/lib/jvm/temurin-25-jdk-amd64/bin:$PATH ./gradlew releaseBuild --stacktrace --console=plain
+```
+
+Both exited 1 before any source compilation. Complete logs were captured at `/tmp/minepanel-release-baseline.log` and `/tmp/minepanel-release-java25.log` for this sandbox session. The relevant failure is:
+
+```text
+Build file '/home/runner/work/MinePanel/MinePanel/build.gradle' line: 2
+Plugin [id: 'net.fabricmc.fabric-loom', version: '1.18-SNAPSHOT'] was not found
+- Gradle Core Plugins (plugin is not in 'org.gradle' namespace)
+- Included Builds (No included builds contain this plugin)
+- Plugin Repositories (could not resolve plugin artifact
+  'net.fabricmc.fabric-loom:net.fabricmc.fabric-loom.gradle.plugin:1.18-SNAPSHOT')
+Searched: maven(https://maven.fabricmc.net/), Gradle Central Plugin Repository, MavenRepo
+org.gradle.api.plugins.UnknownPluginException
+```
+
+Direct `curl -I --connect-timeout 10 --max-time 15` probes of `https://maven.fabricmc.net/net/fabricmc/fabric-loom/1.18-SNAPSHOT/maven-metadata.xml` and `https://piston-meta.mojang.com/mc/game/version_manifest_v2.json` both exited 6: **Could not resolve host**. This is network/DNS evidence, not evidence of an invalid version or compilation error. GitHub MCP workflow listing and historic job `114171506388` logs were inspected; agent workflow success is not a release-build result.
+
+To avoid repeating blocked requests, final release verification used the same Java 25 environment with `./gradlew releaseBuild --offline --stacktrace --console=plain`: exit 1, same uncached Loom plugin, full log `/tmp/minepanel-release-final.log`. No local artifact could satisfy offline resolution. Inspection with `find /home/runner/work/MinePanel/MinePanel/build -type f -name '*.jar'` found **no JAR** (no build directory). Expected `/home/runner/work/MinePanel/MinePanel/build/release/minepanel-0.1.0.jar` does not exist. Client compilation, mixin injection, packaging, and Minecraft 26.1.2 launch have **not** passed or run.
+
+Automated final validation: secret scan clean; packaged code review could not load its configured model (despite its success heading); CodeQL JavaScript completed with **0 alerts**, but timed out before all languages finished. This is not a successful complete Java security scan.
+
+An independent read-only code-review agent subsequently found that Fabric disconnect notification can run on Netty's thread. The client callback now schedules mutation through `client.execute`, guards obsolete connection identities, and prevents sampling a disconnected but still-populated player/world. This tightly scoped client fix was source-reviewed; Minecraft compilation/runtime remain blocked. Automated validation was not retried after its explicit timeout warning.
+
+### Target API evidence and multiplayer limitations
+
+Official [Fabric 26.1.2 connection events](https://github.com/FabricMC/fabric/blob/26.1.2/fabric-networking-api-v1/src/client/java/net/fabricmc/fabric/api/client/networking/v1/ClientPlayConnectionEvents.java) distinguish INIT, JOIN and DISCONNECT. Vanilla packet/custom-stat APIs were corroborated against a [third-party 26.1.2 source mirror](https://github.com/Sekai0NI0itamio/ModCompiler/tree/DecompiledMinecraftSourceCode/26.1.2-fabric/net/minecraft): `ClientboundAwardStatsPacket.stats()`, `Stats.CUSTOM`, `FLY_ONE_CM`, `LEAVE_GAME`, `Stat.getType/getValue`, and `StatsCounter.getValue`. Client implementation bodies were available in that mirror's matching Forge subtree, not its Fabric subtree. This evidence is **not an official artifact compilation**. [Loader 0.19.5](https://github.com/FabricMC/fabric-loader/blob/0.19.5/gradle.properties) declares Mixin `0.17.4+mixin.0.8.7`, whose `JAVA_25` compatibility level supports the configured JVM/ASM prerequisites; actual injection still needs live verification.
+
+Statistics responses are sparse; `StatsCounter.getValue` alone returns zero even for absent values. Only observed packet IDs are treated as available. Totals belong to the connected server/world, not other players or a universal account. Never-used values may remain unavailable, sessions begin at first synchronization, and server suppression/delay is respected. Kill history records aggregate vanilla counter increases, without targets, exact action times, death causes, scoreboard/minigame semantics or hidden server state.
+
+### Reproducible manual Minecraft verification (not performed)
+
+1. On a network-enabled Java 25 machine, run `./gradlew releaseBuild`; inspect the actual release JAR with `jar tf` for mod metadata, client entrypoint, `minepanel.client.mixins.json`, `StatisticsSyncMixin.class` and all bundled web assets. Install that verified JAR in a clean Fabric 26.1.2 client with the configured Loader/API.
+2. Launch singleplayer; inspect logs for startup or mixin errors, open the printed loopback dashboard URL. Repeat multiplayer on a server without MinePanel; never add permissions/bypass restrictions to obtain data.
+3. Start with empty inventory, then populate every slot (0–35), cycle all nine selected hotbar slots, equip head/chest/legs/feet and offhand. Compare dashboard identity/name/count/max stack size against Minecraft tooltips. Move/split/consume stacks using **Minecraft**, not dashboard actions.
+4. Test stackable blocks, 16-stack items and one-stack tools; compare damaged/undamaged tools, non-damageable items, applied enchantments and stored enchanted-book enchantments. Rename an item and change held/offhand/armour between samples. Verify old snapshot values are replaced without inventory mutations.
+5. Open vanilla Statistics to compare synchronized counters. Walk/sprint/swim/fly/jump, then wait at least ten seconds; confirm cumulative counters and first-sync session differences. Unsent counters must read Unavailable. Change worlds/servers to verify baseline reset; respawn/dimension travel must not reset the connection session.
+6. Observe one death and respawn, travel dimensions and produce vanilla kill-counter changes. Verify one transition event per death, dimensions, aggregate kill-report wording, receipt timestamps, category search/filter and expandable details. Do not expect hidden kills or target identities.
+7. Disconnect: inventory/counters unavailable and prior events marked stale. Join another world: new session ID/history and baselines, without prior events. Browser reload/reconnect requires a full snapshot; socket loss clears displayed history. Repeat respawn and temporary loading screens to check missing player/level recovery.
+8. Trigger more than 100 supported events during a disposable session (for example dimension transitions), confirm oldest eviction and consistent newest-first display. Close client and relaunch: no history survives, no chat/database archive appears, and local services stop.
+
+Record actual game version, commands, log errors and observed results before marking any manual/runtime check passed.

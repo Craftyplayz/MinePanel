@@ -134,7 +134,7 @@ final class LocalWebSocketServer implements AutoCloseable {
                     if (version == null) {
                         version = "development";
                     }
-                    String json = "{\"schemaVersion\":1,\"type\":\"" + type + "\",\"modVersion\":\""
+                    String json = "{\"schemaVersion\":2,\"type\":\"" + type + "\",\"modVersion\":\""
                             + version + "\",\"state\":"
                             + (lastSnapshot == null ? snapshot.toJson() : snapshot.toDeltaJson(lastSnapshot)) + "}";
                     writeFrame(output, 0x1, json.getBytes(StandardCharsets.UTF_8));

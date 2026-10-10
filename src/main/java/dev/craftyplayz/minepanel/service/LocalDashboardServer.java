@@ -148,7 +148,7 @@ public final class LocalDashboardServer implements AutoCloseable {
         if (version == null) {
             version = "development";
         }
-        return "{\"schemaVersion\":1,\"service\":\"connected\",\"game\":"
+        return "{\"schemaVersion\":2,\"service\":\"connected\",\"game\":"
                 + (player.available() ? "\"connected\"" : "\"unavailable\"")
                 + ",\"modVersion\":\"" + version + "\","
                 + "\"message\":\"Player state is read-only and session scoped.\","

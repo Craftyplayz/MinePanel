@@ -79,8 +79,9 @@ tasks.register('releaseBuild') {
         }
         def jar = new java.util.jar.JarFile(artifact)
         try {
-            ['fabric.mod.json', 'web/index.html', 'web/app.js', 'web/styles.css',
-             'dev/craftyplayz/minepanel/MinePanelClient.class'].each { entry ->
+            ['fabric.mod.json', 'minepanel.client.mixins.json', 'web/index.html', 'web/app.js', 'web/styles.css',
+             'dev/craftyplayz/minepanel/MinePanelClient.class',
+             'dev/craftyplayz/minepanel/mixin/StatisticsSyncMixin.class'].each { entry ->
                 if (jar.getEntry(entry) == null) {
                     throw new GradleException("Release JAR is missing ${entry}")
                 }
