@@ -65,6 +65,11 @@ def frontendTest = tasks.register('frontendTest', Exec) {
     commandLine 'node', '--test', 'src/test/js/dashboard.test.js'
 }
 
+// Java tests are main()-based and run through serviceTest, so the JUnit task finds none.
+tasks.named('test') {
+    failOnNoDiscoveredTests = false
+}
+
 tasks.named('check') {
     dependsOn serviceTest, frontendSyntax, frontendTest
 }
