@@ -21,5 +21,8 @@
     "minecraft": "~26.1.2",
     "java": ">=25",
     "fabric-api": ">=0.154.0"
+  },
+  "suggests": {
+    "litematica": ">=${litematica_version}"
   }
 }

@@ -27,6 +27,7 @@ public final class LocalDashboardServerTest {
         ItemExtractorTest.main(args);
         StatisticsAndHistoryTest.main(args);
         dev.craftyplayz.minepanel.telemetry.WorldFeaturesTest.main(args);
+        dev.craftyplayz.minepanel.build.BuildProgressTest.main(args);
         testTelemetrySnapshots();
         testWebSocketPush();
         testShutdown();
@@ -77,9 +78,9 @@ public final class LocalDashboardServerTest {
                     .GET()
                     .build();
             HttpResponse<String> state = CLIENT.send(authorizedRequest, HttpResponse.BodyHandlers.ofString());
-            check(state.statusCode() == 200 && state.body().contains("\"schemaVersion\":3")
+            check(state.statusCode() == 200 && state.body().contains("\"schemaVersion\":4")
                             && state.body().contains("\"modVersion\"")
-                            && state.body().contains("\"player\":{\"schemaVersion\":3")
+                            && state.body().contains("\"player\":{\"schemaVersion\":4")
                             && state.body().contains("\"available\":false"),
                     "authorized client receives a versioned initial status");
 

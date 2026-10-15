@@ -243,7 +243,8 @@ public final class MinePanelClient implements ClientModInitializer {
             var details = new PlayerDetails(world, motion.collect(client, player, icons),
                     experience.observe(millis, player.experienceLevel, player.experienceProgress), portals.state(),
                     pickups.pickups(), advancements.collect(client.getConnection(), icons),
-                    worldData.villagers(client, level, icons), worldData.enderChest(client, level, icons));
+                    worldData.villagers(client, level, icons), worldData.enderChest(client, level, icons),
+                    dev.craftyplayz.minepanel.build.BuildProgress.MISSING);
             telemetry.updatePlayer(
                     millis,
                     (now - sessionStartedNanos) / 1_000_000_000L,

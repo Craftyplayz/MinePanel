@@ -20,17 +20,36 @@ loom {
     }
 }
 
+repositories {
+    // Litematica and MaLiLib (LGPL-3.0): compile-time only, never bundled.
+    exclusiveContent {
+        forRepository {
+            maven { url = 'https://masa.dy.fi/maven/sakura-ryoko' }
+        }
+        filter {
+            includeGroup 'fi.dy.masa.litematica'
+            includeGroup 'fi.dy.masa.malilib'
+        }
+    }
+}
+
 dependencies {
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
     implementation "net.fabricmc:fabric-loader:${project.loader_version}"
     implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+    compileOnly("fi.dy.masa.litematica:litematica-fabric-${project.minecraft_version}:${project.litematica_version}") {
+        transitive = false
+    }
+    compileOnly("fi.dy.masa.malilib:malilib-fabric-${project.minecraft_version}:${project.malilib_version}") {
+        transitive = false
+    }
 }
 
 processResources {
-    def modVersion = project.version.toString()
-    inputs.property 'version', modVersion
+    def expansions = [version: project.version.toString(), litematica_version: project.litematica_version]
+    inputs.properties expansions
     filesMatching('fabric.mod.json') {
-        expand version: modVersion
+        expand expansions
     }
 }
 
