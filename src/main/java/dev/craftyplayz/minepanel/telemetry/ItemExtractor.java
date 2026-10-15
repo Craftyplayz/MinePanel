@@ -1,6 +1,7 @@
 package dev.craftyplayz.minepanel.telemetry;
 
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
@@ -23,6 +24,21 @@ public final class ItemExtractor {
         int maxDamage();
         Iterable<EnchantmentView> appliedEnchantments();
         Iterable<EnchantmentView> storedEnchantments();
+
+        default String iconKey() {
+            return null;
+        }
+
+        default boolean foil() {
+            return false;
+        }
+
+        default List<List<TooltipSegmentView>> tooltip() {
+            return List.of();
+        }
+    }
+
+    public record TooltipSegmentView(String text, Integer rgb, String format) {
     }
 
     public record EnchantmentView(String id, String name, int level) {
@@ -47,7 +63,25 @@ public final class ItemExtractor {
         boolean damageable = item.isDamageable();
         return new ItemSnapshot(false, item.itemId(), readableText(item.name()), item.count(), item.maxCount(),
                 damageable ? item.damage() : null, damageable ? item.maxDamage() : null,
-                new ArrayList<>(enchantments.values()));
+                new ArrayList<>(enchantments.values()), item.iconKey(), item.foil(), tooltip(item.tooltip()));
+    }
+
+    /** Truncates oversized tooltips and drops empty runs instead of rejecting a whole inventory sample. */
+    static List<List<ItemSnapshot.TooltipSegment>> tooltip(List<List<TooltipSegmentView>> source) {
+        List<List<ItemSnapshot.TooltipSegment>> lines = new ArrayList<>();
+        for (List<TooltipSegmentView> line : source) {
+            if (lines.size() == ItemSnapshot.MAX_TOOLTIP_LINES) break;
+            List<ItemSnapshot.TooltipSegment> segments = new ArrayList<>();
+            for (TooltipSegmentView segment : line) {
+                if (segments.size() == ItemSnapshot.MAX_TOOLTIP_SEGMENTS) break;
+                String text = sanitize(segment.text());
+                if (text.isEmpty()) continue;
+                String color = segment.rgb() == null ? null : String.format("#%06x", segment.rgb() & 0xffffff);
+                segments.add(new ItemSnapshot.TooltipSegment(text, color, segment.format()));
+            }
+            lines.add(segments);
+        }
+        return lines;
     }
 
     private static void collectEnchantments(Iterable<EnchantmentView> source,
@@ -67,6 +101,11 @@ public final class ItemExtractor {
     }
 
     private static String readableText(String text) {
+        String result = sanitize(text);
+        return result.isEmpty() ? "Unnamed" : result;
+    }
+
+    private static String sanitize(String text) {
         StringBuilder result = new StringBuilder(ItemSnapshot.MAX_TEXT_LENGTH);
         for (int index = 0; index < text.length() && result.length() < ItemSnapshot.MAX_TEXT_LENGTH;) {
             int point = text.codePointAt(index);
@@ -81,6 +120,6 @@ public final class ItemExtractor {
             }
             result.appendCodePoint(point);
         }
-        return result.isEmpty() ? "Unnamed" : result.toString();
+        return result.toString();
     }
 }

@@ -12,19 +12,32 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.HexFormat;
+import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
 
 public final class LocalDashboardServer implements AutoCloseable {
+    public static final int DEFAULT_PORT = 57262;
     private static final Logger LOGGER = Logger.getLogger("MinePanel");
     private static final int MAX_RESPONSE_BYTES = 1024 * 1024;
+    private static final Pattern ICON_PATH = Pattern.compile("/icon/([a-z0-9-]{1,64})\\.png");
+    private static final Map<String, String[]> ASSETS = Map.of(
+            "/", new String[] {"web/index.html", "text/html; charset=utf-8"},
+            "/app.js", new String[] {"web/app.js", "text/javascript; charset=utf-8"},
+            "/protocol.js", new String[] {"web/protocol.js", "text/javascript; charset=utf-8"},
+            "/layout.js", new String[] {"web/layout.js", "text/javascript; charset=utf-8"},
+            "/styles.css", new String[] {"web/styles.css", "text/css; charset=utf-8"});
     private final HttpServer server;
     private final ExecutorService executor;
     private final String token;
     private final TelemetryStore telemetry;
+    private final IconSource icons;
+    private final LayoutStore layouts;
     private final LocalWebSocketServer webSocketServer;
 
     public LocalDashboardServer() throws IOException {
@@ -32,18 +45,26 @@ public final class LocalDashboardServer implements AutoCloseable {
     }
 
     public LocalDashboardServer(TelemetryStore telemetry) throws IOException {
+        this(telemetry, 0, null, null);
+    }
+
+    /** @param port the loopback HTTP port, or 0 for an ephemeral port */
+    public LocalDashboardServer(TelemetryStore telemetry, int port, IconSource icons, LayoutStore layouts)
+            throws IOException {
         this.telemetry = telemetry;
+        this.icons = icons;
+        this.layouts = layouts;
         byte[] tokenBytes = new byte[32];
         new SecureRandom().nextBytes(tokenBytes);
         token = HexFormat.of().formatHex(tokenBytes);
-        server = HttpServer.create(new InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0), 16);
+        server = HttpServer.create(new InetSocketAddress(InetAddress.getByName("127.0.0.1"), port), 16);
         try {
             webSocketServer = new LocalWebSocketServer(telemetry, token, server.getAddress().getPort());
         } catch (IOException failure) {
             server.stop(0);
             throw failure;
         }
-        executor = new ThreadPoolExecutor(2, 2, 0L, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(32), runnable -> {
+        executor = new ThreadPoolExecutor(8, 8, 0L, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(64), runnable -> {
             Thread thread = new Thread(runnable, "MinePanel-http");
             thread.setDaemon(true);
             return thread;
@@ -59,6 +80,10 @@ public final class LocalDashboardServer implements AutoCloseable {
 
     public String getUrl() {
         return "http://127.0.0.1:" + server.getAddress().getPort() + "/";
+    }
+
+    public int getPort() {
+        return server.getAddress().getPort();
     }
 
     int getWebSocketPort() {
@@ -78,17 +103,30 @@ public final class LocalDashboardServer implements AutoCloseable {
                 respond(exchange, 403, "text/plain; charset=utf-8", "Forbidden");
                 return;
             }
-            if (!"GET".equals(exchange.getRequestMethod())) {
-                exchange.getResponseHeaders().set("Allow", "GET");
+            String path = exchange.getRequestURI().getPath();
+            String method = exchange.getRequestMethod();
+            if ("/api/layout".equals(path) && "PUT".equals(method)) {
+                saveLayout(exchange);
+                return;
+            }
+            if (!"GET".equals(method)) {
+                exchange.getResponseHeaders().set("Allow", "/api/layout".equals(path) ? "GET, PUT" : "GET");
                 respond(exchange, 405, "text/plain; charset=utf-8", "Method not allowed");
                 return;
             }
 
-            String path = exchange.getRequestURI().getPath();
+            String[] asset = ASSETS.get(path);
+            if (asset != null) {
+                serveAsset(exchange, asset[0], asset[1]);
+                return;
+            }
+            var icon = ICON_PATH.matcher(path);
+            if (icon.matches()) {
+                serveIcon(exchange, icon.group(1));
+                return;
+            }
             switch (path) {
-                case "/" -> serveAsset(exchange, "web/index.html", "text/html; charset=utf-8");
-                case "/app.js" -> serveAsset(exchange, "web/app.js", "text/javascript; charset=utf-8");
-                case "/styles.css" -> serveAsset(exchange, "web/styles.css", "text/css; charset=utf-8");
+                case "/glint.png" -> serveGlint(exchange);
                 case "/api/session" -> {
                     if (!isSameOriginBrowserRequest(exchange)) {
                         respond(exchange, 403, "text/plain; charset=utf-8", "Forbidden");
@@ -108,11 +146,81 @@ public final class LocalDashboardServer implements AutoCloseable {
                         respond(exchange, 200, "application/json; charset=utf-8", statusJson());
                     }
                 }
+                case "/api/layout" -> {
+                    if (!cookieAuthorized(exchange)) {
+                        respond(exchange, 401, "application/json; charset=utf-8", "{\"error\":\"unauthorized\"}");
+                    } else {
+                        String stored = layouts == null ? null : layouts.load();
+                        exchange.getResponseHeaders().set("Cache-Control", "no-store");
+                        respond(exchange, 200, "application/json; charset=utf-8",
+                                "{\"layout\":" + (stored == null ? "null" : stored) + "}");
+                    }
+                }
                 default -> respond(exchange, 404, "text/plain; charset=utf-8", "Not found");
             }
         } catch (IllegalArgumentException exception) {
             LOGGER.fine("Rejected malformed local dashboard request.");
         }
+    }
+
+    private void saveLayout(HttpExchange exchange) throws IOException {
+        String contentType = exchange.getRequestHeaders().getFirst("Content-Type");
+        if (!cookieAuthorized(exchange) || exchange.getRequestHeaders().getFirst("Origin") == null) {
+            respond(exchange, 403, "application/json; charset=utf-8", "{\"error\":\"forbidden\"}");
+            return;
+        }
+        if (contentType == null || !contentType.toLowerCase().startsWith("application/json")) {
+            respond(exchange, 415, "application/json; charset=utf-8", "{\"error\":\"json required\"}");
+            return;
+        }
+        if (layouts == null) {
+            respond(exchange, 503, "application/json; charset=utf-8", "{\"error\":\"layout storage unavailable\"}");
+            return;
+        }
+        byte[] body = exchange.getRequestBody().readNBytes(LayoutStore.MAX_BYTES + 1);
+        if (body.length > LayoutStore.MAX_BYTES) {
+            respond(exchange, 413, "application/json; charset=utf-8", "{\"error\":\"layout too large\"}");
+            return;
+        }
+        try {
+            layouts.save(new String(body, StandardCharsets.UTF_8));
+        } catch (IllegalArgumentException invalid) {
+            respond(exchange, 400, "application/json; charset=utf-8", "{\"error\":\"invalid layout\"}");
+            return;
+        } catch (IOException failure) {
+            LOGGER.log(Level.WARNING, "MinePanel could not save the dashboard layout.", failure);
+            respond(exchange, 500, "application/json; charset=utf-8", "{\"error\":\"layout not saved\"}");
+            return;
+        }
+        exchange.getResponseHeaders().set("Cache-Control", "no-store");
+        respond(exchange, 200, "application/json; charset=utf-8", "{\"saved\":true}");
+    }
+
+    private void serveIcon(HttpExchange exchange, String key) throws IOException {
+        byte[] png;
+        try {
+            png = icons == null ? null : icons.icon(key);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            png = null;
+        }
+        if (png == null) {
+            respond(exchange, 404, "text/plain; charset=utf-8", "Icon unavailable");
+            return;
+        }
+        // Keys change whenever the item or resource packs change, so a cached icon never goes stale.
+        exchange.getResponseHeaders().set("Cache-Control", "private, max-age=31536000, immutable");
+        send(exchange, 200, "image/png", png);
+    }
+
+    private void serveGlint(HttpExchange exchange) throws IOException {
+        byte[] png = icons == null ? null : icons.glint();
+        if (png == null) {
+            respond(exchange, 404, "text/plain; charset=utf-8", "Glint unavailable");
+            return;
+        }
+        exchange.getResponseHeaders().set("Cache-Control", "private, max-age=3600");
+        send(exchange, 200, "image/png", png);
     }
 
     private boolean validHost(HttpExchange exchange) {
@@ -142,6 +250,21 @@ public final class LocalDashboardServer implements AutoCloseable {
                 authorization.substring(7).getBytes(StandardCharsets.US_ASCII));
     }
 
+    private boolean cookieAuthorized(HttpExchange exchange) {
+        for (String header : exchange.getRequestHeaders().getOrDefault("Cookie", java.util.List.of())) {
+            for (String pair : header.split(";")) {
+                String trimmed = pair.trim();
+                int separator = trimmed.indexOf('=');
+                if (separator > 0 && trimmed.substring(0, separator).equals("MinePanelSession")
+                        && MessageDigest.isEqual(token.getBytes(StandardCharsets.US_ASCII),
+                        trimmed.substring(separator + 1).getBytes(StandardCharsets.US_ASCII))) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private String statusJson() {
         var player = telemetry.player();
         String version = LocalDashboardServer.class.getPackage().getImplementationVersion();
@@ -166,6 +289,7 @@ public final class LocalDashboardServer implements AutoCloseable {
                 respond(exchange, 500, "text/plain; charset=utf-8", "Dashboard asset too large");
                 return;
             }
+            exchange.getResponseHeaders().set("Cache-Control", "no-cache");
             send(exchange, 200, contentType, body);
         }
     }
@@ -180,7 +304,7 @@ public final class LocalDashboardServer implements AutoCloseable {
         exchange.getResponseHeaders().set("Referrer-Policy", "no-referrer");
         exchange.getResponseHeaders().set("Content-Security-Policy",
                 "default-src 'self'; connect-src 'self' ws://127.0.0.1:" + getWebSocketPort()
-                        + "; style-src 'self'; script-src 'self'; "
+                        + "; img-src 'self'; style-src 'self'; script-src 'self'; "
                         + "frame-src 'none'; frame-ancestors 'none'; object-src 'none'; form-action 'none'; base-uri 'none'");
         exchange.sendResponseHeaders(status, body.length);
         try (OutputStream output = exchange.getResponseBody()) {

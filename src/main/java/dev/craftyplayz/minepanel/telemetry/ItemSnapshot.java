@@ -1,27 +1,52 @@
 package dev.craftyplayz.minepanel.telemetry;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
 public record ItemSnapshot(boolean empty, String itemId, String name, int count, int maxCount,
-                           Integer damage, Integer maxDamage, List<Enchantment> enchantments) {
+                           Integer damage, Integer maxDamage, List<Enchantment> enchantments,
+                           String icon, boolean foil, List<List<TooltipSegment>> tooltip) {
     public static final int MAX_TEXT_LENGTH = 256;
     public static final int MAX_COUNT = 1_000_000;
     public static final int MAX_ENCHANTMENTS = 64;
     public static final int MAX_ENCHANTMENT_LEVEL = 255;
+    public static final int MAX_TOOLTIP_LINES = 64;
+    public static final int MAX_TOOLTIP_SEGMENTS = 32;
     private static final Pattern IDENTIFIER = Pattern.compile("[a-z0-9_.-]+:[a-z0-9/._-]+");
+    private static final Pattern ICON = Pattern.compile("[a-z0-9-]{1,64}");
+    private static final Pattern COLOR = Pattern.compile("#[0-9a-f]{6}");
+    private static final Pattern FORMAT = Pattern.compile("b?i?s?u?o?");
     private static final ItemSnapshot EMPTY = new ItemSnapshot(true, null, null, 0, 0, null, null, List.of());
+
+    public ItemSnapshot(boolean empty, String itemId, String name, int count, int maxCount,
+                        Integer damage, Integer maxDamage, List<Enchantment> enchantments) {
+        this(empty, itemId, name, count, maxCount, damage, maxDamage, enchantments, null, false, List.of());
+    }
 
     public ItemSnapshot {
         Objects.requireNonNull(enchantments, "enchantments");
+        Objects.requireNonNull(tooltip, "tooltip");
         if (enchantments.size() > MAX_ENCHANTMENTS) {
             throw new IllegalArgumentException("too many enchantments");
         }
         enchantments = List.copyOf(enchantments);
+        if (tooltip.size() > MAX_TOOLTIP_LINES) {
+            throw new IllegalArgumentException("too many tooltip lines");
+        }
+        List<List<TooltipSegment>> copiedTooltip = new ArrayList<>(tooltip.size());
+        for (List<TooltipSegment> line : tooltip) {
+            if (line.size() > MAX_TOOLTIP_SEGMENTS) {
+                throw new IllegalArgumentException("too many tooltip segments");
+            }
+            copiedTooltip.add(List.copyOf(line));
+        }
+        tooltip = List.copyOf(copiedTooltip);
         if (empty) {
             if (itemId != null || name != null || count != 0 || maxCount != 0
-                    || damage != null || maxDamage != null || !enchantments.isEmpty()) {
+                    || damage != null || maxDamage != null || !enchantments.isEmpty()
+                    || icon != null || foil || !tooltip.isEmpty()) {
                 throw new IllegalArgumentException("empty item metadata must be explicitly absent");
             }
         } else {
@@ -33,6 +58,9 @@ public record ItemSnapshot(boolean empty, String itemId, String name, int count,
             if ((damage == null) != (maxDamage == null)
                     || (damage != null && (damage < 0 || maxDamage <= 0 || damage > maxDamage))) {
                 throw new IllegalArgumentException("durability must be absent or within its maximum");
+            }
+            if (icon != null && !ICON.matcher(icon).matches()) {
+                throw new IllegalArgumentException("icon key must be a short lowercase token");
             }
         }
     }
@@ -56,6 +84,18 @@ public record ItemSnapshot(boolean empty, String itemId, String name, int count,
         for (int index = 0; index < enchantments.size(); index++) {
             if (index > 0) json.append(',');
             json.append(enchantments.get(index).toJson());
+        }
+        json.append("],\"icon\":").append(PlayerSnapshot.string(icon))
+                .append(",\"foil\":").append(foil).append(",\"tooltip\":[");
+        for (int line = 0; line < tooltip.size(); line++) {
+            if (line > 0) json.append(',');
+            json.append('[');
+            List<TooltipSegment> segments = tooltip.get(line);
+            for (int index = 0; index < segments.size(); index++) {
+                if (index > 0) json.append(',');
+                json.append(segments.get(index).toJson());
+            }
+            json.append(']');
         }
         return json.append("]}").toString();
     }
@@ -96,6 +136,22 @@ public record ItemSnapshot(boolean empty, String itemId, String name, int count,
         public String toJson() {
             return "{\"id\":" + PlayerSnapshot.string(id) + ",\"name\":" + PlayerSnapshot.string(name)
                     + ",\"level\":" + level + "}";
+        }
+    }
+
+    /** One styled run of tooltip text; format letters are bold, italic, strikethrough, underlined, obfuscated. */
+    public record TooltipSegment(String text, String color, String format) {
+        public TooltipSegment {
+            validateText(text);
+            Objects.requireNonNull(format, "format");
+            if (color != null && !COLOR.matcher(color).matches() || !FORMAT.matcher(format).matches()) {
+                throw new IllegalArgumentException("tooltip style must be a hex color and known format letters");
+            }
+        }
+
+        public String toJson() {
+            return "{\"text\":" + PlayerSnapshot.string(text) + ",\"color\":" + PlayerSnapshot.string(color)
+                    + ",\"format\":" + PlayerSnapshot.string(format) + "}";
         }
     }
 }

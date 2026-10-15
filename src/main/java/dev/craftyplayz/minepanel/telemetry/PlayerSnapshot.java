@@ -125,7 +125,9 @@ public record PlayerSnapshot(
         if (!Objects.equals(statistics, previous.statistics)) {
             appendField(json, "statistics", statistics == null ? "null" : statistics.toJson());
         }
-        if (!Objects.equals(history, previous.history)) appendField(json, "history", history.toJson());
+        if (!Objects.equals(history, previous.history)) {
+            appendField(json, "history", history.toDeltaJson(previous.history));
+        }
         return json.append('}').toString();
     }
 

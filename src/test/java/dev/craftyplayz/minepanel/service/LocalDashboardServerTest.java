@@ -29,6 +29,8 @@ public final class LocalDashboardServerTest {
         testTelemetrySnapshots();
         testWebSocketPush();
         testShutdown();
+        testPngEncoder();
+        testLayoutAndIcons();
         try (LocalDashboardServer server = new LocalDashboardServer()) {
             server.start();
             URI base = URI.create(server.getUrl());
@@ -360,6 +362,99 @@ public final class LocalDashboardServerTest {
             value.append((char) current);
             previous = current;
         }
+    }
+
+    private static void testPngEncoder() {
+        byte[] png = PngEncoder.encode(2, 1, new byte[] {(byte) 255, 0, 0, (byte) 255, 0, 0, 0, 0});
+        check(png[0] == (byte) 0x89 && new String(png, 1, 3, StandardCharsets.US_ASCII).equals("PNG")
+                        && new String(png, 12, 4, StandardCharsets.US_ASCII).equals("IHDR")
+                        && png[24] == 8 && png[25] == 6,
+                "PNG has a signature and an 8-bit RGBA header");
+        try {
+            PngEncoder.encode(2, 2, new byte[4]);
+            throw new AssertionError("mismatched pixel data must be rejected");
+        } catch (IllegalArgumentException expected) {
+        }
+    }
+
+    private static void testLayoutAndIcons() throws Exception {
+        java.nio.file.Path directory = java.nio.file.Files.createTempDirectory("minepanel-layout");
+        java.nio.file.Path file = directory.resolve("minepanel").resolve("layout.json");
+        byte[] icon = PngEncoder.encode(1, 1, new byte[4]);
+        IconSource icons = new IconSource() {
+            public byte[] icon(String key) {
+                return key.equals("e0-abc") ? icon : null;
+            }
+
+            public byte[] glint() {
+                return icon;
+            }
+        };
+        try (LocalDashboardServer server = new LocalDashboardServer(new TelemetryStore(), 0, icons,
+                new LayoutStore(file))) {
+            server.start();
+            URI base = URI.create(server.getUrl());
+            String origin = base.toString().substring(0, base.toString().length() - 1);
+            for (String asset : new String[] {"protocol.js", "layout.js", "styles.css"}) {
+                check(get(base.resolve(asset)).statusCode() == 200, asset + " is served");
+            }
+            HttpResponse<byte[]> iconResponse = CLIENT.send(HttpRequest.newBuilder(base.resolve("icon/e0-abc.png")).GET().build(),
+                    HttpResponse.BodyHandlers.ofByteArray());
+            check(iconResponse.statusCode() == 200
+                            && iconResponse.headers().firstValue("content-type").orElse("").equals("image/png")
+                            && iconResponse.headers().firstValue("cache-control").orElse("").contains("immutable")
+                            && java.util.Arrays.equals(iconResponse.body(), icon),
+                    "rendered icons are served as cacheable PNGs");
+            check(get(base.resolve("icon/e0-missing.png")).statusCode() == 404, "unknown icons are not found");
+            check(get(base.resolve("icon/..%2Fsecret.png")).statusCode() == 404, "icon keys cannot escape");
+            check(get(base.resolve("glint.png")).statusCode() == 200, "glint texture is served");
+
+            check(get(base.resolve("api/layout")).statusCode() == 401, "layout requires the session cookie");
+            HttpResponse<String> session = CLIENT.send(HttpRequest.newBuilder(base.resolve("api/session"))
+                    .header("Sec-Fetch-Site", "same-origin").GET().build(), HttpResponse.BodyHandlers.ofString());
+            String cookie = session.headers().firstValue("set-cookie").orElseThrow().split(";", 2)[0];
+            HttpResponse<String> empty = CLIENT.send(HttpRequest.newBuilder(base.resolve("api/layout"))
+                    .header("Cookie", cookie).GET().build(), HttpResponse.BodyHandlers.ofString());
+            check(empty.statusCode() == 200 && empty.body().equals("{\"layout\":null}"), "no layout saved yet");
+
+            String layout = "{\"version\":1,\"extra\":true,\"tiles\":[{\"id\":\"player\",\"enabled\":true,"
+                    + "\"x\":2,\"y\":0,\"w\":4,\"h\":5,\"note\":\"dropped\"}]}";
+            check(put(base, cookie, origin, "application/json", layout).statusCode() == 200, "layout saved");
+            String saved = java.nio.file.Files.readString(file);
+            check(saved.equals("{\"version\":1,\"tiles\":[{\"id\":\"player\",\"enabled\":true,\"x\":2,\"y\":0,\"w\":4,\"h\":5}]}"),
+                    "layout file keeps only validated fields");
+            HttpResponse<String> loaded = CLIENT.send(HttpRequest.newBuilder(base.resolve("api/layout"))
+                    .header("Cookie", cookie).GET().build(), HttpResponse.BodyHandlers.ofString());
+            check(loaded.body().equals("{\"layout\":" + saved + "}"), "saved layout is returned");
+
+            check(put(base, "MinePanelSession=" + "0".repeat(64), origin, "application/json", layout).statusCode() == 403,
+                    "layout writes require the session cookie");
+            check(put(base, cookie, null, "application/json", layout).statusCode() == 403,
+                    "layout writes require a browser origin");
+            check(put(base, cookie, "http://evil.example", "application/json", layout).statusCode() == 403,
+                    "layout writes reject foreign origins");
+            check(put(base, cookie, origin, "text/plain", layout).statusCode() == 415, "layout writes must be JSON");
+            for (String invalid : new String[] {"nope", "{}", "{\"version\":2,\"tiles\":[]}",
+                    "{\"version\":1,\"tiles\":[{\"id\":\"chat\",\"enabled\":true,\"x\":0,\"y\":0,\"w\":1,\"h\":1}]}",
+                    "{\"version\":1,\"tiles\":[{\"id\":\"player\",\"enabled\":true,\"x\":10,\"y\":0,\"w\":4,\"h\":1}]}",
+                    "{\"version\":1,\"tiles\":[{\"id\":\"player\",\"enabled\":\"yes\",\"x\":0,\"y\":0,\"w\":4,\"h\":1}]}",
+                    "{\"version\":1,\"tiles\":[{\"id\":\"player\",\"enabled\":true,\"x\":0.5,\"y\":0,\"w\":4,\"h\":1}]}"}) {
+                check(put(base, cookie, origin, "application/json", invalid).statusCode() == 400,
+                        "invalid layout rejected: " + invalid);
+            }
+            check(put(base, cookie, origin, "application/json", "x".repeat(LayoutStore.MAX_BYTES + 1)).statusCode() == 413,
+                    "oversized layout rejected");
+            check(java.nio.file.Files.readString(file).equals(saved), "rejected writes leave the saved layout intact");
+        }
+    }
+
+    private static HttpResponse<String> put(URI base, String cookie, String origin, String contentType, String body)
+            throws Exception {
+        HttpRequest.Builder request = HttpRequest.newBuilder(base.resolve("api/layout"))
+                .header("Cookie", cookie).header("Content-Type", contentType)
+                .PUT(HttpRequest.BodyPublishers.ofString(body));
+        if (origin != null) request.header("Origin", origin);
+        return CLIENT.send(request.build(), HttpResponse.BodyHandlers.ofString());
     }
 
     private static HttpResponse<String> get(URI uri) throws Exception {

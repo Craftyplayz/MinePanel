@@ -18,8 +18,24 @@ public final class InventorySnapshotTest {
     private static void testItems() {
         ItemSnapshot empty = ItemSnapshot.emptyItem();
         check(empty.toJson().equals("{\"empty\":true,\"itemId\":null,\"name\":null,\"count\":0,\"maxCount\":0,"
-                + "\"damage\":null,\"maxDamage\":null,\"remainingDurability\":null,\"enchantments\":[]}"),
+                + "\"damage\":null,\"maxDamage\":null,\"remainingDurability\":null,\"enchantments\":[],"
+                + "\"icon\":null,\"foil\":false,\"tooltip\":[]}"),
                 "empty items have explicit null/zero metadata");
+        var name = new ItemSnapshot.TooltipSegment("Sharp \"Sword\"", "#55ffff", "bi");
+        var lore = new ItemSnapshot.TooltipSegment("Lore", null, "");
+        ItemSnapshot styled = new ItemSnapshot(false, "minecraft:diamond_sword", "Sword", 1, 1, null, null,
+                List.of(), "e0-1a2b", true, List.of(List.of(name), List.of(), List.of(lore)));
+        check(styled.toJson().endsWith("\"icon\":\"e0-1a2b\",\"foil\":true,\"tooltip\":[[{\"text\":\"Sharp \\\"Sword\\\"\","
+                        + "\"color\":\"#55ffff\",\"format\":\"bi\"}],[],[{\"text\":\"Lore\",\"color\":null,\"format\":\"\"}]]}"),
+                "icon key, glint and styled tooltip lines serialized");
+        invalid(() -> new ItemSnapshot(true, null, null, 0, 0, null, null, List.of(), "e0-1", false, List.of()));
+        invalid(() -> new ItemSnapshot(false, "minecraft:stone", "Stone", 1, 64, null, null, List.of(),
+                "../etc", false, List.of()));
+        invalid(() -> new ItemSnapshot.TooltipSegment("x", "red", ""));
+        invalid(() -> new ItemSnapshot.TooltipSegment("x", null, "z"));
+        invalid(() -> new ItemSnapshot.TooltipSegment("", null, ""));
+        invalid(() -> new ItemSnapshot(false, "minecraft:stone", "Stone", 1, 64, null, null, List.of(), null, false,
+                java.util.Collections.nCopies(65, List.of())));
         List<ItemSnapshot.Enchantment> enchantments = new ArrayList<>();
         enchantments.add(new ItemSnapshot.Enchantment("minecraft:unbreaking", "Unbreaking \"III\"\n", 3));
         ItemSnapshot tool = new ItemSnapshot(false, "minecraft:diamond_pickaxe", "Tool \"\\\n\t\u0001😀",

@@ -2,6 +2,8 @@ package dev.craftyplayz.minepanel;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.network.protocol.game.ClientboundAwardStatsPacket;
 import net.minecraft.network.protocol.game.ServerboundClientCommandPacket;
 import net.minecraft.stats.Stats;
@@ -11,11 +13,15 @@ import java.util.HashSet;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 
 /** Connection-scoped synchronization evidence; accessed only on the client thread. */
 public final class MinecraftStatisticsCollector {
     private static ClientPacketListener connection;
     private static final Set<String> received = new HashSet<>();
+    private static final Map<String, Integer> kills = new HashMap<>();
+    private static boolean killBaselineReceived;
+    private static Consumer<Map<String, Integer>> killListener;
     private static final Map<String, Identifier> TRACKED = Map.ofEntries(
             Map.entry("minecraft:walk_one_cm", Stats.WALK_ONE_CM),
             Map.entry("minecraft:sprint_one_cm", Stats.SPRINT_ONE_CM),
@@ -34,14 +40,32 @@ public final class MinecraftStatisticsCollector {
     static void reset(ClientPacketListener listener) {
         connection = listener;
         received.clear();
+        kills.clear();
+        killBaselineReceived = false;
     }
 
     public static void received(ClientPacketListener listener, ClientboundAwardStatsPacket packet) {
         if (listener != connection) return;
-        for (var stat : packet.stats().keySet()) {
-            String id = stat.getValue().toString();
-            if (stat.getType() == Stats.CUSTOM && TRACKED.containsKey(id)) received.add(id);
+        Map<String, Integer> killDeltas = new HashMap<>();
+        for (var entry : packet.stats().object2IntEntrySet()) {
+            var stat = entry.getKey();
+            if (stat.getType() == Stats.CUSTOM) {
+                String id = stat.getValue().toString();
+                if (TRACKED.containsKey(id)) received.add(id);
+            } else if (stat.getType() == Stats.ENTITY_KILLED && stat.getValue() instanceof EntityType<?> type) {
+                String id = BuiltInRegistries.ENTITY_TYPE.getKey(type).toString();
+                Integer previous = kills.put(id, entry.getIntValue());
+                // The first packet after joining carries every stat; it is the baseline, not new kills.
+                int before = previous != null ? previous : killBaselineReceived ? 0 : entry.getIntValue();
+                if (entry.getIntValue() > before) killDeltas.put(id, entry.getIntValue() - before);
+            }
         }
+        killBaselineReceived = true;
+        if (!killDeltas.isEmpty() && killListener != null) killListener.accept(killDeltas);
+    }
+
+    static void onKills(Consumer<Map<String, Integer>> listener) {
+        killListener = listener;
     }
 
     static void request(ClientPacketListener listener) {

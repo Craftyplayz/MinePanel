@@ -58,7 +58,9 @@ def serviceTest = tasks.register('serviceTest', JavaExec) {
 }
 
 def frontendSyntax = tasks.register('frontendSyntax', Exec) {
-    commandLine 'node', '--check', 'src/client/resources/web/app.js'
+    // node --check accepts one file, so check each dashboard script in turn.
+    commandLine 'node', '-e', "for (const file of ['protocol.js', 'layout.js', 'app.js']) " +
+            "require('child_process').execFileSync(process.execPath, ['--check', 'src/client/resources/web/' + file], { stdio: 'inherit' })"
 }
 
 def frontendTest = tasks.register('frontendTest', Exec) {
@@ -88,6 +90,7 @@ tasks.register('releaseBuild') {
         def jar = new java.util.jar.JarFile(artifact)
         try {
             ['fabric.mod.json', 'minepanel.client.mixins.json', 'web/index.html', 'web/app.js', 'web/styles.css',
+             'web/protocol.js', 'web/layout.js',
              'dev/craftyplayz/minepanel/MinePanelClient.class',
              'dev/craftyplayz/minepanel/mixin/StatisticsSyncMixin.class'].each { entry ->
                 if (jar.getEntry(entry) == null) {

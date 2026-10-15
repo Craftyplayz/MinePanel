@@ -47,11 +47,15 @@ Download the compiled `MinePanel-v<version>.jar` under **Assets** on the [GitHub
 
 ## Run
 
-Once a real release JAR has been built, install it in a Fabric 26.1.2 instance's `mods` directory and start the client. MinePanel binds only to `127.0.0.1` on ephemeral ports and prints the dashboard URL in the game log. Open it on the same PC. The dashboard displays player telemetry, 27 main inventory slots, nine hotbar slots, selected/held items, armour, and offhand. Items use readable names and accurate identifiers, not sprites; counts, stack limits, enchantments, and applicable durability are included. No dashboard action can change inventory.
+Once a real release JAR has been built, install it in a Fabric 26.1.2 instance's `mods` directory and start the client. MinePanel serves the dashboard at **http://127.0.0.1:57262/** (loopback only; if that port is busy it falls back to a random port) and posts a clickable link in chat whenever you join a world. Open it on the same PC.
 
-Statistics are grouped into Movement, Combat and General counters, with server/world cumulative totals and changes since each counter's first synchronized observation. Absent vanilla packet values display **Unavailable**, never fabricated zero. Requests use vanilla's statistics action once on join and at most every ten seconds; restrictive servers may not respond. Session counters exclude activity before the first synchronized baseline.
+The inventory tile shows the hotbar, 27 main slots, armour and offhand with icons rendered by the game itself, so resource packs, block models and tinted items look exactly as they do in game. Enchanted items get an animated glint built from the active pack's glint texture. Hovering an item shows its full in-game tooltip (with advanced F3+H details: ID, durability and component count). No dashboard action can change inventory.
 
-The newest-first event list supports category filtering, search and expandable details. Up to 100 events are held only in memory: joins/disconnects, observed alive-to-dead transitions, dimension changes, and aggregate increases in synchronized vanilla kill counters. Kill report timestamps are receipt/sample times, not exact kill times; targets, causes, scoreboard/minigame and hidden server events are unavailable. The previous session stays marked stale after disconnect and is replaced on the next play join. Containers/pinning, configurable layouts, JourneyMap and Litematica remain outstanding.
+Statistics are grouped into Movement, Combat and General counters, with server/world cumulative totals and changes since each counter's first synchronized observation. Absent vanilla packet values display **Unavailable**, never fabricated zero. Requests use vanilla's statistics action on join and every three seconds; restrictive servers may not respond.
+
+The activity log records blocks mined and placed, containers opened and the net inventory change while they were open, items dropped, damage taken (with its source), healing back to full health, deaths with the death message, respawns, mobs killed (by exact entity type, including ranged/indirect kills reconciled from kill statistics), advancements, dimension changes and session joins/disconnects. Repeated actions within five seconds are merged (e.g. "Mined 12 × Stone"). The dashboard keeps the newest 500 events; every event is also appended to `minepanel/history/<session start>.jsonl` in the game directory as a complete log.
+
+Tiles can be rearranged, resized on a 12-column grid, and shown or hidden with **Customize**. The layout is saved to `config/minepanel/layout.json` and can be exported or imported as JSON. Each tile compacts itself as it shrinks, hiding lower-priority details first (for example the inventory falls back to the hotbar only). JourneyMap and Litematica tiles are placeholders and hidden by default.
 
 Pure Java service/protocol tests and browser-state tests are distinct from Minecraft verification. Full game compilation and in-game compatibility remain unverified in this environment; see [testing](docs/TESTING.md) for exact commands and build blockers.
 
@@ -59,4 +63,4 @@ JourneyMap plus its separate Webmap addon and Litematica/Malilib are optional, b
 
 ## Privacy
 
-The services bind to loopback only. MinePanel has no cloud service, analytics telemetry, external API calls, chat archive, or persistent gameplay-history store. Current game data is sent only to the local browser while the client is running.
+The services bind to loopback only. MinePanel has no cloud service, analytics telemetry, external API calls or chat archive. Live game data is sent only to the local browser while the client is running. The activity log is written to `minepanel/history/` in the game directory on this PC; delete those files to remove it.

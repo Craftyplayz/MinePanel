@@ -2,7 +2,13 @@
   "required": true,
   "package": "dev.craftyplayz.minepanel.mixin",
   "compatibilityLevel": "JAVA_25",
-  "client": ["StatisticsSyncMixin"],
+  "client": [
+    "AdvancementEventsMixin",
+    "BlockPlaceMixin",
+    "CombatEventsMixin",
+    "ItemDropMixin",
+    "StatisticsSyncMixin"
+  ],
   "injectors": {
     "defaultRequire": 1
   }

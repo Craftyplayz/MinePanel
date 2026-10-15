@@ -5,15 +5,18 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
-const source = fs.readFileSync(path.join(__dirname, "../../client/resources/web/app.js"), "utf8");
+const web = path.join(__dirname, "../../client/resources/web");
+const sources = ["protocol.js", "layout.js", "app.js"].map(name => fs.readFileSync(path.join(web, name), "utf8"));
 
 function empty() {
   return { empty: true, itemId: null, name: null, count: 0, maxCount: 0,
-    damage: null, maxDamage: null, remainingDurability: null, enchantments: [] };
+    damage: null, maxDamage: null, remainingDurability: null, enchantments: [],
+    icon: null, foil: false, tooltip: [] };
 }
 
 function item(overrides = {}) {
-  return { ...empty(), empty: false, itemId: "minecraft:stone", name: "Stone", count: 32, maxCount: 64, ...overrides };
+  return { ...empty(), empty: false, itemId: "minecraft:stone", name: "Stone", count: 32, maxCount: 64,
+    icon: "e0-1a2b", tooltip: [[{ text: "Stone", color: null, format: "" }]], ...overrides };
 }
 
 function inventory() {
@@ -62,20 +65,48 @@ function unavailable(overrides = {}) {
     absorption: null, inventory: null, statistics: null, history: history({ active: false }), ...overrides });
 }
 
-function harness(fetchImpl = async () => ({ ok: true, json: async () => ({ websocketPort: 8765 }) })) {
+function defaultFetch(storedLayout = null, requests = []) {
+  return async (url, options = {}) => {
+    requests.push({ url, ...options });
+    if (url === "/api/layout") {
+      return options.method === "PUT" ? { ok: true, json: async () => ({ saved: true }) }
+        : { ok: true, json: async () => ({ layout: storedLayout }) };
+    }
+    return { ok: true, json: async () => ({ websocketPort: 8765 }) };
+  };
+}
+
+function harness(fetchImpl = defaultFetch()) {
   class Element {
     constructor(tagName = "div") {
       this.tagName = tagName; this.children = []; this.dataset = {}; this.className = "";
-      this.writes = 0; this.text = ""; this.value = ""; this.open = false;
-      this.listeners = {}; this.replacements = 0;
+      this.writes = 0; this.text = ""; this.value = ""; this.open = false; this.hidden = false;
+      this.listeners = {}; this.replacements = 0; this.attributes = {}; this.src = "";
+      const props = {};
+      this.style = { setProperty: (key, value) => { props[key] = value; }, getPropertyValue: key => props[key] ?? "" };
+      const owner = this;
+      this.classList = {
+        add(name) { if (!owner.classList.contains(name)) owner.className = `${owner.className} ${name}`.trim(); },
+        remove(name) { owner.className = owner.className.split(" ").filter(part => part !== name).join(" "); },
+        contains(name) { return owner.className.split(" ").includes(name); }
+      };
+      this.rect = { left: 0, top: 0, width: 100, height: 40 };
     }
     get textContent() { return this.text + this.children.map(child => child.textContent).join(""); }
     set textContent(value) { this.text = value; this.children = []; this.writes++; }
     set innerHTML(value) { throw new Error(`Unsafe HTML: ${value}`); }
     appendChild(child) { this.children.push(child); }
     replaceChildren(...children) { this.children = children; this.text = ""; this.replacements++; }
+    setAttribute(key, value) { this.attributes[key] = String(value); }
+    getBoundingClientRect() { return this.rect; }
+    setPointerCapture() {}
+    click() { this.clicks = (this.clicks ?? 0) + 1; }
     addEventListener(type, listener) { (this.listeners[type] ||= []).push(listener); }
-    emit(type) { for (const listener of this.listeners[type] || []) listener({ target: this }); }
+    emit(type, event = {}) {
+      for (const listener of this.listeners[type] || []) {
+        listener({ target: this, currentTarget: this, preventDefault() {}, ...event });
+      }
+    }
   }
   const elements = new Map();
   const sockets = [];
@@ -94,9 +125,12 @@ function harness(fetchImpl = async () => ({ ok: true, json: async () => ({ webso
   }
   const timers = new Map();
   const events = {};
+  const downloads = [];
   let timerId = 0;
+  const documentElement = new Element("html");
   const context = vm.createContext({
     document: {
+      documentElement,
       querySelector(selector) {
         if (!elements.has(selector)) elements.set(selector, new Element());
         return elements.get(selector);
@@ -104,23 +138,37 @@ function harness(fetchImpl = async () => ({ ok: true, json: async () => ({ webso
       createElement: tagName => new Element(tagName)
     },
     window: {
+      innerWidth: 1280, innerHeight: 800,
       setTimeout(callback, delay) { timers.set(++timerId, { callback, delay }); return timerId; },
       clearTimeout(id) { timers.delete(id); },
-      addEventListener(type, callback) { events[type] = callback; }
+      addEventListener(type, callback) { events[type] = callback; },
+      getComputedStyle: () => ({ paddingLeft: "14px", paddingRight: "14px", paddingTop: "12px" })
     },
+    Blob: class { constructor(parts, options) { this.parts = parts; this.type = options?.type; } },
+    URL: { createObjectURL: blob => { downloads.push(blob); return "blob:layout"; }, revokeObjectURL() {} },
     fetch: fetchImpl, WebSocket: Socket
   });
-  vm.runInContext(source, context);
+  for (const source of sources) vm.runInContext(source, context);
   return {
-    sockets, timers, elements, events,
+    sockets, timers, elements, events, downloads, documentElement,
     get(selector) { return elements.get(selector); },
     apply(previous, message) {
       context.previousTestState = previous;
       context.testMessage = message;
       return vm.runInContext("applyMessage(previousTestState, testMessage)", context);
     },
+    run(code) { return vm.runInContext(code, context); },
     state() { return vm.runInContext("currentPlayerState", context); },
-    async flush() { for (let i = 0; i < 8; i++) await Promise.resolve(); },
+    async flush() { for (let i = 0; i < 12; i++) await Promise.resolve(); },
+    async runTimers(delay) {
+      for (const [id, timer] of [...timers]) {
+        if (delay === undefined || timer.delay === delay) {
+          timers.delete(id);
+          await timer.callback();
+        }
+      }
+      await this.flush();
+    },
     async reconnect() {
       const timer = [...timers.values()][0];
       assert.ok(timer);
@@ -132,6 +180,10 @@ function harness(fetchImpl = async () => ({ ok: true, json: async () => ({ webso
 }
 
 const plain = value => JSON.parse(JSON.stringify(value));
+const slotParts = slot => {
+  const [placeholder, icon, glint, fallback, count, durability] = slot.children;
+  return { placeholder, icon, glint, fallback, count, durability, bar: durability.children[0] };
+};
 
 test("complete snapshot preserves telemetry, all 36 slots and equipment", () => {
   const h = harness();
@@ -319,33 +371,26 @@ test("DOM rendering preserves telemetry and uses text-only efficient slot update
   const socket = h.sockets[0];
   socket.emit("open");
   socket.message(initial());
-  assert.equal(h.get("#health-value").textContent, "18 / 20 (+2)");
+  assert.equal(h.get("#health-value").textContent, "18 / 20 +2");
+  assert.equal(h.get("#health-fill").style.width, "90%");
+  assert.equal(h.get("#absorption-fill").style.left, "90%");
+  assert.equal(h.get("#absorption-fill").style.width, "10%");
   assert.equal(h.get("#session-value").textContent, "1h 1m");
   assert.equal(h.get("#dimension-value").textContent, "minecraft:overworld");
   assert.equal(h.get("#position-value").textContent, "X 1.0 · Y 64.0 · Z -3.0");
+  assert.equal(h.get("#state-message").textContent, "Live");
+  assert.equal(h.get("#held-value").textContent, "Holding Stone × 32");
   const slots = [...h.get("#hotbar-slots").children, ...h.get("#main-slots").children];
-  const writes = slots.map(element => element.writes);
+  assert.equal(slots.length, 36);
+  assert.equal(h.get("#equipment-slots").children.length, 5);
+  const writes = slots.map(element => element.children.map(child => child.writes));
   socket.message(update({ inventory: { slots: [{ index: 9, item: item({ name: "<img onerror=attack>" }) }] } }));
-  slots.forEach((element, index) => assert.equal(element.writes, writes[index] + (index === 9 ? 1 : 0)));
-  assert.match(slots[9].textContent, /<img onerror=attack>/);
-  assert.match(slots[0].textContent, /Selected[\s\S]*Stone · minecraft:stone · 32\/64/);
-  assert.match(slots[1].textContent, /Empty/);
-  assert.match(h.get("#held-value").textContent, /Held · Hotbar 1/);
-});
-
-test("durability and enchantments are visible with equipment and new selection", async () => {
-  const h = harness();
-  await h.flush();
-  const socket = h.sockets[0];
-  socket.message(initial());
-  const tool = item({ name: "Pickaxe", damage: 1, maxDamage: 100, remainingDurability: 99,
-    enchantments: [{ id: "minecraft:efficiency", name: "Efficiency", level: 4 }] });
-  socket.message(update({ inventory: { slots: [{ index: 1, item: tool }], selectedHotbarSlot: 1,
-    equipment: { mainhand: tool, head: tool } } }));
-  assert.equal(h.get("#hotbar-slots").children[0].className, "inventory-slot");
-  assert.equal(h.get("#hotbar-slots").children[1].className, "inventory-slot selected");
-  assert.match(h.get("#held-value").textContent, /Hotbar 2[\s\S]*Durability 99\/100 · damage 1[\s\S]*Efficiency \(minecraft:efficiency\) 4/);
-  assert.match(h.get("#equipment-slots").children[0].textContent, /head[\s\S]*Pickaxe/);
+  slots.forEach((element, index) => {
+    if (index !== 9) assert.deepEqual(element.children.map(child => child.writes), writes[index], `slot ${index}`);
+  });
+  assert.equal(slots[9].attributes["aria-label"], "<img onerror=attack> × 32");
+  assert.equal(slotParts(slots[9]).fallback.textContent, "<O");
+  assert.equal(slots[1].attributes["aria-label"], "Empty");
 });
 
 test("unavailable and socket close clear all live values and reconnect needs fresh initial", async () => {
@@ -421,7 +466,7 @@ test("events from closed or superseded sockets never corrupt fresh data", async 
   old.emit("close");
   assert.equal(h.state().revision, 20);
   assert.equal(h.timers.size, 0);
-  assert.equal(h.get("#connection-status").textContent, "Dashboard connected");
+  assert.equal(h.get("#connection-status").textContent, "Connected");
 });
 
 test("pagehide prevents reconnects, in-flight fetches and late socket events", async () => {
@@ -557,12 +602,15 @@ test("statistics validates required entry fields, unique ids, bounded entries an
   assert.throws(() => h.apply(undefined, initial(unavailable({ statistics: statistics() }))));
 });
 
-test("history permits empty details, nonmonotonic timestamps, all categories and 100 ordered events", () => {
+const categories = ["lifecycle", "death", "dimension", "kill", "mine", "place",
+  "container", "inventory", "drop", "damage", "heal", "advancement"];
+
+test("history permits empty details, nonmonotonic timestamps, all categories and 500 ordered events", () => {
   const h = harness();
-  const events = Array.from({ length: 100 }, (_, index) => ({
-    id: index + 1, timestamp: 100 - index,
-    category: ["lifecycle", "death", "dimension", "kill"][index % 4],
-    label: "Event", details: index % 2 ? "" : "Details"
+  const events = Array.from({ length: 500 }, (_, index) => ({
+    id: index + 1, timestamp: 100 - Math.min(index, 100),
+    category: categories[index % categories.length],
+    label: "Event", details: index % 2 ? "" : "x".repeat(1024)
   }));
   const value = history({ events });
   assert.deepEqual(plain(h.apply(undefined, initial(snapshot({ history: value }))).history), value);
@@ -580,7 +628,7 @@ test("history permits empty details, nonmonotonic timestamps, all categories and
 test("history rejects null, missing fields, oversized arrays, unordered ids and malformed events", () => {
   const h = harness();
   const invalid = [null, undefined, {}, history({ events: null }),
-    history({ events: Array.from({ length: 101 }, (_, index) => ({ ...history().events[0], id: index + 1 })) })];
+    history({ events: Array.from({ length: 501 }, (_, index) => ({ ...history().events[0], id: index + 1 })) })];
   for (const key of Object.keys(history())) {
     const value = history();
     delete value[key];
@@ -596,7 +644,7 @@ test("history rejects null, missing fields, oversized arrays, unordered ids and 
     { timestamp: -1 }, { timestamp: 0.5 }, { timestamp: "2" },
     { timestamp: Number.MAX_SAFE_INTEGER + 1 }, { category: "chat" },
     { label: "" }, { label: null }, { label: "x".repeat(257) },
-    { details: null }, { details: "x".repeat(257) }, { details: "\uDC00" }
+    { details: null }, { details: "x".repeat(1025) }, { details: "\uDC00" }
   ]) invalid.push(history({ events: [{ ...history().events[0], ...overrides }] }));
   invalid.push(history({ events: [history().events[0], history().events[0]] }),
     history({ events: [...history().events].reverse() }),
@@ -607,7 +655,32 @@ test("history rejects null, missing fields, oversized arrays, unordered ids and 
   assert.throws(() => h.apply(undefined, initial(unavailable({ history: history() }))));
 });
 
-test("statistics and history deltas replace whole fields and leave omitted fields unchanged", () => {
+test("history deltas rewrite merged events, append new ones and evict below firstId", () => {
+  const h = harness();
+  const previous = snapshot();
+  const merged = h.apply(previous, update({ history: { sessionId: 1, active: true, firstId: 1, upsert: [
+    { id: 2, timestamp: 95, category: "mine", label: "Mined 3 × Stone", details: "Last at 1, 2, 3" },
+    { id: 3, timestamp: 96, category: "kill", label: "Killed Zombie", details: "minecraft:zombie" }
+  ] } }));
+  assert.deepEqual(plain(merged.history.events.map(event => event.label)), ["Joined world", "Mined 3 × Stone", "Killed Zombie"]);
+  const evicted = h.apply(merged, update({ baseRevision: 7, revision: 8, history: {
+    sessionId: 1, active: false, firstId: 2, upsert: [] } }));
+  assert.deepEqual(plain(evicted.history.events.map(event => event.id)), [2, 3]);
+  assert.equal(evicted.history.active, false);
+  for (const patch of [
+    { sessionId: 2, active: true, firstId: 1, upsert: [] },
+    { sessionId: 1, active: true, firstId: 0, upsert: [] },
+    { sessionId: 1, active: true, firstId: 5, upsert: [] },
+    { sessionId: 1, active: true, firstId: 2, upsert: [{ ...history().events[0], id: 1 }] },
+    { sessionId: 1, active: true, firstId: 1, upsert: [{ ...history().events[0], category: "chat" }] },
+    { sessionId: 1, active: "yes", firstId: 1, upsert: [] },
+    { sessionId: 1, active: true, firstId: 1 }
+  ]) {
+    assert.throws(() => h.apply(previous, update({ history: patch })), JSON.stringify(patch));
+  }
+});
+
+test("statistics and history deltas leave omitted fields unchanged", () => {
   const h = harness();
   const previous = snapshot();
   const before = JSON.stringify(previous);
@@ -639,7 +712,7 @@ test("availability transition snapshots require statistics and history even with
   }
 });
 
-test("statistics renders categorized cumulative and session counters with units and unavailable values", async () => {
+test("statistics renders categorized totals and session changes with units and unavailable values", async () => {
   const h = harness();
   await h.flush();
   h.sockets[0].message(initial(snapshot({ statistics: statistics([
@@ -651,11 +724,15 @@ test("statistics renders categorized cumulative and session counters with units 
   ]) })));
   const rendered = h.get("#statistics-entries");
   assert.equal(rendered.children.length, 3);
-  assert.match(rendered.textContent, /Movement[\s\S]*Jumps\nCumulative: 40 · Session: 3/);
-  assert.match(rendered.textContent, /Distance\nCumulative: 123.45 m · Session: 0.5 m/);
-  assert.match(rendered.textContent, /General[\s\S]*Play time\nCumulative: 1h 1m · Session: 1m 1s/);
-  assert.match(rendered.textContent, /Deaths\nCumulative: Unavailable · Session: Unavailable/);
-  assert.match(rendered.textContent, /Kills\nCumulative: 0 · Session: 0/);
+  const rows = rendered.children.flatMap(group => group.children.slice(1));
+  const row = label => rows.find(value => value.children[0].textContent === label);
+  assert.deepEqual(row("Jumps").children.map(cell => cell.textContent), ["Jumps", "40", "+3"]);
+  assert.deepEqual(row("Distance").children.map(cell => cell.textContent), ["Distance", "123.45 m", "+0.5 m"]);
+  assert.deepEqual(row("Play time").children.map(cell => cell.textContent), ["Play time", "1h 1m", "+1m 1s"]);
+  assert.deepEqual(row("Deaths").children.map(cell => cell.textContent), ["Deaths", "Unavailable", ""]);
+  assert.equal(row("Jumps").className, "counter-row prio-2", "minor counters are dropped first when compact");
+  assert.equal(row("Distance").className, "counter-row");
+  assert.equal(rendered.children[0].children[0].className, "prio-3");
   const replacements = rendered.replacements;
   h.sockets[0].message(update({ health: 17 }));
   assert.equal(rendered.replacements, replacements);
@@ -664,7 +741,7 @@ test("statistics renders categorized cumulative and session counters with units 
   assert.equal(rendered.textContent, "Statistics unavailable.");
 });
 
-test("history newest-first filters and search preserve expandable safe text details without unchanged rebuilds", async () => {
+test("activity log is newest first with filters, search and safe text, without unchanged rebuilds", async () => {
   const h = harness();
   await h.flush();
   const socket = h.sockets[0];
@@ -673,20 +750,24 @@ test("history newest-first filters and search preserve expandable safe text deta
   const events = [...history().events, { id: 3, timestamp: 1, category: "kill", label, details }];
   socket.message(initial(snapshot({ history: history({ events }) })));
   const list = h.get("#history-entries");
-  assert.equal(h.get("#history-status").textContent, "Current session 1");
+  assert.equal(h.get("#history-status").textContent, "Current session · 3");
   assert.equal(list.children.length, 3);
   const newest = list.children[0];
   assert.equal(newest.tagName, "details");
-  assert.equal(newest.children[0].tagName, "summary");
-  assert.match(newest.children[0].textContent, /kill · <img src=x onerror=attack>/);
+  assert.equal(newest.dataset.category, "kill");
+  const [time, category, text] = newest.children[0].children;
+  assert.match(time.textContent, /^\d\d:\d\d:\d\d$/);
+  assert.equal(category.textContent, "Kill");
+  assert.equal(category.className, "category prio-2");
+  assert.equal(text.textContent, label);
   assert.equal(newest.children[1].textContent, details);
-  assert.match(list.children[1].children[0].textContent, /death · Player died/);
+  assert.equal(list.children[1].children[0].children[2].textContent, "Player died");
   newest.open = true;
   const replacements = list.replacements;
-  const writes = newest.children[0].writes;
+  const writes = text.writes;
   socket.message(update({ health: 16 }));
   assert.equal(list.replacements, replacements);
-  assert.equal(newest.children[0].writes, writes);
+  assert.equal(text.writes, writes);
   assert.equal(newest.open, true);
   h.get("#history-category").value = "death";
   h.get("#history-category").emit("change");
@@ -711,7 +792,7 @@ test("history newest-first filters and search preserve expandable safe text deta
   assert.equal(newest.open, true);
 });
 
-test("history changed events retain expansion, evict old nodes, and session changes reset expansion", async () => {
+test("merged events update in place keeping expansion; session changes reset nodes", async () => {
   const h = harness();
   await h.flush();
   const socket = h.sockets[0];
@@ -719,21 +800,21 @@ test("history changed events retain expansion, evict old nodes, and session chan
   const list = h.get("#history-entries");
   const death = list.children[0];
   death.open = true;
-  socket.message(update({ history: history({ events: [
+  socket.message(update({ history: { sessionId: 1, active: true, firstId: 1, upsert: [
     { ...history().events[1], details: "Updated details" },
     { id: 3, timestamp: 102, category: "dimension", label: "Nether", details: "" }
-  ] }) }));
+  ] } }));
   assert.equal(list.children[1], death);
   assert.equal(death.open, true);
   assert.equal(death.children[1].textContent, "Updated details");
   assert.equal(list.children[0].children[1].textContent, "No additional details.");
   socket.message(update({ baseRevision: 7, revision: 8, history: history({ sessionId: 2 }) }));
-  assert.equal(h.get("#history-status").textContent, "Current session 2");
+  assert.equal(h.get("#history-status").textContent, "Current session · 2");
   assert.notEqual(list.children[0], death);
   assert.equal(list.children[0].open, false);
 });
 
-test("history stays stale on world exit but clears with counters on disconnect and resets on reconnect", async () => {
+test("history stays as previous session on world exit but clears on disconnect and resets on reconnect", async () => {
   const h = harness();
   await h.flush();
   const socket = h.sockets[0];
@@ -741,7 +822,7 @@ test("history stays stale on world exit but clears with counters on disconnect a
   const retained = h.get("#history-entries").children[0];
   retained.open = true;
   socket.message(update(unavailable({ revision: 7, baseRevision: 4 })));
-  assert.equal(h.get("#history-status").textContent, "Stale session 1");
+  assert.equal(h.get("#history-status").textContent, "Previous session · 2");
   assert.equal(h.get("#history-entries").children[0], retained);
   assert.equal(retained.open, true);
   assert.equal(h.get("#statistics-status").textContent, "Unavailable");
@@ -773,4 +854,277 @@ test("statistics and history unsafe labels use only text and malformed replaceme
   assert.doesNotMatch(h.get("#statistics-entries").textContent, /Must not appear/);
   assert.equal(h.get("#history-entries").children.length, 0);
   assert.equal(socket.closed[0][0], 1002);
+});
+
+test("tooltips are validated like the Java model", () => {
+  const h = harness();
+  const valid = item({ tooltip: [
+    [{ text: "Sword", color: "#55ffff", format: "bi" }], [],
+    [{ text: "When in Main Hand:", color: "#aaaaaa", format: "" }, { text: " 7", color: null, format: "u" }]
+  ], foil: true });
+  const state = snapshot();
+  state.inventory.slots[9] = valid;
+  assert.deepEqual(plain(h.apply(undefined, initial(state)).inventory.slots[9]), valid);
+  for (const bad of [
+    item({ tooltip: null }), item({ tooltip: [null] }), item({ tooltip: Array.from({ length: 65 }, () => []) }),
+    item({ tooltip: [Array.from({ length: 33 }, () => ({ text: "x", color: null, format: "" }))] }),
+    item({ tooltip: [[{ text: "", color: null, format: "" }]] }),
+    item({ tooltip: [[{ text: "x", color: "red", format: "" }]] }),
+    item({ tooltip: [[{ text: "x", color: "#FFFFFF", format: "" }]] }),
+    item({ tooltip: [[{ text: "x", color: null, format: "x" }]] }),
+    item({ tooltip: [[{ text: "x", color: null }]] }),
+    item({ icon: "../secret" }), item({ icon: "" }), item({ icon: 7 }), item({ foil: "yes" }),
+    { ...empty(), icon: "e0-1" }, { ...empty(), foil: true }, { ...empty(), tooltip: [[]] }
+  ]) {
+    const value = snapshot();
+    value.inventory.slots[9] = bad;
+    assert.throws(() => h.apply(undefined, initial(value)), JSON.stringify(bad));
+  }
+});
+
+test("hovering a slot shows the game's tooltip lines with Minecraft colors and formats", async () => {
+  const h = harness();
+  await h.flush();
+  const sword = item({ name: "Sword", count: 1, maxCount: 1, tooltip: [
+    [{ text: "<b>Sword</b>", color: "#55ffff", format: "bi" }], [],
+    [{ text: "minecraft:diamond_sword", color: "#555555", format: "" }]
+  ] });
+  h.sockets[0].message(initial(snapshot({ inventory: { ...inventory(),
+    slots: [sword, ...inventory().slots.slice(1)], equipment: { ...inventory().equipment, mainhand: sword } } })));
+  const tooltip = h.get("#tooltip");
+  const slot = h.get("#hotbar-slots").children[0];
+  slot.emit("pointerenter", { clientX: 10, clientY: 20 });
+  assert.equal(tooltip.hidden, false);
+  assert.equal(tooltip.children.length, 3);
+  const name = tooltip.children[0].children[0];
+  assert.equal(name.textContent, "<b>Sword</b>");
+  assert.equal(name.className, "b i");
+  assert.equal(name.style.color, "#55ffff");
+  assert.equal(name.style.textShadow, "1px 1px 0 rgb(21, 63, 63)");
+  assert.equal(tooltip.children[1].children.length, 0);
+  assert.equal(tooltip.style.left, "26px");
+  h.sockets[0].message(update({ inventory: { slots: [{ index: 0, item: item({ name: "Renamed",
+    tooltip: [[{ text: "Renamed", color: null, format: "" }]] }) }], equipment: { mainhand: item({ name: "Renamed",
+    tooltip: [[{ text: "Renamed", color: null, format: "" }]] }) } } }));
+  assert.equal(tooltip.textContent, "Renamed", "an open tooltip follows item changes");
+  slot.emit("pointerleave");
+  assert.equal(tooltip.hidden, true);
+  h.get("#hotbar-slots").children[1].emit("pointerenter", { clientX: 0, clientY: 0 });
+  assert.equal(tooltip.hidden, true, "empty slots have no tooltip");
+});
+
+test("slots show game-rendered icons, counts, durability bars and an animated glint mask", async () => {
+  const h = harness();
+  await h.flush();
+  const socket = h.sockets[0];
+  socket.message(initial());
+  const stone = slotParts(h.get("#hotbar-slots").children[0]);
+  assert.equal(stone.icon.src, "/icon/e0-1a2b.png");
+  assert.equal(stone.icon.hidden, false);
+  assert.equal(stone.count.textContent, "32");
+  assert.equal(stone.glint.hidden, true);
+  assert.equal(stone.durability.hidden, true);
+  assert.equal(stone.placeholder.hidden, true);
+  assert.equal(h.get("#hotbar-slots").children[0].className, "slot selected");
+  assert.equal(h.get("#hotbar-slots").children[0].attributes["aria-label"], "Stone × 32");
+  assert.equal(h.documentElement.style.getPropertyValue("--glint"), 'url("/glint.png?v=0")');
+  const empty = slotParts(h.get("#hotbar-slots").children[1]);
+  assert.equal(empty.icon.hidden, true);
+  assert.equal(empty.placeholder.hidden, false);
+  const tool = item({ name: "Diamond Pickaxe", count: 1, maxCount: 1, damage: 390, maxDamage: 1561,
+    remainingDurability: 1171, foil: true, icon: "e3-ff" });
+  socket.message(update({ inventory: { slots: [{ index: 1, item: tool }], selectedHotbarSlot: 1,
+    equipment: { mainhand: tool, head: tool } } }));
+  const pickaxe = slotParts(h.get("#hotbar-slots").children[1]);
+  assert.equal(pickaxe.count.textContent, "");
+  assert.equal(pickaxe.glint.hidden, false);
+  assert.equal(pickaxe.glint.style.maskImage, 'url("/icon/e3-ff.png")');
+  assert.equal(pickaxe.durability.hidden, false);
+  assert.equal(pickaxe.bar.style.width, "75%");
+  assert.equal(pickaxe.bar.style.background, "hsl(90, 100%, 50%)");
+  assert.equal(h.documentElement.style.getPropertyValue("--glint"), 'url("/glint.png?v=3")',
+    "a resource-pack reload refreshes the glint texture");
+  assert.equal(h.get("#hotbar-slots").children[0].className, "slot");
+  assert.equal(h.get("#held-value").textContent, "Holding Diamond Pickaxe");
+  assert.equal(slotParts(h.get("#equipment-slots").children[0]).icon.src, "/icon/e3-ff.png");
+  const src = pickaxe.icon.src;
+  socket.message(update({ baseRevision: 7, revision: 8, health: 3 }));
+  assert.equal(pickaxe.icon.src, src, "unchanged icons are not reloaded");
+  pickaxe.icon.emit("error");
+  assert.equal([...h.timers.values()].some(timer => timer.delay === 1500), true, "a missing icon is retried");
+  pickaxe.icon.emit("error");
+  assert.equal(pickaxe.icon.hidden, true);
+  assert.equal(pickaxe.fallback.hidden, false);
+  assert.equal(pickaxe.fallback.textContent, "DP");
+});
+
+test("layout engine keeps tiles in the grid without overlaps and settles them upward", () => {
+  const h = harness();
+  const result = h.run(`(() => {
+    const overlapping = (layout) => layout.tiles.filter(t => t.enabled).some((a, i, all) =>
+      all.some((b, j) => i !== j && overlaps(a, b)));
+    const base = defaultLayout();
+    const moved = placeTile(base, "history", { x: 0, y: 0 }, false);
+    const resized = placeTile(base, "player", { w: 12, h: 3 }, false);
+    const clamped = placeTile(base, "player", { x: 11, y: -5, w: 1, h: 999 }, false);
+    const dragging = placeTile(base, "player", { x: 0, y: 30 }, true);
+    const hidden = setTileEnabled(base, "inventory", false);
+    const shown = setTileEnabled(base, "map", true);
+    return { overlapping: [base, moved, resized, clamped, dragging, hidden, shown].map(overlapping),
+      moved: moved.tiles.find(t => t.id === "history"), player: moved.tiles.find(t => t.id === "player"),
+      resized: resized.tiles.filter(t => t.enabled).map(t => [t.id, t.x, t.y, t.w, t.h]),
+      clamped: clamped.tiles.find(t => t.id === "player"),
+      dragging: dragging.tiles.find(t => t.id === "player").y,
+      dropped: placeTile(base, "player", { x: 0, y: 30 }, false).tiles.find(t => t.id === "player").y,
+      hiddenHistoryY: hidden.tiles.find(t => t.id === "history").y,
+      shownMap: shown.tiles.find(t => t.id === "map"), rows: layoutRows(base) };
+  })()`);
+  assert.deepEqual(plain(result.overlapping), [false, false, false, false, false, false, false]);
+  assert.deepEqual(plain(result.moved), { id: "history", enabled: true, x: 0, y: 0, w: 8, h: 9 });
+  assert.equal(result.player.y, 9, "displaced tiles move below the dropped tile");
+  assert.deepEqual(plain(result.resized), [["player", 0, 0, 12, 3], ["inventory", 4, 3, 8, 8],
+    ["statistics", 0, 3, 4, 9], ["history", 4, 11, 8, 9]]);
+  assert.deepEqual(plain(result.clamped), { id: "player", enabled: true, x: 10, y: 0, w: 2, h: 60 });
+  assert.equal(result.dragging, 30, "a dragged tile stays under the pointer");
+  assert.equal(result.dropped, 9, "after dropping, the tile settles just below the tiles it passed");
+  assert.equal(result.hiddenHistoryY, 0, "disabling a tile lets others move up");
+  assert.deepEqual(plain(result.shownMap), { id: "map", enabled: true, x: 0, y: 17, w: 6, h: 6 });
+  assert.equal(result.rows, 17);
+});
+
+test("imported or stored layouts are validated and completed", () => {
+  const h = harness();
+  const normalize = value => h.run(`normalizeLayout(${JSON.stringify(value)})`);
+  const partial = normalize({ version: 1, tiles: [{ id: "history", enabled: true, x: 0, y: 5, w: 12, h: 2 }] });
+  assert.deepEqual(plain(partial.tiles[0]), { id: "history", enabled: true, x: 0, y: 0, w: 12, h: 3 });
+  assert.equal(partial.tiles.length, 6);
+  assert.equal(partial.tiles.filter(tile => tile.enabled).length, 1, "missing tiles are added disabled");
+  for (const bad of [null, [], { version: 2, tiles: [] }, { version: 1 },
+    { version: 1, tiles: [{ id: "chat", enabled: true, x: 0, y: 0, w: 1, h: 1 }] },
+    { version: 1, tiles: [{ id: "player", enabled: 1, x: 0, y: 0, w: 4, h: 4 }] },
+    { version: 1, tiles: [{ id: "player", enabled: true, x: 0.5, y: 0, w: 4, h: 4 }] },
+    { version: 1, tiles: [{ id: "player", enabled: true, x: 0, y: 0, w: 4, h: 4 },
+      { id: "player", enabled: true, x: 4, y: 0, w: 4, h: 4 }] }]) {
+    assert.throws(() => normalize(bad), JSON.stringify(bad));
+  }
+});
+
+test("the saved layout is loaded after the session and applied to tile grid placement", async () => {
+  const stored = { version: 1, tiles: [
+    { id: "inventory", enabled: true, x: 0, y: 0, w: 12, h: 6 },
+    { id: "player", enabled: false, x: 0, y: 6, w: 4, h: 4 }] };
+  const requests = [];
+  const h = harness(defaultFetch(stored, requests));
+  assert.equal(h.get("#tile-player").hidden, false, "defaults render before the saved layout arrives");
+  await h.flush();
+  assert.deepEqual(requests.map(request => request.url), ["/api/session", "/api/layout"]);
+  assert.equal(h.get("#tile-player").hidden, true);
+  assert.equal(h.get("#tile-inventory").style.getPropertyValue("--grid-column"), "1 / span 12");
+  assert.equal(h.get("#tile-inventory").style.getPropertyValue("--grid-row"), "1 / span 6");
+  assert.equal(h.get("#tile-history").hidden, true, "tiles missing from a saved layout start hidden");
+  const toggles = h.get("#tile-toggles").children;
+  assert.deepEqual(toggles.map(chip => [chip.textContent, chip.attributes["aria-pressed"]]),
+    [["Player", "false"], ["Inventory", "true"], ["Statistics", "false"], ["Activity log", "false"],
+      ["JourneyMap", "false"], ["Build progress", "false"]]);
+  h.sockets[0].emit("close");
+  await h.reconnect();
+  assert.equal(requests.filter(request => request.url === "/api/layout").length, 1, "layout loads once");
+});
+
+test("customize mode toggles tiles, saves to the config file, resets, exports and imports", async () => {
+  const requests = [];
+  const h = harness(defaultFetch(null, requests));
+  await h.flush();
+  assert.equal(h.get("#edit-toolbar").hidden, true);
+  h.get("#edit-toggle").emit("click");
+  assert.equal(h.get("#edit-toolbar").hidden, false);
+  assert.equal(h.get("#grid").className, "grid editing");
+  assert.equal(h.get("#edit-toggle").attributes["aria-pressed"], "true");
+  h.get("#tile-toggles").children[4].emit("click");
+  assert.equal(h.get("#tile-map").hidden, false);
+  assert.equal(h.get("#layout-status").textContent, "Saving…");
+  h.get("#tile-toggles").children[0].emit("click");
+  await h.runTimers(400);
+  const saves = requests.filter(request => request.method === "PUT");
+  assert.equal(saves.length, 1, "rapid changes are saved once");
+  const saved = JSON.parse(saves[0].body);
+  assert.equal(saved.tiles.find(tile => tile.id === "map").enabled, true);
+  assert.equal(saved.tiles.find(tile => tile.id === "player").enabled, false);
+  assert.equal(saves[0].headers["Content-Type"], "application/json");
+  assert.equal(h.get("#layout-status").textContent, "Saved to config/minepanel/layout.json");
+
+  h.get("#layout-export").emit("click");
+  assert.equal(h.downloads.length, 1);
+  assert.deepEqual(JSON.parse(h.downloads[0].parts[0]), saved);
+
+  h.get("#layout-reset").emit("click");
+  assert.equal(h.get("#tile-player").hidden, false);
+  assert.equal(h.get("#tile-map").hidden, true);
+
+  const file = h.get("#layout-file");
+  file.files = [{ text: async () => JSON.stringify({ version: 1, tiles: [
+    { id: "statistics", enabled: true, x: 2, y: 0, w: 10, h: 5 }] }) }];
+  file.emit("change");
+  await h.flush();
+  assert.equal(h.get("#tile-statistics").style.getPropertyValue("--grid-column"), "3 / span 10");
+  assert.equal(h.get("#tile-player").hidden, true);
+  file.files = [{ text: async () => "{\"version\":9}" }];
+  file.emit("change");
+  await h.flush();
+  assert.equal(h.get("#layout-status").textContent, "That file is not a MinePanel layout");
+  assert.equal(h.get("#layout-status").className, "save-status error");
+  assert.equal(h.get("#tile-statistics").style.getPropertyValue("--grid-column"), "3 / span 10",
+    "a rejected import leaves the layout unchanged");
+
+  h.get("#edit-done").emit("click");
+  assert.equal(h.get("#edit-toolbar").hidden, true);
+  assert.equal(h.get("#grid").className, "grid");
+});
+
+test("failed layout saves are reported", async () => {
+  const h = harness(async (url, options = {}) => options.method === "PUT" ? { ok: false }
+    : url === "/api/layout" ? { ok: true, json: async () => ({ layout: null }) }
+      : { ok: true, json: async () => ({ websocketPort: 8765 }) });
+  await h.flush();
+  h.get("#layout-reset").emit("click");
+  await h.runTimers(400);
+  assert.equal(h.get("#layout-status").textContent, "Not saved");
+  assert.equal(h.get("#layout-status").className, "save-status error");
+});
+
+test("tiles move and resize by dragging only in customize mode, snapping to grid cells", async () => {
+  const requests = [];
+  const h = harness(defaultFetch(null, requests));
+  await h.flush();
+  const grid = h.get("#grid");
+  grid.rect = { left: 0, top: 0, width: 1218, height: 2000 };
+  const player = h.get("#tile-player");
+  player.rect = { left: 14, top: 12, width: 390, height: 190 };
+  const head = h.get("#head-player");
+  const layout = () => plain(h.run("layout")).tiles.find(tile => tile.id === "player");
+  head.emit("pointerdown", { button: 0, clientX: 20, clientY: 20, pointerId: 1 });
+  head.emit("pointermove", { clientX: 520, clientY: 220 });
+  assert.deepEqual(layout(), { id: "player", enabled: true, x: 0, y: 0, w: 4, h: 4 }, "no dragging outside customize mode");
+
+  h.get("#edit-toggle").emit("click");
+  head.emit("pointerdown", { button: 0, clientX: 20, clientY: 20, pointerId: 1 });
+  assert.equal(player.className, "dragging");
+  head.emit("pointermove", { clientX: 520, clientY: 220 });
+  assert.deepEqual(layout(), { id: "player", enabled: true, x: 5, y: 4, w: 4, h: 4 });
+  head.emit("pointerup");
+  assert.equal(player.className, "");
+  const dropped = plain(h.run("layout")).tiles;
+  assert.equal(dropped.find(tile => tile.id === "player").y, 0, "dropped tiles settle upward");
+  assert.equal(dropped.find(tile => tile.id === "player").x, 5);
+
+  const handle = player.children.at(-1);
+  assert.equal(handle.className, "resize-handle");
+  player.rect = { left: 514, top: 12, width: 390, height: 190 };
+  handle.emit("pointerdown", { button: 0, clientX: 900, clientY: 200, pointerId: 2 });
+  handle.emit("pointermove", { clientX: 1100, clientY: 300 });
+  handle.emit("pointerup");
+  const resized = plain(h.run("layout")).tiles.find(tile => tile.id === "player");
+  assert.deepEqual([resized.w, resized.h], [6, 6]);
+  await h.runTimers(400);
+  assert.equal(requests.filter(request => request.method === "PUT").length, 1);
 });

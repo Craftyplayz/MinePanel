@@ -6,74 +6,98 @@
   <meta name="color-scheme" content="dark">
   <title>MinePanel</title>
   <link rel="stylesheet" href="/styles.css">
+  <script src="/protocol.js" defer></script>
+  <script src="/layout.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
-  <main class="shell">
-    <header class="topbar">
-      <a class="brand" href="/" aria-label="MinePanel dashboard home"><span class="brand-mark" aria-hidden="true">M</span><span>MinePanel</span></a>
-      <div class="connection"><span id="connection-dot" class="dot" aria-hidden="true"></span><span id="connection-status" role="status">Connecting</span></div>
-    </header>
-    <section class="welcome" aria-labelledby="welcome-title">
-      <p class="eyebrow">LOCAL DASHBOARD · MINECRAFT CLIENT</p>
-      <h1 id="welcome-title">Your world,<br><span>at a glance.</span></h1>
-      <p class="intro">A private companion for your Minecraft session. MinePanel runs on this computer and does not send data to external services.</p>
-    </section>
-    <section class="grid" aria-label="Dashboard widgets">
-      <article class="card map-card">
-        <div class="card-heading"><div><p class="eyebrow">WORLD</p><h2>JourneyMap</h2></div><span class="badge" id="map-status">Not connected</span></div>
-        <div class="empty-state"><span class="empty-icon" aria-hidden="true">⌖</span><p>JourneyMap Webmap integration is not available yet.</p><small>When configured, the map will be opened from its actual local Webmap endpoint.</small></div>
-      </article>
-      <article class="card">
-        <div class="card-heading"><div><p class="eyebrow">SESSION</p><h2>Player status</h2></div><span class="badge muted" id="game-status">Unavailable</span></div>
-        <p class="card-copy" id="state-message">Waiting for MinePanel.</p>
-        <div class="placeholder-stats">
-          <div><span>Health</span><strong id="health-value">—</strong></div>
-          <div><span>Session</span><strong id="session-value">—</strong></div>
-          <div><span>Dimension</span><strong id="dimension-value">—</strong></div>
+  <header class="topbar">
+    <span class="brand"><span class="brand-mark" aria-hidden="true">M</span>MinePanel</span>
+    <span class="connection"><span id="connection-dot" class="dot" aria-hidden="true"></span><span id="connection-status" role="status">Connecting</span></span>
+    <span class="game-state" id="state-message">Waiting for MinePanel.</span>
+    <span class="spacer"></span>
+    <span class="version" id="version">·</span>
+    <button type="button" class="button" id="edit-toggle" aria-pressed="false">Customize</button>
+  </header>
+  <section class="toolbar" id="edit-toolbar" hidden aria-label="Layout editing">
+    <span class="toolbar-label">Tiles</span>
+    <span class="tile-toggles" id="tile-toggles"></span>
+    <span class="spacer"></span>
+    <span class="save-status" id="layout-status" role="status"></span>
+    <button type="button" class="button quiet" id="layout-reset">Reset</button>
+    <button type="button" class="button quiet" id="layout-export">Export</button>
+    <button type="button" class="button quiet" id="layout-import">Import</button>
+    <input type="file" id="layout-file" accept="application/json,.json" hidden>
+    <button type="button" class="button" id="edit-done">Done</button>
+  </section>
+  <main class="grid" id="grid" aria-label="Dashboard tiles">
+    <article class="tile" id="tile-player" data-tile="player" aria-labelledby="player-title">
+      <header class="tile-head" id="head-player"><h2 id="player-title">Player</h2><span class="badge muted" id="game-status">Unavailable</span></header>
+      <div class="tile-body">
+        <div class="health prio-1">
+          <div class="health-bar"><span id="health-fill"></span><span id="absorption-fill"></span></div>
+          <strong id="health-value">—</strong>
         </div>
-        <p class="position" id="position-value">Position unavailable</p>
-      </article>
-      <article class="card integration-card">
-        <div class="card-heading"><div><p class="eyebrow">INTEGRATIONS</p><h2>Build progress</h2></div><span class="badge muted">Unavailable</span></div>
-        <p class="card-copy">Litematica support requires a compatible 26.1.2 release and a verified placement API.</p>
-      </article>
-      <article class="card statistics-card">
-        <div class="card-heading"><div><p class="eyebrow">STATISTICS</p><h2>Gameplay counters</h2></div><span class="badge muted" id="statistics-status">Unavailable</span></div>
-        <p class="card-copy">Read-only cumulative client counters and changes during this session. Unavailable values have not been received from the client.</p>
-        <div id="statistics-entries" aria-label="Categorized gameplay counters"></div>
-      </article>
-      <article class="card history-card">
-        <div class="card-heading"><div><p class="eyebrow">HISTORY</p><h2>Gameplay events</h2></div><span class="badge muted" id="history-status">No session</span></div>
-        <p class="card-copy">Newest first, limited to 100 events. Stale history is retained after leaving a world and cleared when the dashboard disconnects.</p>
-        <div class="history-filters">
+        <p class="position prio-1" id="position-value">Position unavailable</p>
+        <dl class="facts">
+          <div class="prio-2"><dt>Dimension</dt><dd id="dimension-value">—</dd></div>
+          <div class="prio-2"><dt>Session</dt><dd id="session-value">—</dd></div>
+        </dl>
+      </div>
+    </article>
+    <article class="tile" id="tile-inventory" data-tile="inventory" aria-labelledby="inventory-title">
+      <header class="tile-head" id="head-inventory"><h2 id="inventory-title">Inventory</h2><span class="badge muted" id="inventory-status">Unavailable</span></header>
+      <div class="tile-body">
+        <p class="held prio-3" id="held-value">Held item unavailable</p>
+        <div class="inventory-layout">
+          <div class="equipment prio-2" id="equipment-slots" aria-label="Armor and offhand"></div>
+          <div class="storage">
+            <div class="slots main prio-2" id="main-slots" aria-label="Main inventory"></div>
+            <div class="slots hotbar prio-1" id="hotbar-slots" aria-label="Hotbar"></div>
+          </div>
+        </div>
+      </div>
+    </article>
+    <article class="tile" id="tile-statistics" data-tile="statistics" aria-labelledby="statistics-title">
+      <header class="tile-head" id="head-statistics"><h2 id="statistics-title">Statistics</h2><span class="badge muted" id="statistics-status">Unavailable</span></header>
+      <div class="tile-body scroll" id="statistics-entries" aria-label="Gameplay counters"></div>
+    </article>
+    <article class="tile" id="tile-history" data-tile="history" aria-labelledby="history-title">
+      <header class="tile-head" id="head-history"><h2 id="history-title">Activity log</h2><span class="badge muted" id="history-status">No session</span></header>
+      <div class="tile-body column">
+        <div class="history-filters prio-3">
           <label>Category
             <select id="history-category">
-              <option value="all">All categories</option>
-              <option value="lifecycle">Lifecycle</option>
-              <option value="death">Death</option>
-              <option value="dimension">Dimension</option>
-              <option value="kill">Kill</option>
+              <option value="all">All</option>
+              <option value="mine">Mined</option>
+              <option value="place">Placed</option>
+              <option value="kill">Kills</option>
+              <option value="damage">Damage</option>
+              <option value="heal">Healing</option>
+              <option value="death">Deaths</option>
+              <option value="advancement">Advancements</option>
+              <option value="container">Containers</option>
+              <option value="inventory">Inventory changes</option>
+              <option value="drop">Drops</option>
+              <option value="dimension">Dimensions</option>
+              <option value="lifecycle">Session</option>
             </select>
           </label>
-          <label>Search events <input id="history-search" type="search" placeholder="Label or details" maxlength="256"></label>
+          <label>Search <input id="history-search" type="search" placeholder="Label or details" maxlength="256"></label>
         </div>
-        <p class="card-copy" id="history-empty" role="status">No gameplay events.</p>
-        <div id="history-entries" aria-label="Gameplay event history"></div>
-      </article>
-      <article class="card inventory-card">
-        <div class="card-heading"><div><p class="eyebrow">INVENTORY</p><h2>Inventory &amp; equipment</h2></div><span class="badge muted" id="inventory-status">Unavailable</span></div>
-        <p class="card-copy">Read-only client inventory. No dashboard action will modify items.</p>
-        <p class="held-summary" id="held-value">Held item unavailable</p>
-        <h3>Hotbar</h3>
-        <div class="inventory-grid" id="hotbar-slots" aria-label="Hotbar slots"></div>
-        <h3>Main inventory</h3>
-        <div class="inventory-grid" id="main-slots" aria-label="Main inventory slots"></div>
-        <h3>Equipment</h3>
-        <div class="equipment-grid" id="equipment-slots" aria-label="Equipment slots"></div>
-      </article>
-    </section>
-    <footer><span>MinePanel <span id="version">·</span></span><span>Loopback only · No cloud · Session data not stored</span></footer>
+        <p class="empty-note" id="history-empty" role="status">No gameplay events.</p>
+        <div class="history-list scroll" id="history-entries" aria-label="Activity log"></div>
+      </div>
+    </article>
+    <article class="tile" id="tile-map" data-tile="map" aria-labelledby="map-title">
+      <header class="tile-head" id="head-map"><h2 id="map-title">JourneyMap</h2><span class="badge muted">Not connected</span></header>
+      <div class="tile-body placeholder"><p>JourneyMap Webmap integration is not available yet.</p></div>
+    </article>
+    <article class="tile" id="tile-build" data-tile="build" aria-labelledby="build-title">
+      <header class="tile-head" id="head-build"><h2 id="build-title">Build progress</h2><span class="badge muted">Unavailable</span></header>
+      <div class="tile-body placeholder"><p>Litematica support requires a compatible 26.1.2 release.</p></div>
+    </article>
   </main>
+  <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
 </body>
 </html>

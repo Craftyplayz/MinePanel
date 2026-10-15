@@ -1,36 +1,46 @@
 "use strict";
 
-const connection = document.querySelector("#connection-status");
-const dot = document.querySelector("#connection-dot");
-const gameStatus = document.querySelector("#game-status");
-const stateMessage = document.querySelector("#state-message");
-const version = document.querySelector("#version");
-const healthValue = document.querySelector("#health-value");
-const sessionValue = document.querySelector("#session-value");
-const dimensionValue = document.querySelector("#dimension-value");
-const positionValue = document.querySelector("#position-value");
-const inventoryStatus = document.querySelector("#inventory-status");
-const heldValue = document.querySelector("#held-value");
-const statisticsStatus = document.querySelector("#statistics-status");
-const statisticsEntries = document.querySelector("#statistics-entries");
-const historyStatus = document.querySelector("#history-status");
-const historyEntries = document.querySelector("#history-entries");
-const historyEmpty = document.querySelector("#history-empty");
-const historyCategory = document.querySelector("#history-category");
-const historySearch = document.querySelector("#history-search");
-const equipmentKeys = ["head", "chest", "legs", "feet", "offhand", "mainhand"];
-const slotElements = Array.from({ length: 36 }, (_, index) => {
-  const element = document.createElement("div");
-  element.className = "inventory-slot";
-  document.querySelector(index < 9 ? "#hotbar-slots" : "#main-slots").appendChild(element);
-  return element;
-});
-const equipmentElements = equipmentKeys.map(key => {
-  const element = document.createElement("div");
-  element.className = "equipment-slot";
-  document.querySelector("#equipment-slots").appendChild(element);
-  return element;
-});
+// Dashboard UI. Message validation lives in protocol.js and the tile-layout model in layout.js.
+
+const $ = selector => document.querySelector(selector);
+const connection = $("#connection-status");
+const dot = $("#connection-dot");
+const gameStatus = $("#game-status");
+const stateMessage = $("#state-message");
+const version = $("#version");
+const healthValue = $("#health-value");
+const healthFill = $("#health-fill");
+const absorptionFill = $("#absorption-fill");
+const sessionValue = $("#session-value");
+const dimensionValue = $("#dimension-value");
+const positionValue = $("#position-value");
+const inventoryStatus = $("#inventory-status");
+const heldValue = $("#held-value");
+const statisticsStatus = $("#statistics-status");
+const statisticsEntries = $("#statistics-entries");
+const historyStatus = $("#history-status");
+const historyEntries = $("#history-entries");
+const historyEmpty = $("#history-empty");
+const historyCategory = $("#history-category");
+const historySearch = $("#history-search");
+const tooltip = $("#tooltip");
+const grid = $("#grid");
+const editToggle = $("#edit-toggle");
+const editToolbar = $("#edit-toolbar");
+const layoutStatus = $("#layout-status");
+const layoutFile = $("#layout-file");
+
+const TILE_LABELS = { player: "Player", inventory: "Inventory", statistics: "Statistics",
+  history: "Activity log", map: "JourneyMap", build: "Build progress" };
+const CATEGORY_LABELS = { lifecycle: "Session", death: "Death", dimension: "Dimension", kill: "Kill",
+  mine: "Mined", place: "Placed", container: "Opened", inventory: "Inventory", drop: "Dropped",
+  damage: "Damage", heal: "Healed", advancement: "Advancement" };
+const IMPORTANT_COUNTERS = new Set(["minecraft:walk_one_cm", "minecraft:sprint_one_cm", "minecraft:deaths",
+  "minecraft:mob_kills", "minecraft:player_kills", "minecraft:play_time"]);
+const EQUIPMENT_SLOTS = [["head", "Head"], ["chest", "Chest"], ["legs", "Legs"], ["feet", "Feet"], ["offhand", "Offhand"]];
+const ROW_HEIGHT = 40;
+const GRID_GAP = 10;
+
 let activeSocket;
 let reconnectTimer;
 let currentPlayerState;
@@ -41,194 +51,178 @@ let displayedHistory;
 let historySessionId;
 let historyNodes = new Map();
 let historyViewKey;
-
-const has = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
-const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
-const integer = value => Number.isSafeInteger(value) && value >= 0;
-const finite = value => typeof value === "number" && Number.isFinite(value);
-const validText = value => typeof value === "string" && value.length > 0 && value.length <= 256
-  && !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(value);
-const validIdentifier = value => validText(value) && /^[a-z0-9_.-]+:[a-z0-9/._-]+$/.test(value);
-
-function requireValid(condition) {
-  if (!condition) throw new Error("Invalid dashboard message");
-}
-
-function validateItem(item) {
-  requireValid(object(item) && typeof item.empty === "boolean"
-    && (item.itemId === null || typeof item.itemId === "string")
-    && (item.name === null || typeof item.name === "string")
-    && integer(item.count) && item.count <= 1000000
-    && integer(item.maxCount) && item.maxCount <= 1000000
-    && ["damage", "maxDamage", "remainingDurability"].every(key =>
-      item[key] === null || integer(item[key]))
-    && Array.isArray(item.enchantments) && item.enchantments.length <= 64);
-  const enchantments = item.enchantments.map(enchantment => {
-    requireValid(object(enchantment) && validIdentifier(enchantment.id)
-      && validText(enchantment.name) && integer(enchantment.level)
-      && enchantment.level >= 1 && enchantment.level <= 255);
-    return { id: enchantment.id, name: enchantment.name, level: enchantment.level };
-  });
-  requireValid(item.empty
-    ? item.count === 0 && item.maxCount === 0 && item.itemId === null && item.name === null
-      && item.damage === null && item.maxDamage === null && item.remainingDurability === null
-      && enchantments.length === 0
-    : validIdentifier(item.itemId) && validText(item.name) && item.count > 0 && item.maxCount > 0);
-  requireValid(item.maxDamage === null
-    ? item.damage === null && item.remainingDurability === null
-    : item.maxDamage > 0 && item.damage !== null && item.damage <= item.maxDamage
-      && item.remainingDurability === item.maxDamage - item.damage);
-  return {
-    empty: item.empty, itemId: item.itemId, name: item.name, count: item.count,
-    maxCount: item.maxCount, damage: item.damage, maxDamage: item.maxDamage,
-    remainingDurability: item.remainingDurability, enchantments
-  };
-}
-
-function validateInventory(inventory) {
-  if (inventory === null) return null;
-  requireValid(object(inventory) && Array.isArray(inventory.slots)
-    && inventory.slots.length === 36 && object(inventory.equipment)
-    && Object.keys(inventory.equipment).every(key => equipmentKeys.includes(key))
-    && integer(inventory.selectedHotbarSlot) && inventory.selectedHotbarSlot <= 8);
-  const slots = inventory.slots.map(validateItem);
-  const equipment = Object.fromEntries(equipmentKeys.map(key =>
-    [key, validateItem(inventory.equipment[key])]));
-  requireValid(JSON.stringify(equipment.mainhand) === JSON.stringify(slots[inventory.selectedHotbarSlot]));
-  return { slots, selectedHotbarSlot: inventory.selectedHotbarSlot, equipment };
-}
-
-function patchInventory(previous, patch) {
-  requireValid(object(previous) && object(patch)
-    && (!has(patch, "slots") || Array.isArray(patch.slots)));
-  const slots = previous.slots.slice();
-  const seen = new Set();
-  for (const entry of patch.slots ?? []) {
-    requireValid(object(entry) && integer(entry.index) && entry.index < 36 && !seen.has(entry.index));
-    seen.add(entry.index);
-    slots[entry.index] = validateItem(entry.item);
-  }
-  const equipment = { ...previous.equipment };
-  if (has(patch, "equipment")) {
-    requireValid(object(patch.equipment)
-      && Object.keys(patch.equipment).every(key => equipmentKeys.includes(key)));
-    for (const key of Object.keys(patch.equipment)) equipment[key] = validateItem(patch.equipment[key]);
-  }
-  return validateInventory({
-    slots, equipment,
-    selectedHotbarSlot: has(patch, "selectedHotbarSlot")
-      ? patch.selectedHotbarSlot : previous.selectedHotbarSlot
-  });
-}
-
-function validateStatistics(statistics) {
-  if (statistics === null) return null;
-  requireValid(object(statistics) && Array.isArray(statistics.entries) && statistics.entries.length <= 32);
-  const ids = new Set();
-  const entries = statistics.entries.map(entry => {
-    requireValid(object(entry) && validIdentifier(entry.id) && !ids.has(entry.id)
-      && validText(entry.label) && ["Movement", "Combat", "General"].includes(entry.category)
-      && ["count", "cm", "ticks"].includes(entry.unit)
-      && (entry.cumulative === null || integer(entry.cumulative) && entry.cumulative <= 2147483647)
-      && (entry.session === null || integer(entry.session) && entry.cumulative !== null
-        && entry.session <= entry.cumulative));
-    ids.add(entry.id);
-    return { id: entry.id, label: entry.label, category: entry.category, unit: entry.unit,
-      cumulative: entry.cumulative, session: entry.session };
-  });
-  return { entries };
-}
-
-function validateHistory(history) {
-  requireValid(object(history) && integer(history.sessionId) && typeof history.active === "boolean"
-    && Array.isArray(history.events) && history.events.length <= 100);
-  let previousId = 0;
-  const events = history.events.map(event => {
-    requireValid(object(event) && integer(event.id) && event.id > previousId && integer(event.timestamp)
-      && ["lifecycle", "death", "dimension", "kill"].includes(event.category)
-      && validText(event.label) && typeof event.details === "string"
-      && (event.details === "" || validText(event.details)));
-    previousId = event.id;
-    return { id: event.id, timestamp: event.timestamp, category: event.category,
-      label: event.label, details: event.details };
-  });
-  return { sessionId: history.sessionId, active: history.active, events };
-}
-
-function validatePlayer(state) {
-  requireValid(object(state) && state.schemaVersion === 2 && integer(state.revision)
-    && integer(state.capturedAt) && typeof state.available === "boolean" && object(state.position)
-    && has(state, "inventory") && has(state, "statistics") && has(state, "history"));
-  if (state.available) {
-    requireValid(state.inventory !== null && integer(state.sessionSeconds) && typeof state.dimension === "string"
-      && ["x", "y", "z"].every(key => finite(state.position[key]))
-      && ["health", "maxHealth", "absorption"].every(key => finite(state[key]) && state[key] >= 0));
-  } else {
-    requireValid(["sessionSeconds", "dimension", "health", "maxHealth", "absorption"]
-      .every(key => state[key] === null)
-      && ["x", "y", "z"].every(key => state.position[key] === null) && state.inventory === null
-      && state.statistics === null && state.history?.active === false);
-  }
-  return { ...state, inventory: validateInventory(state.inventory),
-    statistics: validateStatistics(state.statistics), history: validateHistory(state.history) };
-}
-
-function applyMessage(previous, message) {
-  requireValid(object(message) && message.schemaVersion === 2
-    && ["initial", "update"].includes(message.type) && object(message.state)
-    && message.state.schemaVersion === 2);
-  const state = message.state;
-  if (message.type === "initial") {
-    requireValid(!previous);
-    return validatePlayer(state);
-  }
-  requireValid(previous && integer(state.baseRevision) && state.baseRevision === previous.revision
-    && integer(state.revision) && state.revision > previous.revision && integer(state.capturedAt));
-  // Availability changes carry a complete snapshot, not an inventory patch.
-  if (has(state, "available") && state.available !== previous.available) return validatePlayer(state);
-  if (has(state, "position")) requireValid(object(state.position));
-  const next = {
-    ...previous, ...state,
-    position: { ...previous.position, ...state.position },
-    inventory: has(state, "inventory") ? patchInventory(previous.inventory, state.inventory) : previous.inventory
-  };
-  return validatePlayer(next);
-}
+let hoveredSlot;
+let glintEpoch;
 
 function writeText(element, text) {
   if (element.textContent !== text) element.textContent = text;
 }
 
-function itemText(item) {
-  if (!item) return "Unavailable";
-  if (item.empty) return "Empty";
-  let text = `${item.name || item.itemId} · ${item.itemId} · ${item.count}/${item.maxCount}`;
-  if (item.damage !== null || item.maxDamage !== null || item.remainingDurability !== null) {
-    text += `\nDurability ${item.remainingDurability ?? "?"}/${item.maxDamage ?? "?"} · damage ${item.damage ?? "?"}`;
-  }
-  if (item.enchantments.length) {
-    text += "\n" + item.enchantments.map(value => `${value.name} (${value.id}) ${value.level}`).join(" · ");
-  }
-  return text;
+function setHidden(element, hidden) {
+  if (element.hidden !== hidden) element.hidden = hidden;
 }
+
+function create(tagName, className, text) {
+  const element = document.createElement(tagName);
+  if (className) element.className = className;
+  if (text !== undefined) element.textContent = text;
+  return element;
+}
+
+// ---------------------------------------------------------------------------------------------- Inventory slots
+
+function createSlot(container, label) {
+  const element = create("div", "slot");
+  const placeholder = create("span", "placeholder-label", label);
+  const icon = create("img", "icon");
+  icon.alt = "";
+  icon.hidden = true;
+  const glint = create("span", "glint");
+  glint.hidden = true;
+  const fallback = create("span", "fallback");
+  fallback.hidden = true;
+  const count = create("span", "count");
+  const durability = create("span", "durability");
+  const bar = create("span");
+  durability.appendChild(bar);
+  durability.hidden = true;
+  for (const child of [placeholder, icon, glint, fallback, count, durability]) element.appendChild(child);
+  container.appendChild(element);
+  const slot = { element, placeholder, icon, glint, fallback, count, durability, bar, item: null, iconKey: null };
+  icon.addEventListener("error", () => {
+    // Icons render on the game thread; a missing one is retried once before showing initials.
+    if (!slot.iconKey || slot.retried) return showFallback(slot);
+    slot.retried = true;
+    window.setTimeout(() => { if (slot.iconKey) icon.src = iconUrl(slot.iconKey); }, 1500);
+  });
+  element.addEventListener("pointerenter", event => { hoveredSlot = slot; showTooltip(slot.item, event); });
+  element.addEventListener("pointermove", event => { if (hoveredSlot === slot) positionTooltip(event); });
+  element.addEventListener("pointerleave", () => { if (hoveredSlot === slot) { hoveredSlot = undefined; hideTooltip(); } });
+  return slot;
+}
+
+const iconUrl = key => `/icon/${key}.png`;
+
+function showFallback(slot) {
+  setHidden(slot.icon, true);
+  setHidden(slot.glint, true);
+  setHidden(slot.fallback, false);
+}
+
+function initials(name) {
+  const words = name.split(/\s+/).filter(Boolean);
+  return (words.length > 1 ? words[0][0] + words[1][0] : name.slice(0, 2)).toUpperCase();
+}
+
+function updateGlintTexture(key) {
+  const epoch = /^e(\d+)-/.exec(key)?.[1];
+  if (epoch === undefined || epoch === glintEpoch) return;
+  glintEpoch = epoch;
+  document.documentElement?.style?.setProperty("--glint", `url("/glint.png?v=${epoch}")`);
+}
+
+function renderSlot(slot, item, selected) {
+  const className = selected ? "slot selected" : "slot";
+  if (slot.element.className !== className) slot.element.className = className;
+  const changed = slot.item !== item;
+  slot.item = item;
+  if (!item || item.empty) {
+    slot.iconKey = null;
+    setHidden(slot.placeholder, false);
+    for (const part of [slot.icon, slot.glint, slot.fallback, slot.durability]) setHidden(part, true);
+    writeText(slot.count, "");
+    slot.element.setAttribute?.("aria-label", "Empty");
+  } else {
+    setHidden(slot.placeholder, true);
+    slot.element.setAttribute?.("aria-label", `${item.name}${item.count > 1 ? ` × ${item.count}` : ""}`);
+    writeText(slot.fallback, initials(item.name));
+    if (item.icon === null) {
+      slot.iconKey = null;
+      showFallback(slot);
+    } else if (item.icon !== slot.iconKey) {
+      slot.iconKey = item.icon;
+      slot.retried = false;
+      updateGlintTexture(item.icon);
+      slot.icon.src = iconUrl(item.icon);
+      slot.glint.style.maskImage = `url("${iconUrl(item.icon)}")`;
+      slot.glint.style.webkitMaskImage = `url("${iconUrl(item.icon)}")`;
+      setHidden(slot.icon, false);
+      setHidden(slot.fallback, true);
+    }
+    if (slot.iconKey) setHidden(slot.glint, !item.foil);
+    writeText(slot.count, item.count > 1 ? String(item.count) : "");
+    const damaged = item.maxDamage !== null && item.damage > 0;
+    setHidden(slot.durability, !damaged);
+    if (damaged) {
+      const fraction = item.remainingDurability / item.maxDamage;
+      slot.bar.style.width = `${Math.round(fraction * 100)}%`;
+      slot.bar.style.background = `hsl(${Math.round(fraction * 120)}, 100%, 50%)`;
+    }
+  }
+  if (changed && hoveredSlot === slot) showTooltip(item);
+}
+
+const hotbarSlots = Array.from({ length: 9 }, () => createSlot($("#hotbar-slots")));
+const mainSlots = Array.from({ length: 27 }, () => createSlot($("#main-slots")));
+const inventorySlots = [...hotbarSlots, ...mainSlots];
+const equipmentSlots = EQUIPMENT_SLOTS.map(([, label]) => createSlot($("#equipment-slots"), label));
 
 function renderInventory(inventory) {
-  writeText(inventoryStatus, inventory ? `Slot ${inventory.selectedHotbarSlot + 1} selected` : "Unavailable");
-  writeText(heldValue, inventory
-    ? `Held · Hotbar ${inventory.selectedHotbarSlot + 1}: ${itemText(inventory.equipment.mainhand)}`
-    : "Held item unavailable");
-  slotElements.forEach((element, index) => {
-    const selected = inventory && index === inventory.selectedHotbarSlot;
-    const className = selected ? "inventory-slot selected" : "inventory-slot";
-    if (element.className !== className) element.className = className;
-    writeText(element, `${index < 9 ? "Hotbar" : "Main"} ${index < 9 ? index + 1 : index - 8}${selected ? " · Selected" : ""}\n${itemText(inventory?.slots[index])}`);
-  });
-  equipmentElements.forEach((element, index) =>
-    writeText(element, `${equipmentKeys[index]}\n${itemText(inventory?.equipment[equipmentKeys[index]])}`));
+  writeText(inventoryStatus, inventory ? `Slot ${inventory.selectedHotbarSlot + 1}` : "Unavailable");
+  const held = inventory?.equipment.mainhand;
+  writeText(heldValue, !inventory ? "Held item unavailable"
+    : held.empty ? "Holding nothing" : `Holding ${held.name}${held.count > 1 ? ` × ${held.count}` : ""}`);
+  inventorySlots.forEach((slot, index) =>
+    renderSlot(slot, inventory?.slots[index] ?? null, inventory !== null && index === inventory?.selectedHotbarSlot));
+  equipmentSlots.forEach((slot, index) =>
+    renderSlot(slot, inventory?.equipment[EQUIPMENT_SLOTS[index][0]] ?? null, false));
 }
 
+// --------------------------------------------------------------------------------------------------- Tooltips
+
+function shadowColor(color) {
+  // Minecraft draws text shadows at a quarter of the text colour's brightness.
+  const value = parseInt(color.slice(1), 16);
+  const channel = shift => Math.floor(((value >> shift) & 255) / 4);
+  return `rgb(${channel(16)}, ${channel(8)}, ${channel(0)})`;
+}
+
+function showTooltip(item, event) {
+  if (!item || item.empty) return hideTooltip();
+  const lines = item.tooltip.length ? item.tooltip : [[{ text: item.name, color: null, format: "" }]];
+  tooltip.replaceChildren(...lines.map(line => {
+    const row = create("div", "line");
+    for (const segment of line) {
+      const span = create("span", [...segment.format].join(" "), segment.text);
+      if (segment.color) {
+        span.style.color = segment.color;
+        span.style.textShadow = `1px 1px 0 ${shadowColor(segment.color)}`;
+      }
+      row.appendChild(span);
+    }
+    return row;
+  }));
+  setHidden(tooltip, false);
+  if (event) positionTooltip(event);
+}
+
+function positionTooltip(event) {
+  if (tooltip.hidden || !tooltip.getBoundingClientRect) return;
+  const box = tooltip.getBoundingClientRect();
+  const x = event.clientX + 16 + box.width > window.innerWidth - 8 ? event.clientX - 16 - box.width : event.clientX + 16;
+  const y = Math.min(Math.max(8, event.clientY - 12), window.innerHeight - box.height - 8);
+  tooltip.style.left = `${Math.max(8, x)}px`;
+  tooltip.style.top = `${Math.max(8, y)}px`;
+}
+
+function hideTooltip() {
+  setHidden(tooltip, true);
+}
+
+// ------------------------------------------------------------------------------------- Player and statistics
+
 function setConnection(online) {
-  connection.textContent = online ? "Dashboard connected" : "Disconnected · reconnecting";
+  connection.textContent = online ? "Connected" : "Disconnected · reconnecting";
   dot.className = online ? "dot online" : "dot offline";
 }
 
@@ -247,6 +241,8 @@ function formatCounter(value, unit) {
   return value.toLocaleString();
 }
 
+const formatNumber = value => Number.isInteger(value) ? String(value) : value.toFixed(1);
+
 function renderStatistics(statistics) {
   writeText(statisticsStatus, statistics ? "Client counters" : "Unavailable");
   const key = JSON.stringify(statistics);
@@ -255,32 +251,36 @@ function renderStatistics(statistics) {
   const groups = new Map();
   for (const entry of statistics?.entries ?? []) {
     if (!groups.has(entry.category)) {
-      const section = document.createElement("section");
-      section.className = "statistics-group";
-      const heading = document.createElement("h3");
-      heading.textContent = entry.category;
-      section.appendChild(heading);
+      const section = create("section", "statistics-group");
+      section.appendChild(create("h3", "prio-3", entry.category));
       groups.set(entry.category, section);
     }
-    const row = document.createElement("p");
-    row.className = "counter-row";
-    row.textContent = `${entry.label}\nCumulative: ${formatCounter(entry.cumulative, entry.unit)} · Session: ${formatCounter(entry.session, entry.unit)}`;
+    const row = create("div", IMPORTANT_COUNTERS.has(entry.id) ? "counter-row" : "counter-row prio-2");
+    row.appendChild(create("span", "label", entry.label));
+    row.appendChild(create("span", "total", formatCounter(entry.cumulative, entry.unit)));
+    row.appendChild(create("span", "session prio-2", entry.session === null ? "" : `+${formatCounter(entry.session, entry.unit)}`));
     groups.get(entry.category).appendChild(row);
   }
   if (!groups.size) {
-    const empty = document.createElement("p");
-    empty.className = "card-copy";
-    empty.textContent = statistics ? "No counters available." : "Statistics unavailable.";
-    statisticsEntries.replaceChildren(empty);
+    statisticsEntries.replaceChildren(create("p", "empty-note",
+      statistics ? "No counters available." : "Statistics unavailable."));
   } else {
     statisticsEntries.replaceChildren(...groups.values());
   }
 }
 
+// ------------------------------------------------------------------------------------------------ Activity log
+
+function formatTime(timestamp) {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return String(timestamp);
+  return [date.getHours(), date.getMinutes(), date.getSeconds()].map(part => String(part).padStart(2, "0")).join(":");
+}
+
 function renderHistory(history) {
   displayedHistory = history;
   writeText(historyStatus, !history || history.sessionId === 0
-    ? "No session" : `${history.active ? "Current" : "Stale"} session ${history.sessionId}`);
+    ? "No session" : `${history.active ? "Current" : "Previous"} session · ${history.events.length}`);
   if (historySessionId !== history?.sessionId) {
     historyNodes = new Map();
     historySessionId = history?.sessionId;
@@ -294,15 +294,20 @@ function renderHistory(history) {
   for (const event of events) {
     let node = historyNodes.get(event.id);
     if (!node) {
-      node = document.createElement("details");
-      node.className = "history-event";
-      node.appendChild(document.createElement("summary"));
-      node.appendChild(document.createElement("p"));
+      node = create("details", "history-event");
+      const summary = create("summary");
+      summary.appendChild(create("span", "time"));
+      summary.appendChild(create("span", "category prio-2"));
+      summary.appendChild(create("span", "label"));
+      node.appendChild(summary);
+      node.appendChild(create("p"));
       historyNodes.set(event.id, node);
     }
-    const date = new Date(event.timestamp);
-    const timestamp = Number.isNaN(date.getTime()) ? String(event.timestamp) : date.toISOString();
-    writeText(node.children[0], `${timestamp} · ${event.category} · ${event.label}`);
+    if (node.dataset.category !== event.category) node.dataset.category = event.category;
+    const [time, category, label] = node.children[0].children;
+    writeText(time, formatTime(event.timestamp));
+    writeText(category, CATEGORY_LABELS[event.category]);
+    writeText(label, event.label);
     writeText(node.children[1], event.details || "No additional details.");
   }
   const query = historySearch.value.trim().toLowerCase();
@@ -325,28 +330,203 @@ function renderPlayer(player) {
   renderStatistics(player?.available ? player.statistics : null);
   renderHistory(player?.history);
   if (!player?.available) {
-    gameStatus.textContent = "No active world";
-    healthValue.textContent = "—";
-    sessionValue.textContent = "—";
-    dimensionValue.textContent = "—";
-    positionValue.textContent = "Position unavailable";
+    writeText(gameStatus, "No active world");
+    writeText(healthValue, "—");
+    writeText(sessionValue, "—");
+    writeText(dimensionValue, "—");
+    writeText(positionValue, "Position unavailable");
+    healthFill.style.width = "0%";
+    absorptionFill.style.width = "0%";
     return;
   }
-  gameStatus.textContent = "In world";
-  healthValue.textContent = `${player.health} / ${player.maxHealth}${player.absorption > 0 ? ` (+${player.absorption})` : ""}`;
-  sessionValue.textContent = formatDuration(player.sessionSeconds);
-  dimensionValue.textContent = player.dimension || "Unknown";
+  writeText(gameStatus, "In world");
+  writeText(healthValue, `${formatNumber(player.health)} / ${formatNumber(player.maxHealth)}`
+    + (player.absorption > 0 ? ` +${formatNumber(player.absorption)}` : ""));
+  const max = Math.max(player.maxHealth, 1);
+  const healthPercent = Math.min(100, player.health / max * 100);
+  healthFill.style.width = `${healthPercent}%`;
+  absorptionFill.style.left = `${healthPercent}%`;
+  absorptionFill.style.width = `${Math.min(100 - healthPercent, player.absorption / max * 100)}%`;
+  writeText(sessionValue, formatDuration(player.sessionSeconds));
+  writeText(dimensionValue, player.dimension || "Unknown");
   const pos = player.position;
-  positionValue.textContent = pos ? `X ${pos.x.toFixed(1)} · Y ${pos.y.toFixed(1)} · Z ${pos.z.toFixed(1)}` : "Position unavailable";
+  writeText(positionValue, `X ${pos.x.toFixed(1)} · Y ${pos.y.toFixed(1)} · Z ${pos.z.toFixed(1)}`);
 }
 
 function clearLiveData() {
   currentPlayerState = undefined;
   renderPlayer(null);
-  gameStatus.textContent = "Unavailable";
-  stateMessage.textContent = "Waiting for a fresh MinePanel snapshot.";
-  version.textContent = "·";
+  writeText(gameStatus, "Unavailable");
+  writeText(stateMessage, "Waiting for a fresh MinePanel snapshot.");
+  writeText(version, "·");
 }
+
+// ---------------------------------------------------------------------------------------------------- Layout
+
+let layout = defaultLayout();
+let layoutLoaded = false;
+let layoutChanged = false;
+let editing = false;
+let saveTimer;
+let drag;
+const tileElements = Object.fromEntries(TILE_IDS.map(id => [id, $(`#tile-${id}`)]));
+const tileToggles = Object.fromEntries(TILE_IDS.map(id => {
+  const chip = create("button", "chip", TILE_LABELS[id]);
+  chip.type = "button";
+  chip.addEventListener("click", () => {
+    const tile = layout.tiles.find(value => value.id === id);
+    changeLayout(setTileEnabled(layout, id, !tile.enabled));
+  });
+  $("#tile-toggles").appendChild(chip);
+  return [id, chip];
+}));
+
+function applyLayout() {
+  const order = [...layout.tiles].sort((a, b) => a.y - b.y || a.x - b.x);
+  for (const tile of layout.tiles) {
+    const element = tileElements[tile.id];
+    setHidden(element, !tile.enabled);
+    element.style.setProperty("--grid-column", `${tile.x + 1} / span ${tile.w}`);
+    element.style.setProperty("--grid-row", `${tile.y + 1} / span ${tile.h}`);
+    element.style.setProperty("--grid-row-span", `span ${tile.h}`);
+    element.style.setProperty("--order", String(order.indexOf(tile)));
+    tileToggles[tile.id].setAttribute("aria-pressed", String(tile.enabled));
+  }
+}
+
+function changeLayout(next) {
+  layout = next;
+  layoutChanged = true;
+  applyLayout();
+  scheduleSave();
+}
+
+function setLayoutStatus(text, error = false) {
+  writeText(layoutStatus, text);
+  layoutStatus.className = error ? "save-status error" : "save-status";
+}
+
+function scheduleSave() {
+  window.clearTimeout(saveTimer);
+  setLayoutStatus("Saving…");
+  saveTimer = window.setTimeout(async () => {
+    try {
+      const response = await fetch("/api/layout", { method: "PUT", cache: "no-store",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify(layout) });
+      if (!response.ok) throw new Error("Layout not saved");
+      setLayoutStatus("Saved to config/minepanel/layout.json");
+    } catch {
+      setLayoutStatus("Not saved", true);
+    }
+  }, 400);
+}
+
+async function loadLayout() {
+  if (layoutLoaded) return;
+  try {
+    const response = await fetch("/api/layout", { cache: "no-store" });
+    if (!response.ok) return;
+    const { layout: stored } = await response.json();
+    layoutLoaded = true;
+    if (stored && !layoutChanged) {
+      layout = normalizeLayout(stored);
+      applyLayout();
+    }
+  } catch {
+    // Keep the default layout; the next connection retries.
+  }
+}
+
+function setEditing(value) {
+  editing = value;
+  grid.className = editing ? "grid editing" : "grid";
+  setHidden(editToolbar, !editing);
+  editToggle.setAttribute("aria-pressed", String(editing));
+  if (!editing) setLayoutStatus("");
+}
+
+editToggle.addEventListener("click", () => setEditing(!editing));
+$("#edit-done").addEventListener("click", () => setEditing(false));
+$("#layout-reset").addEventListener("click", () => changeLayout(defaultLayout()));
+$("#layout-export").addEventListener("click", () => {
+  const link = create("a");
+  link.href = URL.createObjectURL(new Blob([JSON.stringify(layout, null, 2)], { type: "application/json" }));
+  link.download = "minepanel-layout.json";
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+});
+$("#layout-import").addEventListener("click", () => layoutFile.click());
+layoutFile.addEventListener("change", async () => {
+  const file = layoutFile.files?.[0];
+  layoutFile.value = "";
+  if (!file) return;
+  try {
+    changeLayout(normalizeLayout(JSON.parse(await file.text())));
+  } catch {
+    setLayoutStatus("That file is not a MinePanel layout", true);
+  }
+});
+
+function gridMetrics() {
+  const box = grid.getBoundingClientRect();
+  const style = window.getComputedStyle(grid);
+  const left = box.left + parseFloat(style.paddingLeft);
+  const top = box.top + parseFloat(style.paddingTop);
+  const width = box.width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+  const column = (width - GRID_GAP * (LAYOUT_COLUMNS - 1)) / LAYOUT_COLUMNS;
+  return { left, top, columnStride: column + GRID_GAP, rowStride: ROW_HEIGHT + GRID_GAP };
+}
+
+function startDrag(event, id, mode) {
+  if (!editing || event.button !== 0) return;
+  const element = tileElements[id];
+  const box = element.getBoundingClientRect();
+  drag = { id, mode, base: layout, metrics: gridMetrics(), tile: layout.tiles.find(tile => tile.id === id),
+    offsetX: event.clientX - box.left, offsetY: event.clientY - box.top, rect: null };
+  event.currentTarget.setPointerCapture(event.pointerId);
+  element.classList.add("dragging");
+  event.preventDefault();
+}
+
+function dragTo(event) {
+  if (!drag) return;
+  const { metrics, tile } = drag;
+  const rect = drag.mode === "move"
+    ? { x: Math.round((event.clientX - metrics.left - drag.offsetX) / metrics.columnStride),
+        y: Math.round((event.clientY - metrics.top - drag.offsetY) / metrics.rowStride) }
+    : { w: Math.round((event.clientX - metrics.left - tile.x * metrics.columnStride + GRID_GAP) / metrics.columnStride),
+        h: Math.round((event.clientY - metrics.top - tile.y * metrics.rowStride + GRID_GAP) / metrics.rowStride) };
+  if (JSON.stringify(rect) === JSON.stringify(drag.rect)) return;
+  drag.rect = rect;
+  layout = placeTile(drag.base, drag.id, rect, true);
+  applyLayout();
+}
+
+function endDrag() {
+  if (!drag) return;
+  tileElements[drag.id].classList.remove("dragging");
+  const finished = drag;
+  drag = undefined;
+  if (finished.rect) changeLayout(placeTile(finished.base, finished.id, finished.rect, false));
+}
+
+for (const id of TILE_IDS) {
+  const head = $(`#head-${id}`);
+  const handle = create("span", "resize-handle");
+  handle.setAttribute("aria-hidden", "true");
+  tileElements[id].appendChild(handle);
+  for (const [target, mode] of [[head, "move"], [handle, "resize"]]) {
+    target.addEventListener("pointerdown", event => startDrag(event, id, mode));
+    target.addEventListener("pointermove", dragTo);
+    target.addEventListener("pointerup", endDrag);
+    target.addEventListener("pointercancel", endDrag);
+  }
+}
+
+applyLayout();
+setEditing(false);
+
+// ------------------------------------------------------------------------------------------------ Connection
 
 function scheduleReconnect(delay) {
   if (pageHidden) return;
@@ -371,6 +551,7 @@ async function connect() {
     if (!Number.isInteger(websocketPort) || websocketPort < 1 || websocketPort > 65535) {
       throw new Error("Invalid local session");
     }
+    loadLayout();
     const socket = new WebSocket(`ws://127.0.0.1:${websocketPort}/ws`);
     activeSocket = socket;
     let rejected = false;
@@ -384,9 +565,9 @@ async function connect() {
         const message = JSON.parse(event.data);
         currentPlayerState = applyMessage(currentPlayerState, message);
         setConnection(true);
-        stateMessage.textContent = "Live read-only client telemetry.";
+        writeText(stateMessage, currentPlayerState.available ? "Live" : "Not in a world");
         renderPlayer(currentPlayerState);
-        version.textContent = `v${message.modVersion || "0.1.0"}`;
+        writeText(version, `v${message.modVersion || "0.1.0"}`);
       } catch {
         rejected = true;
         clearLiveData();

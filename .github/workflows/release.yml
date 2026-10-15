@@ -133,7 +133,7 @@ jobs:
               raise SystemExit(f"Expected exactly one nonempty release JAR: {source}; found {candidates}")
           required = (
               "fabric.mod.json", "minepanel.client.mixins.json",
-              "web/index.html", "web/app.js", "web/styles.css",
+              "web/index.html", "web/app.js", "web/styles.css", "web/protocol.js", "web/layout.js",
               "dev/craftyplayz/minepanel/MinePanelClient.class",
               "dev/craftyplayz/minepanel/mixin/StatisticsSyncMixin.class",
           )

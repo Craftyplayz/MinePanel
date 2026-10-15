@@ -14,7 +14,27 @@ public final class ItemExtractorTest {
         testMetadata();
         testEnchantmentsAndBounds();
         testInventoryAndChanges();
+        testTooltips();
         System.out.println("MinePanel read-only item extraction tests passed.");
+    }
+
+    private static void testTooltips() {
+        List<List<ItemExtractor.TooltipSegmentView>> source = new ArrayList<>();
+        source.add(List.of(new ItemExtractor.TooltipSegmentView("Name", 0x55ffff, "b"),
+                new ItemExtractor.TooltipSegmentView("", 0xffffff, ""),
+                new ItemExtractor.TooltipSegmentView("tab\there", null, "")));
+        source.add(List.of());
+        for (int index = 0; index < 80; index++) {
+            source.add(Collections.nCopies(40, new ItemExtractor.TooltipSegmentView("x", 0xff123456, "")));
+        }
+        var tooltip = ItemExtractor.tooltip(source);
+        check(tooltip.size() == ItemSnapshot.MAX_TOOLTIP_LINES && tooltip.get(1).isEmpty()
+                        && tooltip.get(2).size() == ItemSnapshot.MAX_TOOLTIP_SEGMENTS,
+                "oversized tooltips are truncated, blank lines kept");
+        check(tooltip.getFirst().size() == 2 && tooltip.getFirst().get(0).color().equals("#55ffff")
+                        && tooltip.getFirst().get(1).text().equals("tab here") && tooltip.getFirst().get(1).color() == null
+                        && tooltip.get(2).getFirst().color().equals("#123456"),
+                "empty runs dropped, control characters replaced, colors normalized to #rrggbb");
     }
 
     private static void testMetadata() {
