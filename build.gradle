@@ -73,8 +73,10 @@ tasks.register('releaseBuild') {
     group = 'build'
     description = 'Builds, tests, and validates the installable MinePanel release JAR.'
     dependsOn tasks.build
+    def jarFile = tasks.named('jar').flatMap { it.archiveFile }
+    def releaseDir = layout.buildDirectory.dir('release')
     doLast {
-        def artifact = tasks.jar.archiveFile.get().asFile
+        def artifact = jarFile.get().asFile
         if (!artifact.isFile()) {
             throw new GradleException("Release JAR was not created: ${artifact}")
         }
@@ -90,10 +92,9 @@ tasks.register('releaseBuild') {
         } finally {
             jar.close()
         }
-        copy {
-            from artifact
-            into layout.buildDirectory.dir('release')
-        }
-        logger.lifecycle("Validated release artifact: ${layout.buildDirectory.file("release/${artifact.name}").get().asFile}")
+        def destination = releaseDir.get().file(artifact.name).asFile
+        destination.parentFile.mkdirs()
+        java.nio.file.Files.copy(artifact.toPath(), destination.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        logger.lifecycle("Validated release artifact: ${destination}")
     }
 }
