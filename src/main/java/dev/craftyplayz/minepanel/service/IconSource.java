@@ -7,4 +7,9 @@ public interface IconSource {
 
     /** Returns the active resource pack's item glint texture as PNG bytes, or {@code null} if unavailable. */
     byte[] glint();
+
+    /** Returns the active resource pack's icon for a status effect such as {@code minecraft:speed}, or {@code null}. */
+    default byte[] effectIcon(String effectId) {
+        return null;
+    }
 }

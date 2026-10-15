@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
+import dev.craftyplayz.minepanel.telemetry.StatisticsSnapshot;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -15,11 +16,15 @@ import java.nio.file.StandardCopyOption;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /** Persists the dashboard tile layout as a small, strictly validated JSON config file. */
 public final class LayoutStore {
     public static final int COLUMNS = 12;
-    public static final int MAX_BYTES = 16 * 1024;
+    public static final int MAX_BYTES = 64 * 1024;
+    public static final int MAX_STATISTIC_IDS = 512;
+    private static final Pattern LOOPBACK_URL =
+            Pattern.compile("http://(127\\.0\\.0\\.1|localhost)(:[0-9]{1,5})?(/[A-Za-z0-9._~!$&'()*+,;=:@%/?#-]*)?");
     public static final List<String> TILE_IDS = List.of("player", "inventory", "statistics", "history", "map", "build");
     private final Path file;
 
@@ -90,7 +95,57 @@ public final class LayoutStore {
         JsonObject result = new JsonObject();
         result.addProperty("version", 1);
         result.add("tiles", normalizedTiles);
+        if (root.has("settings")) result.add("settings", settings(root.getAsJsonObject("settings")));
         return result.toString();
+    }
+
+    /** Per-tile preferences; unknown keys are dropped, malformed known keys reject the layout. */
+    private static JsonObject settings(JsonObject source) {
+        JsonObject result = new JsonObject();
+        if (source.has("inventory")) {
+            JsonObject inventory = source.getAsJsonObject("inventory");
+            JsonObject normalized = new JsonObject();
+            if (inventory.has("showArmor")) normalized.addProperty("showArmor", bool(inventory.get("showArmor")));
+            result.add("inventory", normalized);
+        }
+        if (source.has("statistics")) {
+            JsonObject statistics = source.getAsJsonObject("statistics");
+            JsonObject normalized = new JsonObject();
+            for (String key : List.of("shown", "recentExcluded")) {
+                if (statistics.has(key)) normalized.add(key, statisticIds(statistics.getAsJsonArray(key)));
+            }
+            result.add("statistics", normalized);
+        }
+        if (source.has("map")) {
+            JsonObject map = source.getAsJsonObject("map");
+            JsonObject normalized = new JsonObject();
+            if (map.has("url")) {
+                String url = map.get("url").getAsString();
+                if (!LOOPBACK_URL.matcher(url).matches()) throw new IllegalArgumentException("map URL must be loopback http");
+                normalized.addProperty("url", url);
+            }
+            result.add("map", normalized);
+        }
+        return result;
+    }
+
+    private static JsonArray statisticIds(JsonArray source) {
+        if (source.size() > MAX_STATISTIC_IDS) throw new IllegalArgumentException("too many statistics");
+        Set<String> seen = new HashSet<>();
+        JsonArray result = new JsonArray();
+        for (JsonElement element : source) {
+            String id = element.getAsJsonPrimitive().getAsString();
+            if (!StatisticsSnapshot.validId(id)) throw new IllegalArgumentException("invalid statistic id");
+            if (seen.add(id)) result.add(id);
+        }
+        return result;
+    }
+
+    private static boolean bool(JsonElement value) {
+        if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isBoolean()) {
+            throw new IllegalArgumentException("expected a boolean");
+        }
+        return value.getAsBoolean();
     }
 
     private static int integer(JsonElement value, int min, int max) {

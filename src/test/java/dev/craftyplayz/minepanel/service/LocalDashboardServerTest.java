@@ -389,6 +389,10 @@ public final class LocalDashboardServerTest {
             public byte[] glint() {
                 return icon;
             }
+
+            public byte[] effectIcon(String id) {
+                return id.equals("minecraft:speed") ? icon : null;
+            }
         };
         try (LocalDashboardServer server = new LocalDashboardServer(new TelemetryStore(), 0, icons,
                 new LayoutStore(file))) {
@@ -408,6 +412,13 @@ public final class LocalDashboardServerTest {
             check(get(base.resolve("icon/e0-missing.png")).statusCode() == 404, "unknown icons are not found");
             check(get(base.resolve("icon/..%2Fsecret.png")).statusCode() == 404, "icon keys cannot escape");
             check(get(base.resolve("glint.png")).statusCode() == 200, "glint texture is served");
+            check(get(base.resolve("effect/minecraft/speed.png")).statusCode() == 200, "effect icons are served");
+            check(get(base.resolve("effect/minecraft/flight.png")).statusCode() == 404, "unknown effect icons are not found");
+            check(get(base.resolve("effect/Minecraft/../speed.png")).statusCode() == 404, "effect paths are strict");
+            String csp = get(base).headers().firstValue("content-security-policy").orElse("");
+            check(csp.contains("frame-src http://127.0.0.1:* http://localhost:*")
+                            && csp.contains("connect-src 'self' ws://127.0.0.1:") && !csp.contains("https:"),
+                    "only local map servers may be embedded or probed");
 
             check(get(base.resolve("api/layout")).statusCode() == 401, "layout requires the session cookie");
             HttpResponse<String> session = CLIENT.send(HttpRequest.newBuilder(base.resolve("api/session"))
@@ -442,6 +453,26 @@ public final class LocalDashboardServerTest {
                 check(put(base, cookie, origin, "application/json", invalid).statusCode() == 400,
                         "invalid layout rejected: " + invalid);
             }
+            String withSettings = "{\"version\":1,\"tiles\":[],\"settings\":{\"inventory\":{\"showArmor\":false,\"x\":1},"
+                    + "\"statistics\":{\"shown\":[\"minecraft:custom/minecraft:jump\",\"minecraft:custom/minecraft:jump\"],"
+                    + "\"recentExcluded\":[\"minecraft:custom/minecraft:play_time\"]},\"map\":{\"url\":\"http://127.0.0.1:8080/\"},"
+                    + "\"other\":true}}";
+            check(put(base, cookie, origin, "application/json", withSettings).statusCode() == 200, "settings saved");
+            check(java.nio.file.Files.readString(file).equals("{\"version\":1,\"tiles\":[],\"settings\":{"
+                            + "\"inventory\":{\"showArmor\":false},\"statistics\":{\"shown\":[\"minecraft:custom/minecraft:jump\"],"
+                            + "\"recentExcluded\":[\"minecraft:custom/minecraft:play_time\"]},"
+                            + "\"map\":{\"url\":\"http://127.0.0.1:8080/\"}}}"),
+                    "settings keep known, validated keys with duplicate ids removed");
+            for (String invalid : new String[] {
+                    "{\"version\":1,\"tiles\":[],\"settings\":{\"map\":{\"url\":\"https://example.com/\"}}}",
+                    "{\"version\":1,\"tiles\":[],\"settings\":{\"map\":{\"url\":\"http://127.0.0.1.evil.example/\"}}}",
+                    "{\"version\":1,\"tiles\":[],\"settings\":{\"inventory\":{\"showArmor\":\"no\"}}}",
+                    "{\"version\":1,\"tiles\":[],\"settings\":{\"statistics\":{\"shown\":[\"jump\"]}}}",
+                    "{\"version\":1,\"tiles\":[],\"settings\":[]}"}) {
+                check(put(base, cookie, origin, "application/json", invalid).statusCode() == 400,
+                        "invalid settings rejected: " + invalid);
+            }
+            check(put(base, cookie, origin, "application/json", layout).statusCode() == 200, "layout saved again");
             check(put(base, cookie, origin, "application/json", "x".repeat(LayoutStore.MAX_BYTES + 1)).statusCode() == 413,
                     "oversized layout rejected");
             check(java.nio.file.Files.readString(file).equals(saved), "rejected writes leave the saved layout intact");

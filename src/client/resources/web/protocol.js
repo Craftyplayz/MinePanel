@@ -104,22 +104,54 @@ function patchInventory(previous, patch) {
   });
 }
 
+const MAX_STATISTICS = 4096;
+const validStatisticId = value => typeof value === "string" && value.length <= 256
+  && /^[a-z0-9_.-]+:[a-z0-9_.-]+\/[a-z0-9_.-]+:[a-z0-9/._-]+$/.test(value);
+
+function validateStatistic(entry) {
+  requireValid(object(entry) && validStatisticId(entry.id) && validText(entry.label) && validText(entry.category)
+    && integer(entry.value) && entry.value <= 2147483647 && integer(entry.session) && entry.session <= entry.value
+    && validText(entry.display) && validText(entry.sessionDisplay)
+    && (entry.changedAt === null || integer(entry.changedAt)));
+  return { id: entry.id, label: entry.label, category: entry.category, value: entry.value, session: entry.session,
+    display: entry.display, sessionDisplay: entry.sessionDisplay, changedAt: entry.changedAt };
+}
+
 function validateStatistics(statistics) {
   if (statistics === null) return null;
-  requireValid(object(statistics) && Array.isArray(statistics.entries) && statistics.entries.length <= 32);
+  requireValid(object(statistics) && Array.isArray(statistics.entries) && statistics.entries.length <= MAX_STATISTICS);
   const ids = new Set();
-  const entries = statistics.entries.map(entry => {
-    requireValid(object(entry) && validIdentifier(entry.id) && !ids.has(entry.id)
-      && validText(entry.label) && ["Movement", "Combat", "General"].includes(entry.category)
-      && ["count", "cm", "ticks"].includes(entry.unit)
-      && (entry.cumulative === null || integer(entry.cumulative) && entry.cumulative <= 2147483647)
-      && (entry.session === null || integer(entry.session) && entry.cumulative !== null
-        && entry.session <= entry.cumulative));
+  const entries = statistics.entries.map(value => {
+    const entry = validateStatistic(value);
+    requireValid(!ids.has(entry.id));
     ids.add(entry.id);
-    return { id: entry.id, label: entry.label, category: entry.category, unit: entry.unit,
-      cumulative: entry.cumulative, session: entry.session };
+    return entry;
   });
   return { entries };
+}
+
+/** A statistics update is a full replacement, null, or new/changed entries merged by id. */
+function applyStatistics(previous, patch) {
+  if (patch === null || object(patch) && has(patch, "entries")) return validateStatistics(patch);
+  requireValid(object(previous) && object(patch) && Array.isArray(patch.upsert)
+    && patch.upsert.length <= MAX_STATISTICS);
+  const entries = new Map(previous.entries.map(entry => [entry.id, entry]));
+  for (const value of patch.upsert) {
+    const entry = validateStatistic(value);
+    entries.set(entry.id, entry);
+  }
+  return validateStatistics({ entries: [...entries.values()].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0) });
+}
+
+function validateEffects(effects) {
+  if (effects === null) return null;
+  requireValid(Array.isArray(effects) && effects.length <= 64);
+  return effects.map(effect => {
+    requireValid(object(effect) && validIdentifier(effect.id) && validText(effect.name)
+      && integer(effect.amplifier) && effect.amplifier <= 255
+      && (effect.endsAt === null || integer(effect.endsAt)) && typeof effect.beacon === "boolean");
+    return { id: effect.id, name: effect.name, amplifier: effect.amplifier, endsAt: effect.endsAt, beacon: effect.beacon };
+  });
 }
 
 function validateEvent(event) {
@@ -166,19 +198,23 @@ function applyHistory(previous, patch) {
 function validatePlayer(state) {
   requireValid(object(state) && state.schemaVersion === 2 && integer(state.revision)
     && integer(state.capturedAt) && typeof state.available === "boolean" && object(state.position)
-    && has(state, "inventory") && has(state, "statistics") && has(state, "history"));
+    && has(state, "inventory") && has(state, "statistics") && has(state, "history")
+    && has(state, "food") && has(state, "saturation") && has(state, "effects"));
   if (state.available) {
     requireValid(state.inventory !== null && integer(state.sessionSeconds) && typeof state.dimension === "string"
       && ["x", "y", "z"].every(key => finite(state.position[key]))
-      && ["health", "maxHealth", "absorption"].every(key => finite(state[key]) && state[key] >= 0));
+      && ["health", "maxHealth", "absorption"].every(key => finite(state[key]) && state[key] >= 0)
+      && integer(state.food) && state.food <= 20
+      && finite(state.saturation) && state.saturation >= 0 && state.saturation <= 20 && state.effects !== null);
   } else {
-    requireValid(["sessionSeconds", "dimension", "health", "maxHealth", "absorption"]
+    requireValid(["sessionSeconds", "dimension", "health", "maxHealth", "absorption", "food", "saturation", "effects"]
       .every(key => state[key] === null)
       && ["x", "y", "z"].every(key => state.position[key] === null) && state.inventory === null
       && state.statistics === null && state.history?.active === false);
   }
   return { ...state, inventory: validateInventory(state.inventory),
-    statistics: validateStatistics(state.statistics), history: validateHistory(state.history) };
+    statistics: validateStatistics(state.statistics), history: validateHistory(state.history),
+    effects: validateEffects(state.effects) };
 }
 
 function applyMessage(previous, message) {
@@ -199,6 +235,7 @@ function applyMessage(previous, message) {
     ...previous, ...state,
     position: { ...previous.position, ...state.position },
     inventory: has(state, "inventory") ? patchInventory(previous.inventory, state.inventory) : previous.inventory,
+    statistics: has(state, "statistics") ? applyStatistics(previous.statistics, state.statistics) : previous.statistics,
     history: has(state, "history") ? applyHistory(previous.history, state.history) : previous.history
   };
   return validatePlayer(next);

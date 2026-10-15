@@ -34,33 +34,40 @@
     <article class="tile" id="tile-player" data-tile="player" aria-labelledby="player-title">
       <header class="tile-head" id="head-player"><h2 id="player-title">Player</h2><span class="badge muted" id="game-status">Unavailable</span></header>
       <div class="tile-body">
-        <div class="health prio-1">
-          <div class="health-bar"><span id="health-fill"></span><span id="absorption-fill"></span></div>
+        <div class="vitals prio-1">
+          <div class="bars">
+            <div class="saturation-bar" title="Saturation"><span id="saturation-fill"></span></div>
+            <div class="health-bar" title="Health"><span id="health-fill"></span><span id="absorption-fill"></span></div>
+          </div>
           <strong id="health-value">—</strong>
         </div>
         <p class="position prio-1" id="position-value">Position unavailable</p>
+        <div class="effects prio-2" id="effects" aria-label="Status effects"></div>
         <dl class="facts">
-          <div class="prio-2"><dt>Dimension</dt><dd id="dimension-value">—</dd></div>
-          <div class="prio-2"><dt>Session</dt><dd id="session-value">—</dd></div>
+          <div class="prio-2"><dt>Food</dt><dd id="food-value">—</dd></div>
+          <div class="prio-3"><dt>Dimension</dt><dd id="dimension-value">—</dd></div>
+          <div class="prio-3"><dt>Session</dt><dd id="session-value">—</dd></div>
         </dl>
       </div>
     </article>
     <article class="tile" id="tile-inventory" data-tile="inventory" aria-labelledby="inventory-title">
-      <header class="tile-head" id="head-inventory"><h2 id="inventory-title">Inventory</h2><span class="badge muted" id="inventory-status">Unavailable</span></header>
-      <div class="tile-body">
-        <p class="held prio-3" id="held-value">Held item unavailable</p>
-        <div class="inventory-layout">
-          <div class="equipment prio-2" id="equipment-slots" aria-label="Armor and offhand"></div>
-          <div class="storage">
-            <div class="slots main prio-2" id="main-slots" aria-label="Main inventory"></div>
-            <div class="slots hotbar prio-1" id="hotbar-slots" aria-label="Hotbar"></div>
-          </div>
-        </div>
+      <header class="tile-head" id="head-inventory"><h2 id="inventory-title">Inventory</h2>
+        <span class="head-actions"><button type="button" class="chip small" id="armor-toggle" aria-pressed="true">Armor</button><span class="badge muted" id="inventory-status">Unavailable</span></span></header>
+      <div class="tile-body inventory-body" id="inventory-body">
+        <p class="held" id="held-value">Held item unavailable</p>
+        <div class="inventory-grid" id="inventory-grid" aria-label="Inventory"></div>
       </div>
     </article>
     <article class="tile" id="tile-statistics" data-tile="statistics" aria-labelledby="statistics-title">
-      <header class="tile-head" id="head-statistics"><h2 id="statistics-title">Statistics</h2><span class="badge muted" id="statistics-status">Unavailable</span></header>
-      <div class="tile-body scroll" id="statistics-entries" aria-label="Gameplay counters"></div>
+      <header class="tile-head" id="head-statistics"><h2 id="statistics-title">Statistics</h2>
+        <span class="head-actions"><span class="badge muted" id="statistics-status">Unavailable</span><button type="button" class="icon-button" id="statistics-settings" aria-label="Choose statistics" title="Choose statistics">⚙</button></span></header>
+      <div class="tile-body scroll" id="statistics-body">
+        <div id="statistics-entries" aria-label="Chosen statistics"></div>
+        <section class="recent" id="statistics-recent-section" aria-labelledby="recent-title">
+          <h3 id="recent-title">Recent <span class="hint">· changed in the last minute</span></h3>
+          <div id="statistics-recent"></div>
+        </section>
+      </div>
     </article>
     <article class="tile" id="tile-history" data-tile="history" aria-labelledby="history-title">
       <header class="tile-head" id="head-history"><h2 id="history-title">Activity log</h2><span class="badge muted" id="history-status">No session</span></header>
@@ -90,8 +97,17 @@
       </div>
     </article>
     <article class="tile" id="tile-map" data-tile="map" aria-labelledby="map-title">
-      <header class="tile-head" id="head-map"><h2 id="map-title">JourneyMap</h2><span class="badge muted">Not connected</span></header>
-      <div class="tile-body placeholder"><p>JourneyMap Webmap integration is not available yet.</p></div>
+      <header class="tile-head" id="head-map"><h2 id="map-title">JourneyMap</h2>
+        <span class="head-actions"><span class="badge muted" id="map-status">Not connected</span><a class="icon-button" id="map-open" target="_blank" rel="noopener" title="Open the map in a new tab" aria-label="Open the map in a new tab">↗</a><button type="button" class="icon-button" id="map-settings" aria-label="Map address" title="Map address">⚙</button></span></header>
+      <div class="tile-body map-body">
+        <form class="map-address" id="map-address" hidden>
+          <label>JourneyMap web map address <input id="map-url" type="url" maxlength="200" placeholder="http://127.0.0.1:8080/"></label>
+          <button type="submit" class="button">Save</button>
+          <span class="save-status error" id="map-url-error" role="status"></span>
+        </form>
+        <iframe class="map-frame" id="map-frame" title="JourneyMap web map" hidden></iframe>
+        <div class="placeholder map-offline" id="map-offline"><p id="map-offline-text">Looking for the JourneyMap web map…</p></div>
+      </div>
     </article>
     <article class="tile" id="tile-build" data-tile="build" aria-labelledby="build-title">
       <header class="tile-head" id="head-build"><h2 id="build-title">Build progress</h2><span class="badge muted">Unavailable</span></header>
@@ -99,5 +115,19 @@
     </article>
   </main>
   <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+  <div class="dialog-backdrop" id="statistics-dialog" hidden>
+    <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="statistics-dialog-title">
+      <header class="dialog-head">
+        <h2 id="statistics-dialog-title">Statistics</h2>
+        <button type="button" class="button" id="statistics-dialog-close">Done</button>
+      </header>
+      <p class="dialog-note"><strong>Show</strong> pins a statistic to the tile. <strong>Recent</strong> lets it appear under Recent when it changes; pinned statistics never appear there twice.</p>
+      <div class="dialog-tools">
+        <input id="statistics-search" type="search" placeholder="Search statistics" maxlength="100" aria-label="Search statistics">
+        <button type="button" class="button quiet" id="statistics-defaults">Defaults</button>
+      </div>
+      <div class="dialog-list" id="statistics-options"></div>
+    </section>
+  </div>
 </body>
 </html>

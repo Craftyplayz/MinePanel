@@ -26,6 +26,7 @@ public final class LocalDashboardServer implements AutoCloseable {
     private static final Logger LOGGER = Logger.getLogger("MinePanel");
     private static final int MAX_RESPONSE_BYTES = 1024 * 1024;
     private static final Pattern ICON_PATH = Pattern.compile("/icon/([a-z0-9-]{1,64})\\.png");
+    private static final Pattern EFFECT_PATH = Pattern.compile("/effect/([a-z0-9_.-]{1,64})/([a-z0-9_.-]{1,128})\\.png");
     private static final Map<String, String[]> ASSETS = Map.of(
             "/", new String[] {"web/index.html", "text/html; charset=utf-8"},
             "/app.js", new String[] {"web/app.js", "text/javascript; charset=utf-8"},
@@ -123,6 +124,17 @@ public final class LocalDashboardServer implements AutoCloseable {
             var icon = ICON_PATH.matcher(path);
             if (icon.matches()) {
                 serveIcon(exchange, icon.group(1));
+                return;
+            }
+            var effect = EFFECT_PATH.matcher(path);
+            if (effect.matches()) {
+                byte[] png = icons == null ? null : icons.effectIcon(effect.group(1) + ":" + effect.group(2));
+                if (png == null) {
+                    respond(exchange, 404, "text/plain; charset=utf-8", "Effect icon unavailable");
+                } else {
+                    exchange.getResponseHeaders().set("Cache-Control", "private, max-age=3600");
+                    send(exchange, 200, "image/png", png);
+                }
                 return;
             }
             switch (path) {
@@ -303,9 +315,11 @@ public final class LocalDashboardServer implements AutoCloseable {
         exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
         exchange.getResponseHeaders().set("Referrer-Policy", "no-referrer");
         exchange.getResponseHeaders().set("Content-Security-Policy",
+                // Local map servers (JourneyMap's web map) may be embedded and probed; nothing off this PC is allowed.
                 "default-src 'self'; connect-src 'self' ws://127.0.0.1:" + getWebSocketPort()
-                        + "; img-src 'self'; style-src 'self'; script-src 'self'; "
-                        + "frame-src 'none'; frame-ancestors 'none'; object-src 'none'; form-action 'none'; base-uri 'none'");
+                        + " http://127.0.0.1:* http://localhost:*; img-src 'self'; style-src 'self'; script-src 'self'; "
+                        + "frame-src http://127.0.0.1:* http://localhost:*; frame-ancestors 'none'; object-src 'none'; "
+                        + "form-action 'none'; base-uri 'none'");
         exchange.sendResponseHeaders(status, body.length);
         try (OutputStream output = exchange.getResponseBody()) {
             output.write(body);

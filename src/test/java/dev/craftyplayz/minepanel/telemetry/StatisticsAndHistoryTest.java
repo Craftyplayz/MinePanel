@@ -14,26 +14,59 @@ public final class StatisticsAndHistoryTest {
 
     private static void testStatistics() {
         StatisticsTracker tracker = new StatisticsTracker();
-        var unknown = tracker.sample(Map.of());
-        check(unknown.entries().size() == 10 && entry(unknown, "jump").cumulative() == null,
-                "no packet value means unavailable, not zero");
-        check(unknown.toJson().contains("\"cumulative\":null,\"session\":null"), "explicit unavailable serialization");
-        var first = tracker.sample(Map.of("minecraft:jump", 50L, "minecraft:deaths", 0L));
-        check(entry(first, "jump").session() == 0 && entry(first, "deaths").cumulative() == 0,
-                "first synchronized observation establishes per-stat baseline; received zero remains valid");
-        var changed = tracker.sample(Map.of("minecraft:jump", 54L));
-        check(entry(changed, "jump").session() == 4, "session delta uses synchronized baseline");
-        check(entry(tracker.sample(Map.of("minecraft:jump", 52L)), "jump").session() == 0,
-                "decrease above initial baseline also invalidates session baseline");
-        var reset = tracker.sample(Map.of("minecraft:jump", 2L));
-        check(entry(reset, "jump").session() == 0, "counter decrease rebases without negative values");
+        check(tracker.sample(1, List.of()).entries().isEmpty(), "nothing is reported before statistics arrive");
+        var first = tracker.sample(10, List.of(jump(50), deaths(0)));
+        check(entry(first, JUMP).session() == 0 && entry(first, JUMP).changedAt() == null
+                        && entry(first, DEATHS).value() == 0 && entry(first, JUMP).display().equals("50 jumps"),
+                "first observation is the baseline, formatted with the game's formatter");
+        check(first.entries().getFirst().id().equals(DEATHS), "entries are sorted by id");
+        var changed = tracker.sample(20, List.of(jump(54), deaths(0)));
+        check(entry(changed, JUMP).session() == 4 && entry(changed, JUMP).sessionDisplay().equals("4 jumps")
+                        && entry(changed, JUMP).changedAt() == 20 && entry(changed, DEATHS).changedAt() == null,
+                "session delta and change time are tracked per statistic");
+        var later = tracker.sample(30, List.of(jump(54), deaths(0), mined(3)));
+        check(entry(later, JUMP).changedAt() == 20, "unchanged statistics keep their change time");
+        check(entry(later, MINED).session() == 3 && entry(later, MINED).changedAt() == 30,
+                "a statistic first seen after the baseline started from zero this session");
+        String delta = later.toDeltaJson(changed);
+        check(delta.startsWith("{\"upsert\":[") && delta.contains(MINED) && !delta.contains(JUMP),
+                "statistics deltas only send new or changed entries");
+        check(changed.toDeltaJson(later).startsWith("{\"entries\":["), "a removed statistic forces a full replacement");
+        check(entry(tracker.sample(40, List.of(jump(2))), JUMP).session() == 0, "counter decrease rebases");
         tracker.reset();
-        check(entry(tracker.sample(Map.of("minecraft:jump", 60L)), "jump").session() == 0, "new session rebases");
-        invalid(() -> tracker.sample(Map.of("minecraft:jump", -1L)));
+        check(entry(tracker.sample(50, List.of(jump(60))), JUMP).session() == 0, "new session rebases");
+        invalid(() -> tracker.sample(60, List.of(jump(-1))));
         invalid(() -> new StatisticsSnapshot(List.of(first.entries().getFirst(), first.entries().getFirst())));
-        invalid(() -> new StatisticsSnapshot.Entry(first.entries().getFirst().definition(), null, 0L));
-        invalid(() -> new StatisticsSnapshot.Entry(first.entries().getFirst().definition(), 1L, 2L));
+        invalid(() -> new StatisticsSnapshot.Entry("minecraft:jump", "Jumps", "General", 1, 2, "1", "2", null));
+        invalid(() -> new StatisticsSnapshot.Entry(JUMP, "Jumps", "General", 2, 3, "2", "3", null));
+        invalid(() -> new StatisticsSnapshot.Entry(JUMP, "", "General", 2, 1, "2", "1", null));
+        check(StatisticsSnapshot.validId(MINED) && !StatisticsSnapshot.validId("minecraft:mined/stone"),
+                "ids pair a stat type with a namespaced value");
         immutable(() -> first.entries().clear());
+
+        var effect = new StatusEffect("minecraft:speed", "Speed", 1, 5000L, true);
+        check(effect.toJson().equals("{\"id\":\"minecraft:speed\",\"name\":\"Speed\",\"amplifier\":1,"
+                + "\"endsAt\":5000,\"beacon\":true}"), "effects carry an end time and beacon source");
+        check(new StatusEffect("minecraft:night_vision", "Night Vision", 0, null, false).toJson()
+                .contains("\"endsAt\":null"), "infinite effects have no end time");
+        invalid(() -> new StatusEffect("speed", "Speed", 0, null, false));
+        invalid(() -> new StatusEffect("minecraft:speed", "Speed", 256, null, false));
+    }
+
+    private static final String JUMP = "minecraft:custom/minecraft:jump";
+    private static final String DEATHS = "minecraft:custom/minecraft:deaths";
+    private static final String MINED = "minecraft:mined/minecraft:stone";
+
+    private static StatisticsTracker.Sample jump(long value) {
+        return new StatisticsTracker.Sample(JUMP, "Jumps", "General", value, count -> count + " jumps");
+    }
+
+    private static StatisticsTracker.Sample deaths(long value) {
+        return new StatisticsTracker.Sample(DEATHS, "Deaths", "General", value, Long::toString);
+    }
+
+    private static StatisticsTracker.Sample mined(long value) {
+        return new StatisticsTracker.Sample(MINED, "Stone", "Mined", value, Long::toString);
     }
 
     private static void testEvents() {
@@ -160,18 +193,30 @@ public final class StatisticsAndHistoryTest {
         GameplayTracker history = new GameplayTracker();
         history.start(100);
         StatisticsTracker tracker = new StatisticsTracker();
-        var stats = tracker.sample(Map.of("minecraft:jump", 2L));
+        var stats = tracker.sample(100, List.of(jump(2), deaths(1)));
         check(update(store, 100, stats, history.snapshot()), "initial extended snapshot");
         PlayerSnapshot first = store.player();
         check(first.toJson().contains("\"schemaVersion\":2") && first.toJson().contains("\"statistics\":{\"entries\":[")
-                && first.toJson().contains("\"history\":{\"sessionId\":1"), "full fields serialized");
+                && first.toJson().contains("\"history\":{\"sessionId\":1")
+                && first.toJson().endsWith("\"food\":20,\"saturation\":5.0,\"effects\":[]}"), "full fields serialized");
         check(!update(store, 101, stats, history.snapshot()), "unchanged snapshot suppressed");
-        var changed = tracker.sample(Map.of("minecraft:jump", 4L));
+        var changed = tracker.sample(102, List.of(jump(4), deaths(1)));
         update(store, 102, changed, history.snapshot());
         String delta = store.player().toDeltaJson(first);
-        check(delta.contains("\"statistics\":") && delta.contains("\"session\":2")
-                && !delta.contains("\"history\":") && !delta.contains("\"inventory\":"),
-                "statistics delta replaces changed counters only, preserving existing inventory");
+        check(delta.contains("\"statistics\":{\"upsert\":[") && delta.contains("\"session\":2")
+                && !delta.contains(DEATHS) && !delta.contains("\"history\":") && !delta.contains("\"inventory\":"),
+                "statistics delta sends changed counters only, preserving existing inventory");
+        PlayerSnapshot beforeEffects = store.player();
+        store.updatePlayer(102, 0L, "minecraft:overworld", 0.0, 64.0, 0.0, 20.0, 20.0, 0.0, InventorySnapshot.empty(),
+                changed, history.snapshot(), 17, 2.5, List.of(new StatusEffect("minecraft:speed", "Speed", 0, 9000L, false)));
+        String effectDelta = store.player().toDeltaJson(beforeEffects);
+        check(effectDelta.contains("\"food\":17,\"saturation\":2.5,\"effects\":[{\"id\":\"minecraft:speed\"")
+                && !effectDelta.contains("\"statistics\""), "food, saturation and effects are sent when they change");
+        invalid(() -> store.updatePlayer(103, 0L, "minecraft:overworld", 0.0, 64.0, 0.0, 20.0, 20.0, 0.0,
+                InventorySnapshot.empty(), changed, history.snapshot(), 21, 2.5, List.of()));
+        invalid(() -> store.updatePlayer(103, 0L, "minecraft:overworld", 0.0, 64.0, 0.0, 20.0, 20.0, 0.0,
+                InventorySnapshot.empty(), changed, history.snapshot(), 20, Double.NaN, List.of()));
+        update(store, 102, changed, history.snapshot());
         PlayerSnapshot previous = store.player();
         history.observe(103, "minecraft:overworld", false);
         history.observe(104, "minecraft:the_end", false);
@@ -186,7 +231,7 @@ public final class StatisticsAndHistoryTest {
                 && store.player().history().events().size() == 3, "disconnect clears live values but retains events");
         check(!store.markUnavailable(106, history.snapshot()), "unchanged unavailable state suppressed");
         history.start(107);
-        update(store, 107, tracker.sample(Map.of()), history.snapshot());
+        update(store, 107, tracker.sample(107, List.of()), history.snapshot());
         check(store.player().history().events().size() == 1 && store.player().history().sessionId() == 2,
                 "new session publishes reset history");
         GameplayTracker deltas = new GameplayTracker();
@@ -214,8 +259,7 @@ public final class StatisticsAndHistoryTest {
     }
 
     private static StatisticsSnapshot.Entry entry(StatisticsSnapshot snapshot, String id) {
-        return snapshot.entries().stream().filter(value -> value.definition().id().equals("minecraft:" + id))
-                .findFirst().orElseThrow();
+        return snapshot.entries().stream().filter(value -> value.id().equals(id)).findFirst().orElseThrow();
     }
 
     private static void check(boolean condition, String message) {

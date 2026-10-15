@@ -1,5 +1,6 @@
 package dev.craftyplayz.minepanel.telemetry;
 
+import java.util.List;
 import java.util.Objects;
 
 public record PlayerSnapshot(
@@ -16,8 +17,19 @@ public record PlayerSnapshot(
         Double absorption,
         InventorySnapshot inventory,
         StatisticsSnapshot statistics,
-        GameplayHistory history
+        GameplayHistory history,
+        Integer food,
+        Double saturation,
+        List<StatusEffect> effects
 ) {
+    public PlayerSnapshot(long revision, long capturedAt, boolean available, Long sessionSeconds, String dimension,
+                          Double x, Double y, Double z, Double health, Double maxHealth, Double absorption,
+                          InventorySnapshot inventory, StatisticsSnapshot statistics, GameplayHistory history) {
+        this(revision, capturedAt, available, sessionSeconds, dimension, x, y, z, health, maxHealth, absorption,
+                inventory, statistics, history, available ? 20 : null, available ? 5.0 : null,
+                available ? List.of() : null);
+    }
+
     public PlayerSnapshot(long revision, long capturedAt, boolean available, Long sessionSeconds, String dimension,
                           Double x, Double y, Double z, Double health, Double maxHealth, Double absorption,
                           InventorySnapshot inventory) {
@@ -46,13 +58,19 @@ public record PlayerSnapshot(
             Objects.requireNonNull(maxHealth, "maxHealth");
             Objects.requireNonNull(absorption, "absorption");
             Objects.requireNonNull(inventory, "inventory");
-            if (dimension.length() > 256 || sessionSeconds < 0 || !finite(x, y, z, health, maxHealth, absorption)
-                    || health < 0 || maxHealth < 0 || absorption < 0) {
+            Objects.requireNonNull(food, "food");
+            Objects.requireNonNull(saturation, "saturation");
+            Objects.requireNonNull(effects, "effects");
+            if (dimension.length() > 256 || sessionSeconds < 0 || !finite(x, y, z, health, maxHealth, absorption, saturation)
+                    || health < 0 || maxHealth < 0 || absorption < 0
+                    || food < 0 || food > 20 || saturation < 0 || saturation > 20
+                    || effects.size() > StatusEffect.MAX_EFFECTS) {
                 throw new IllegalArgumentException("available player values must be finite and non-negative");
             }
+            effects = List.copyOf(effects);
         } else if (sessionSeconds != null || dimension != null || x != null || y != null || z != null
                 || health != null || maxHealth != null || absorption != null || inventory != null || statistics != null
-                || history.active()) {
+                || food != null || saturation != null || effects != null || history.active()) {
             throw new IllegalArgumentException("unavailable player values must be null");
         }
     }
@@ -78,7 +96,20 @@ public record PlayerSnapshot(
                 + ",\"absorption\":" + number(absorption)
                 + ",\"inventory\":" + (inventory == null ? "null" : inventory.toJson())
                 + ",\"statistics\":" + (statistics == null ? "null" : statistics.toJson())
-                + ",\"history\":" + history.toJson() + "}";
+                + ",\"history\":" + history.toJson()
+                + ",\"food\":" + number(food)
+                + ",\"saturation\":" + number(saturation)
+                + ",\"effects\":" + effectsJson() + "}";
+    }
+
+    private String effectsJson() {
+        if (effects == null) return "null";
+        StringBuilder json = new StringBuilder("[");
+        for (int index = 0; index < effects.size(); index++) {
+            if (index > 0) json.append(',');
+            json.append(effects.get(index).toJson());
+        }
+        return json.append(']').toString();
     }
 
     public String toDeltaJson(PlayerSnapshot previous) {
@@ -123,11 +154,14 @@ public record PlayerSnapshot(
             appendField(json, "inventory", inventory == null ? "null" : inventory.toDeltaJson(previous.inventory));
         }
         if (!Objects.equals(statistics, previous.statistics)) {
-            appendField(json, "statistics", statistics == null ? "null" : statistics.toJson());
+            appendField(json, "statistics", statistics == null ? "null" : statistics.toDeltaJson(previous.statistics));
         }
         if (!Objects.equals(history, previous.history)) {
             appendField(json, "history", history.toDeltaJson(previous.history));
         }
+        if (!Objects.equals(food, previous.food)) appendField(json, "food", number(food));
+        if (!Objects.equals(saturation, previous.saturation)) appendField(json, "saturation", number(saturation));
+        if (!Objects.equals(effects, previous.effects)) appendField(json, "effects", effectsJson());
         return json.append('}').toString();
     }
 
@@ -140,7 +174,9 @@ public record PlayerSnapshot(
                 && Objects.equals(absorption, other.absorption)
                 && Objects.equals(inventory, other.inventory)
                 && Objects.equals(statistics, other.statistics)
-                && Objects.equals(history, other.history);
+                && Objects.equals(history, other.history)
+                && Objects.equals(food, other.food) && Objects.equals(saturation, other.saturation)
+                && Objects.equals(effects, other.effects);
     }
 
     private static boolean finite(Double... values) {

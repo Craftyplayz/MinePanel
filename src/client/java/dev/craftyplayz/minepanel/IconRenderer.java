@@ -49,6 +49,7 @@ final class IconRenderer implements IconSource {
 
     private final Map<String, CompletableFuture<byte[]>> icons = new ConcurrentHashMap<>();
     private final ArrayDeque<Pending> pending = new ArrayDeque<>();
+    private final Map<String, byte[]> effectIcons = new ConcurrentHashMap<>();
     private final PoseStack poseStack = new PoseStack();
     private final Projection projection = new Projection();
     private volatile int epoch;
@@ -88,6 +89,7 @@ final class IconRenderer implements IconSource {
         icons.values().forEach(future -> future.complete(null));
         icons.clear();
         pending.clear();
+        effectIcons.clear();
         glint = null;
         glintMissing = false;
     }
@@ -106,6 +108,27 @@ final class IconRenderer implements IconSource {
     @Override
     public byte[] glint() {
         return glint;
+    }
+
+    /** Effect icons are plain textures, so they are read from the active resource packs rather than rendered. */
+    @Override
+    public byte[] effectIcon(String effectId) {
+        Identifier id = Identifier.tryParse(effectId);
+        if (id == null) return null;
+        byte[] cached = effectIcons.get(effectId);
+        if (cached != null) return cached.length == 0 ? null : cached;
+        var resource = Minecraft.getInstance().getResourceManager()
+                .getResource(id.withPath(path -> "textures/mob_effect/" + path + ".png"));
+        byte[] bytes = new byte[0];
+        if (resource.isPresent()) {
+            try (InputStream input = resource.get().open()) {
+                bytes = input.readNBytes(1024 * 1024);
+            } catch (IOException | RuntimeException unreadable) {
+                bytes = new byte[0];
+            }
+        }
+        if (effectIcons.size() < 512) effectIcons.put(effectId, bytes);
+        return bytes.length == 0 ? null : bytes;
     }
 
     /** Render thread, between frames. */

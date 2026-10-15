@@ -11,13 +11,32 @@ const version = $("#version");
 const healthValue = $("#health-value");
 const healthFill = $("#health-fill");
 const absorptionFill = $("#absorption-fill");
+const saturationFill = $("#saturation-fill");
+const foodValue = $("#food-value");
+const effectsList = $("#effects");
 const sessionValue = $("#session-value");
 const dimensionValue = $("#dimension-value");
 const positionValue = $("#position-value");
 const inventoryStatus = $("#inventory-status");
+const inventoryBody = $("#inventory-body");
+const inventoryGrid = $("#inventory-grid");
+const armorToggle = $("#armor-toggle");
 const heldValue = $("#held-value");
 const statisticsStatus = $("#statistics-status");
 const statisticsEntries = $("#statistics-entries");
+const statisticsRecent = $("#statistics-recent");
+const statisticsRecentSection = $("#statistics-recent-section");
+const statisticsDialog = $("#statistics-dialog");
+const statisticsOptions = $("#statistics-options");
+const statisticsSearch = $("#statistics-search");
+const mapFrame = $("#map-frame");
+const mapOffline = $("#map-offline");
+const mapOfflineText = $("#map-offline-text");
+const mapStatus = $("#map-status");
+const mapOpen = $("#map-open");
+const mapAddress = $("#map-address");
+const mapUrlInput = $("#map-url");
+const mapUrlError = $("#map-url-error");
 const historyStatus = $("#history-status");
 const historyEntries = $("#history-entries");
 const historyEmpty = $("#history-empty");
@@ -35,11 +54,11 @@ const TILE_LABELS = { player: "Player", inventory: "Inventory", statistics: "Sta
 const CATEGORY_LABELS = { lifecycle: "Session", death: "Death", dimension: "Dimension", kill: "Kill",
   mine: "Mined", place: "Placed", container: "Opened", inventory: "Inventory", drop: "Dropped",
   damage: "Damage", heal: "Healed", advancement: "Advancement" };
-const IMPORTANT_COUNTERS = new Set(["minecraft:walk_one_cm", "minecraft:sprint_one_cm", "minecraft:deaths",
-  "minecraft:mob_kills", "minecraft:player_kills", "minecraft:play_time"]);
 const EQUIPMENT_SLOTS = [["head", "Head"], ["chest", "Chest"], ["legs", "Legs"], ["feet", "Feet"], ["offhand", "Offhand"]];
 const ROW_HEIGHT = 40;
 const GRID_GAP = 10;
+const RECENT_MILLIS = 60_000;
+const HELD_LINE_HEIGHT = 22;
 
 let activeSocket;
 let reconnectTimer;
@@ -162,10 +181,71 @@ function renderSlot(slot, item, selected) {
   if (changed && hoveredSlot === slot) showTooltip(item);
 }
 
-const hotbarSlots = Array.from({ length: 9 }, () => createSlot($("#hotbar-slots")));
-const mainSlots = Array.from({ length: 27 }, () => createSlot($("#main-slots")));
+const hotbarSlots = Array.from({ length: 9 }, () => createSlot(inventoryGrid));
+const mainSlots = Array.from({ length: 27 }, () => createSlot(inventoryGrid));
 const inventorySlots = [...hotbarSlots, ...mainSlots];
-const equipmentSlots = EQUIPMENT_SLOTS.map(([, label]) => createSlot($("#equipment-slots"), label));
+const equipmentSlots = EQUIPMENT_SLOTS.map(([, label]) => createSlot(inventoryGrid, label));
+const inventoryRows = {
+  hotbar: hotbarSlots, main1: mainSlots.slice(0, 9), main2: mainSlots.slice(9, 18), main3: mainSlots.slice(18, 27),
+  equipment: equipmentSlots
+};
+let inventoryArrangementKey;
+
+function bodySize(element) {
+  const box = element.getBoundingClientRect();
+  const style = window.getComputedStyle?.(element) ?? {};
+  const horizontal = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+  const vertical = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+  return { width: Math.max(0, box.width - horizontal), height: Math.max(0, box.height - vertical) };
+}
+
+/** Places slots on the grid so only rows that fully fit are shown; see inventoryArrangement in layout.js. */
+function layoutInventory() {
+  const { width, height } = bodySize(inventoryBody);
+  const showArmor = layout.settings.inventory.showArmor;
+  const withHeld = inventoryArrangement(width, height - HELD_LINE_HEIGHT, showArmor);
+  const full = inventoryArrangement(width, height, showArmor);
+  // The "Holding ..." line is a luxury: show it only when it costs no inventory row and no slot size.
+  const showHeld = withHeld.rows.length === full.rows.length && withHeld.wide === full.wide
+    && withHeld.slot >= full.slot;
+  const arrangement = showHeld ? withHeld : full;
+  const key = JSON.stringify([arrangement, showHeld, showArmor]);
+  if (key === inventoryArrangementKey) return;
+  inventoryArrangementKey = key;
+  setHidden(heldValue, !showHeld);
+  const visual = (arrangement.wide ? ["main1", "main2", "main3", "hotbar"]
+    : ["equipment", "main1", "main2", "main3", "hotbar"]).filter(row => arrangement.rows.includes(row));
+  const rowOf = name => visual.indexOf(name) + 1;
+  inventoryGrid.style.setProperty("--slot", `${arrangement.slot}px`);
+  inventoryGrid.style.gridTemplateColumns = arrangement.wide
+    ? "var(--slot) 6px repeat(9, var(--slot)) 6px var(--slot)" : "repeat(9, var(--slot))";
+  const place = (slot, row, column) => {
+    setHidden(slot.element, row < 1);
+    if (row >= 1) {
+      slot.element.style.gridRow = String(row);
+      slot.element.style.gridColumn = String(column);
+    }
+  };
+  for (const name of ["hotbar", "main1", "main2", "main3"]) {
+    inventoryRows[name].forEach((slot, index) => place(slot, rowOf(name), (arrangement.wide ? 3 : 1) + index));
+  }
+  // Armor pieces line up with the storage rows beside them; the offhand sits next to the hotbar.
+  const armorRows = arrangement.wide ? ["main1", "main2", "main3", "hotbar"] : [];
+  equipmentSlots.forEach((slot, index) => {
+    if (!showArmor) return place(slot, 0, 0);
+    if (arrangement.wide) {
+      return index < 4 ? place(slot, rowOf(armorRows[index]), 1) : place(slot, rowOf("hotbar"), 13);
+    }
+    place(slot, rowOf("equipment"), 1 + index);
+  });
+}
+
+if (typeof ResizeObserver === "function") new ResizeObserver(() => layoutInventory()).observe(inventoryBody);
+window.addEventListener("resize", () => layoutInventory());
+
+armorToggle.addEventListener("pointerdown", event => event.stopPropagation());
+armorToggle.addEventListener("click", () =>
+  changeLayout(withSettings(layout, "inventory", { showArmor: !layout.settings.inventory.showArmor })));
 
 function renderInventory(inventory) {
   writeText(inventoryStatus, inventory ? `Slot ${inventory.selectedHotbarSlot + 1}` : "Unavailable");
@@ -234,40 +314,113 @@ function formatDuration(seconds) {
   return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m ${remaining}s`;
 }
 
-function formatCounter(value, unit) {
-  if (value === null) return "Unavailable";
-  if (unit === "cm") return `${(value / 100).toLocaleString(undefined, { maximumFractionDigits: 2 })} m`;
-  if (unit === "ticks") return formatDuration(value / 20);
-  return value.toLocaleString();
-}
-
 const formatNumber = value => Number.isInteger(value) ? String(value) : value.toFixed(1);
 
-function renderStatistics(statistics) {
-  writeText(statisticsStatus, statistics ? "Client counters" : "Unavailable");
-  const key = JSON.stringify(statistics);
+let displayedStatistics = null;
+
+function statisticRow(entry, showCategory, className = "counter-row") {
+  const row = create("div", className);
+  const label = create("span", "label", entry.label);
+  if (showCategory && entry.category !== "General") label.appendChild(create("span", "stat-category", entry.category));
+  row.appendChild(label);
+  row.appendChild(create("span", "total", entry.display));
+  row.appendChild(create("span", "session prio-2", entry.session > 0 ? `+${entry.sessionDisplay}` : ""));
+  return row;
+}
+
+/** Statistics changed in the last minute that are neither pinned nor excluded, newest first. */
+function recentStatistics(statistics, settings, now = Date.now()) {
+  const hidden = new Set([...settings.shown, ...settings.recentExcluded]);
+  return (statistics?.entries ?? [])
+    .filter(entry => entry.changedAt !== null && now - entry.changedAt < RECENT_MILLIS && !hidden.has(entry.id))
+    .sort((a, b) => b.changedAt - a.changedAt || (a.label < b.label ? -1 : 1));
+}
+
+function renderStatistics(statistics, now = Date.now()) {
+  displayedStatistics = statistics;
+  writeText(statisticsStatus, statistics ? "Session" : "Unavailable");
+  const settings = layout.settings.statistics;
+  const byId = new Map((statistics?.entries ?? []).map(entry => [entry.id, entry]));
+  const pinned = settings.shown.map(id => byId.get(id)).filter(Boolean);
+  const recent = recentStatistics(statistics, settings, now);
+  const key = JSON.stringify([statistics ? pinned : null, recent.map(entry => [entry.id, entry.display, entry.session])]);
   if (key === statisticsKey) return;
   statisticsKey = key;
-  const groups = new Map();
-  for (const entry of statistics?.entries ?? []) {
-    if (!groups.has(entry.category)) {
-      const section = create("section", "statistics-group");
-      section.appendChild(create("h3", "prio-3", entry.category));
-      groups.set(entry.category, section);
-    }
-    const row = create("div", IMPORTANT_COUNTERS.has(entry.id) ? "counter-row" : "counter-row prio-2");
-    row.appendChild(create("span", "label", entry.label));
-    row.appendChild(create("span", "total", formatCounter(entry.cumulative, entry.unit)));
-    row.appendChild(create("span", "session prio-2", entry.session === null ? "" : `+${formatCounter(entry.session, entry.unit)}`));
-    groups.get(entry.category).appendChild(row);
-  }
-  if (!groups.size) {
+  if (!statistics) {
+    statisticsEntries.replaceChildren(create("p", "empty-note", "Statistics unavailable."));
+  } else if (!pinned.length) {
     statisticsEntries.replaceChildren(create("p", "empty-note",
-      statistics ? "No counters available." : "Statistics unavailable."));
+      statistics.entries.length ? "No statistics chosen. Use ⚙ to pick some." : "Waiting for statistics from the server."));
   } else {
-    statisticsEntries.replaceChildren(...groups.values());
+    statisticsEntries.replaceChildren(...pinned.map(entry => statisticRow(entry, true)));
+  }
+  setHidden(statisticsRecentSection, recent.length === 0);
+  statisticsRecent.replaceChildren(...recent.map(entry => statisticRow(entry, true, "counter-row recent-row")));
+  if (!statisticsDialog.hidden) renderStatisticOptions();
+}
+
+function toggleStatistic(key, id, enabled) {
+  const current = layout.settings.statistics[key];
+  const next = enabled ? [...current.filter(value => value !== id), id] : current.filter(value => value !== id);
+  changeLayout(withSettings(layout, "statistics", { [key]: next }));
+}
+
+function renderStatisticOptions() {
+  const settings = layout.settings.statistics;
+  const known = new Map((displayedStatistics?.entries ?? []).map(entry => [entry.id, entry]));
+  for (const id of [...settings.shown, ...settings.recentExcluded]) {
+    if (!known.has(id)) known.set(id, { id, label: id.slice(id.lastIndexOf(":") + 1).replaceAll("_", " "), category: "Not received yet" });
+  }
+  const query = statisticsSearch.value.trim().toLowerCase();
+  const groups = new Map();
+  [...known.values()]
+    .filter(entry => `${entry.label} ${entry.category}`.toLowerCase().includes(query))
+    .sort((a, b) => a.category.localeCompare(b.category) || a.label.localeCompare(b.label))
+    .forEach(entry => {
+      if (!groups.has(entry.category)) {
+        const group = create("section", "option-group");
+        group.appendChild(create("h3", "", entry.category));
+        groups.set(entry.category, group);
+      }
+      const row = create("div", "option-row");
+      row.appendChild(create("span", "label", entry.label));
+      for (const [key, text, checked] of [["shown", "Show", settings.shown.includes(entry.id)],
+        ["recentExcluded", "Recent", !settings.recentExcluded.includes(entry.id)]]) {
+        const label = create("label", "option-toggle");
+        const input = create("input");
+        input.type = "checkbox";
+        input.checked = checked;
+        input.addEventListener("change", () => toggleStatistic(key, entry.id, key === "shown" ? input.checked : !input.checked));
+        label.appendChild(input);
+        label.appendChild(create("span", "", text));
+        row.appendChild(label);
+      }
+      groups.get(entry.category).appendChild(row);
+    });
+  statisticsOptions.replaceChildren(...(groups.size ? groups.values()
+    : [create("p", "empty-note", known.size ? "No statistics match." : "Join a world to list its statistics.")]));
+}
+
+function setStatisticsDialog(open) {
+  setHidden(statisticsDialog, !open);
+  if (open) {
+    statisticsSearch.value = "";
+    renderStatisticOptions();
+    statisticsSearch.focus?.();
   }
 }
+
+setHidden(statisticsDialog, true);
+$("#statistics-settings").addEventListener("pointerdown", event => event.stopPropagation());
+$("#statistics-settings").addEventListener("click", () => setStatisticsDialog(true));
+$("#statistics-dialog-close").addEventListener("click", () => setStatisticsDialog(false));
+statisticsDialog.addEventListener("click", event => { if (event.target === statisticsDialog) setStatisticsDialog(false); });
+statisticsSearch.addEventListener("input", () => renderStatisticOptions());
+$("#statistics-defaults").addEventListener("click", () => {
+  changeLayout(withSettings(layout, "statistics", defaultSettings().statistics));
+  renderStatisticOptions();
+});
+window.addEventListener("keydown", event => { if (event.key === "Escape" && !statisticsDialog.hidden) setStatisticsDialog(false); });
 
 // ------------------------------------------------------------------------------------------------ Activity log
 
@@ -335,10 +488,16 @@ function renderPlayer(player) {
     writeText(sessionValue, "—");
     writeText(dimensionValue, "—");
     writeText(positionValue, "Position unavailable");
+    writeText(foodValue, "—");
     healthFill.style.width = "0%";
     absorptionFill.style.width = "0%";
+    saturationFill.style.width = "0%";
+    renderEffects([]);
     return;
   }
+  writeText(foodValue, `${player.food} / 20 · saturation ${formatNumber(player.saturation)}`);
+  saturationFill.style.width = `${Math.min(100, player.saturation / 20 * 100)}%`;
+  renderEffects(player.effects);
   writeText(gameStatus, "In world");
   writeText(healthValue, `${formatNumber(player.health)} / ${formatNumber(player.maxHealth)}`
     + (player.absorption > 0 ? ` +${formatNumber(player.absorption)}` : ""));
@@ -351,6 +510,65 @@ function renderPlayer(player) {
   writeText(dimensionValue, player.dimension || "Unknown");
   const pos = player.position;
   writeText(positionValue, `X ${pos.x.toFixed(1)} · Y ${pos.y.toFixed(1)} · Z ${pos.z.toFixed(1)}`);
+}
+
+// ------------------------------------------------------------------------------------------------- Effects
+
+const ROMAN = ["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"];
+let effectNodes = new Map();
+let displayedEffects = [];
+
+const effectIconUrl = id => `/effect/${id.replace(":", "/")}.png`;
+
+function formatRemaining(endsAt, now = Date.now()) {
+  if (endsAt === null) return "∞";
+  const seconds = Math.max(0, Math.ceil((endsAt - now) / 1000));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor(seconds % 3600 / 60);
+  const rest = String(seconds % 60).padStart(2, "0");
+  return hours > 0 ? `${hours}:${String(minutes).padStart(2, "0")}:${rest}` : `${minutes}:${rest}`;
+}
+
+function renderEffects(effects) {
+  displayedEffects = effects;
+  const retained = new Map();
+  const nodes = effects.map(effect => {
+    let node = effectNodes.get(effect.id);
+    if (!node) {
+      node = create("div", "effect");
+      const icon = create("img", "effect-icon");
+      icon.alt = "";
+      icon.src = effectIconUrl(effect.id);
+      icon.addEventListener("error", () => setHidden(icon, true));
+      node.appendChild(icon);
+      node.appendChild(create("span", "effect-level"));
+      node.appendChild(create("span", "effect-source", "◆"));
+      node.appendChild(create("span", "effect-timer"));
+    }
+    retained.set(effect.id, node);
+    const [, level, source] = node.children;
+    writeText(level, effect.amplifier > 0 ? ROMAN[effect.amplifier + 1] ?? String(effect.amplifier + 1) : "");
+    setHidden(source, !effect.beacon);
+    node.className = effect.beacon ? "effect beacon" : "effect";
+    return node;
+  });
+  effectNodes = retained;
+  if (effectsList.children.length !== nodes.length || nodes.some((node, index) => effectsList.children[index] !== node)) {
+    effectsList.replaceChildren(...nodes);
+  }
+  tickEffects();
+}
+
+/** Counts effect timers down locally; the game only resends an effect when its end time actually changes. */
+function tickEffects(now = Date.now()) {
+  displayedEffects.forEach(effect => {
+    const node = effectNodes.get(effect.id);
+    if (!node) return;
+    const remaining = formatRemaining(effect.endsAt, now);
+    writeText(node.children[3], remaining);
+    node.setAttribute?.("title", `${effect.name}${effect.amplifier > 0 ? ` ${ROMAN[effect.amplifier + 1] ?? effect.amplifier + 1}` : ""}`
+      + ` · ${remaining}${effect.beacon ? " · from a beacon" : ""}`);
+  });
 }
 
 function clearLiveData() {
@@ -392,7 +610,81 @@ function applyLayout() {
     element.style.setProperty("--order", String(order.indexOf(tile)));
     tileToggles[tile.id].setAttribute("aria-pressed", String(tile.enabled));
   }
+  armorToggle.setAttribute("aria-pressed", String(layout.settings.inventory.showArmor));
+  layoutInventory();
+  statisticsKey = undefined;
+  renderStatistics(displayedStatistics);
+  updateMap();
 }
+
+// ------------------------------------------------------------------------------------------------- Map
+
+const MAP_RETRY_MILLIS = 10_000;
+const MAP_RECHECK_MILLIS = 30_000;
+let mapUrl;
+let mapTimer;
+
+function updateMap() {
+  const enabled = layout.tiles.find(tile => tile.id === "map").enabled;
+  const url = layout.settings.map.url;
+  mapOpen.href = url;
+  if (!enabled) {
+    window.clearTimeout(mapTimer);
+    mapUrl = undefined;
+    return;
+  }
+  if (url === mapUrl) return;
+  mapUrl = url;
+  probeMap();
+}
+
+/** JourneyMap's web server allows cross-origin requests, so a plain fetch tells whether the map is running. */
+async function probeMap() {
+  window.clearTimeout(mapTimer);
+  const url = mapUrl;
+  if (!url) return;
+  let online;
+  try {
+    await fetch(url, { mode: "cors", cache: "no-store" });
+    online = true;
+  } catch {
+    online = false;
+  }
+  if (url !== mapUrl) return;
+  if (online) {
+    if (mapFrame.src !== url) mapFrame.src = url;
+    writeText(mapStatus, "Live");
+    mapStatus.className = "badge";
+  } else {
+    writeText(mapOfflineText, `JourneyMap's web map isn't reachable at ${url}. Check that JourneyMap's web map is enabled; `
+      + "retrying every 10 seconds.");
+    writeText(mapStatus, "Offline");
+    mapStatus.className = "badge muted";
+  }
+  setHidden(mapFrame, !online);
+  setHidden(mapOffline, online);
+  mapTimer = window.setTimeout(probeMap, online ? MAP_RECHECK_MILLIS : MAP_RETRY_MILLIS);
+}
+
+setHidden(mapAddress, true);
+setHidden(mapFrame, true);
+$("#map-settings").addEventListener("pointerdown", event => event.stopPropagation());
+mapOpen.addEventListener("pointerdown", event => event.stopPropagation());
+$("#map-settings").addEventListener("click", () => {
+  setHidden(mapAddress, !mapAddress.hidden);
+  mapUrlInput.value = layout.settings.map.url;
+  writeText(mapUrlError, "");
+});
+mapAddress.addEventListener("submit", event => {
+  event.preventDefault();
+  const url = mapUrlInput.value.trim();
+  if (!validMapUrl(url)) {
+    writeText(mapUrlError, "Use an http://127.0.0.1:<port>/ or http://localhost:<port>/ address.");
+    return;
+  }
+  setHidden(mapAddress, true);
+  changeLayout(withSettings(layout, "map", { url }));
+});
 
 function changeLayout(next) {
   layout = next;
@@ -614,5 +906,11 @@ window.addEventListener("pageshow", event => {
     connect();
   }
 });
+
+// Effect timers count down and "recent" statistics expire between server updates.
+window.setInterval?.(() => {
+  tickEffects();
+  if (displayedStatistics) renderStatistics(displayedStatistics);
+}, 1000);
 
 connect();

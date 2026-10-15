@@ -1,5 +1,6 @@
 package dev.craftyplayz.minepanel.telemetry;
 
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 public final class TelemetryStore {
@@ -28,14 +29,22 @@ public final class TelemetryStore {
                                 Double x, Double y, Double z, Double health, Double maxHealth,
                                 Double absorption, InventorySnapshot inventory, StatisticsSnapshot statistics,
                                 GameplayHistory history) {
+        return updatePlayer(capturedAt, sessionSeconds, dimension, x, y, z, health, maxHealth, absorption,
+                inventory, statistics, history, 20, 5.0, List.of());
+    }
+
+    public boolean updatePlayer(long capturedAt, Long sessionSeconds, String dimension,
+                                Double x, Double y, Double z, Double health, Double maxHealth,
+                                Double absorption, InventorySnapshot inventory, StatisticsSnapshot statistics,
+                                GameplayHistory history, Integer food, Double saturation, List<StatusEffect> effects) {
         PlayerSnapshot current = player.get();
-        PlayerSnapshot candidate = new PlayerSnapshot(current.revision(), capturedAt, true,
-                sessionSeconds, dimension, x, y, z, health, maxHealth, absorption, inventory, statistics, history);
+        PlayerSnapshot candidate = new PlayerSnapshot(current.revision(), capturedAt, true, sessionSeconds, dimension,
+                x, y, z, health, maxHealth, absorption, inventory, statistics, history, food, saturation, effects);
         if (current.sameValues(candidate)) {
             return false;
         }
-        player.set(new PlayerSnapshot(current.revision() + 1, capturedAt, true,
-                sessionSeconds, dimension, x, y, z, health, maxHealth, absorption, inventory, statistics, history));
+        player.set(new PlayerSnapshot(current.revision() + 1, capturedAt, true, sessionSeconds, dimension,
+                x, y, z, health, maxHealth, absorption, inventory, statistics, history, food, saturation, effects));
         return true;
     }
 

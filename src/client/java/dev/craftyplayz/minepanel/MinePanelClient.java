@@ -42,6 +42,7 @@ public final class MinePanelClient implements ClientModInitializer {
     private final TelemetryStore telemetry = new TelemetryStore();
     private final StatisticsTracker statistics = new StatisticsTracker();
     private final IconRenderer icons = new IconRenderer();
+    private final EffectsCollector effects = new EffectsCollector();
     private final HistoryArchive archive = new HistoryArchive(
             FabricLoader.getInstance().getGameDir().resolve("minepanel").resolve("history"));
     private final GameplayTracker history = new GameplayTracker(archive::append);
@@ -66,13 +67,17 @@ public final class MinePanelClient implements ClientModInitializer {
         lifecycleExecutor.execute(this::startDashboard);
         ResourceLoader.get(PackType.CLIENT_RESOURCES).registerReloadListener(
                 Identifier.fromNamespaceAndPath("minepanel", "item_icons"),
-                (ResourceManagerReloadListener) manager -> icons.reset());
+                (ResourceManagerReloadListener) manager -> {
+                    icons.reset();
+                    MinecraftStatisticsCollector.clearNames();
+                });
         MinecraftStatisticsCollector.onKills(activity::killStatistics);
         ClientPlayConnectionEvents.INIT.register((listener, client) -> {
             initializedConnection = listener;
             MinecraftStatisticsCollector.reset(listener);
             statistics.reset();
             activity.reset();
+            effects.reset();
             sessionStartedNanos = 0;
             samplingFailureReported = false;
         });
@@ -94,6 +99,7 @@ public final class MinePanelClient implements ClientModInitializer {
                 MinecraftStatisticsCollector.reset(null);
                 statistics.reset();
                 activity.reset();
+                effects.reset();
                 sessionStartedNanos = 0;
                 history.disconnect(System.currentTimeMillis());
                 telemetry.markUnavailable(System.currentTimeMillis(), history.snapshot());
@@ -153,16 +159,19 @@ public final class MinePanelClient implements ClientModInitializer {
 
         var player = client.player;
         try {
+            long millis = System.currentTimeMillis();
             var snapshot = MinecraftInventoryCollector.collect(client, player, icons);
-            var receivedStats = MinecraftStatisticsCollector.collect(client);
-            var counters = statistics.sample(receivedStats);
+            var counters = statistics.sample(millis, MinecraftStatisticsCollector.collect(client));
+            var food = player.getFoodData();
             telemetry.updatePlayer(
-                    System.currentTimeMillis(),
+                    millis,
                     (now - sessionStartedNanos) / 1_000_000_000L,
                     client.level.dimension().identifier().toString(),
                     player.getX(), player.getY(), player.getZ(),
                     (double) player.getHealth(), player.getAttributeValue(Attributes.MAX_HEALTH),
-                    (double) player.getAbsorptionAmount(), snapshot, counters, history.snapshot());
+                    (double) player.getAbsorptionAmount(), snapshot, counters, history.snapshot(),
+                    Math.clamp(food.getFoodLevel(), 0, 20), (double) Math.clamp(food.getSaturationLevel(), 0F, 20F),
+                    effects.collect(player, millis));
         } catch (RuntimeException exception) {
             var events = history.snapshot();
             telemetry.markUnavailable(System.currentTimeMillis(),

@@ -32,8 +32,8 @@ function statistics(entries = [counter()]) {
 }
 
 function counter(overrides = {}) {
-  return { id: "minecraft:jump", label: "Jumps", category: "Movement", unit: "count",
-    cumulative: 40, session: 3, ...overrides };
+  return { id: "minecraft:custom/minecraft:jump", label: "Jumps", category: "General", value: 40, session: 3,
+    display: "40", sessionDisplay: "3", changedAt: null, ...overrides };
 }
 
 function history(overrides = {}) {
@@ -47,7 +47,7 @@ function snapshot(overrides = {}) {
   return { schemaVersion: 2, revision: 4, capturedAt: 100, available: true,
     sessionSeconds: 3665, dimension: "minecraft:overworld", position: { x: 1, y: 64, z: -3 },
     health: 18, maxHealth: 20, absorption: 2, inventory: inventory(),
-    statistics: statistics(), history: history(), ...overrides };
+    statistics: statistics(), history: history(), food: 18, saturation: 5.5, effects: [], ...overrides };
 }
 
 function initial(state = snapshot()) {
@@ -62,7 +62,8 @@ function update(state = {}) {
 function unavailable(overrides = {}) {
   return snapshot({ available: false, sessionSeconds: null, dimension: null,
     position: { x: null, y: null, z: null }, health: null, maxHealth: null,
-    absorption: null, inventory: null, statistics: null, history: history({ active: false }), ...overrides });
+    absorption: null, inventory: null, statistics: null, history: history({ active: false }),
+    food: null, saturation: null, effects: null, ...overrides });
 }
 
 function defaultFetch(storedLayout = null, requests = []) {
@@ -180,6 +181,9 @@ function harness(fetchImpl = defaultFetch()) {
 }
 
 const plain = value => JSON.parse(JSON.stringify(value));
+const hotbar = h => h.get("#inventory-grid").children.slice(0, 9);
+const main = h => h.get("#inventory-grid").children.slice(9, 36);
+const equipment = h => h.get("#inventory-grid").children.slice(36, 41);
 const slotParts = slot => {
   const [placeholder, icon, glint, fallback, count, durability] = slot.children;
   return { placeholder, icon, glint, fallback, count, durability, bar: durability.children[0] };
@@ -380,9 +384,9 @@ test("DOM rendering preserves telemetry and uses text-only efficient slot update
   assert.equal(h.get("#position-value").textContent, "X 1.0 · Y 64.0 · Z -3.0");
   assert.equal(h.get("#state-message").textContent, "Live");
   assert.equal(h.get("#held-value").textContent, "Holding Stone × 32");
-  const slots = [...h.get("#hotbar-slots").children, ...h.get("#main-slots").children];
+  const slots = [...hotbar(h), ...main(h)];
   assert.equal(slots.length, 36);
-  assert.equal(h.get("#equipment-slots").children.length, 5);
+  assert.equal(equipment(h).length, 5);
   const writes = slots.map(element => element.children.map(child => child.writes));
   socket.message(update({ inventory: { slots: [{ index: 9, item: item({ name: "<img onerror=attack>" }) }] } }));
   slots.forEach((element, index) => {
@@ -446,7 +450,7 @@ test("a malformed late patch cannot publish partially updated state or slot text
   assert.equal(h.state(), undefined);
   assert.equal(h.get("#health-value").textContent, "—");
   assert.equal(h.get("#position-value").textContent, "Position unavailable");
-  assert.doesNotMatch(h.get("#main-slots").children[0].textContent, /Must not appear/);
+  assert.doesNotMatch(main(h)[0].textContent, /Must not appear/);
   assert.equal(socket.closed[0][0], 1002);
 });
 
@@ -557,27 +561,35 @@ test("persisted pageshow restores a fresh socket without accepting pre-pagehide 
   assert.equal(h.timers.size, 0);
 });
 
-test("statistics accepts nullable values, zero, Java integer bounds and all units", () => {
+const stone = (overrides = {}) => counter({ id: "minecraft:mined/minecraft:stone", label: "Stone", category: "Mined",
+  value: 12, session: 12, display: "12", sessionDisplay: "12", changedAt: 500, ...overrides });
+
+test("statistics accept Java bounds and merge incremental updates by id", () => {
   const h = harness();
-  for (const unit of ["count", "cm", "ticks"]) {
-    for (const cumulative of [null, 0, 2147483647]) {
-      for (const session of [null, 0, 2147483647].filter(value =>
-        value === null || cumulative !== null && value <= cumulative)) {
-        const state = snapshot({ statistics: statistics([counter({ unit, cumulative, session })]) });
+  for (const value of [0, 1, 2147483647]) {
+    for (const session of [0, value]) {
+      for (const changedAt of [null, 0, Number.MAX_SAFE_INTEGER]) {
+        const state = snapshot({ statistics: statistics([counter({ value, session, changedAt })]) });
         assert.deepEqual(plain(h.apply(undefined, initial(state)).statistics), state.statistics);
       }
     }
   }
   assert.equal(h.apply(undefined, initial(snapshot({ statistics: null }))).statistics, null);
-  assert.equal(h.apply(undefined, initial(snapshot({ statistics: statistics([]) }))).statistics.entries.length, 0);
-  const entries = Array.from({ length: 32 }, (_, index) => counter({ id: `minecraft:counter_${index}` }));
-  assert.equal(h.apply(undefined, initial(snapshot({ statistics: statistics(entries) }))).statistics.entries.length, 32);
+  const entries = Array.from({ length: 4096 }, (_, index) => counter({ id: `minecraft:custom/minecraft:c${index}` }));
+  assert.equal(h.apply(undefined, initial(snapshot({ statistics: statistics(entries) }))).statistics.entries.length, 4096);
+  const added = h.apply(snapshot(), update({ statistics: { upsert: [stone()] } }));
+  assert.deepEqual(plain(added.statistics.entries.map(entry => entry.id)),
+    ["minecraft:custom/minecraft:jump", "minecraft:mined/minecraft:stone"]);
+  const changed = h.apply(added, update({ baseRevision: 7, revision: 8,
+    statistics: { upsert: [counter({ value: 41, session: 4, display: "41", sessionDisplay: "4", changedAt: 900 })] } }));
+  assert.equal(changed.statistics.entries[0].value, 41);
+  assert.equal(changed.statistics.entries[1].label, "Stone", "omitted statistics are kept");
 });
 
-test("statistics validates required entry fields, unique ids, bounded entries and numeric values", () => {
+test("statistics reject malformed entries, ids, bounds and deltas", () => {
   const h = harness();
   const invalid = [undefined, {}, { entries: null },
-    statistics(Array.from({ length: 33 }, (_, index) => counter({ id: `minecraft:counter_${index}` }))),
+    statistics(Array.from({ length: 4097 }, (_, index) => counter({ id: `minecraft:custom/minecraft:c${index}` }))),
     statistics([counter(), counter()])];
   for (const key of Object.keys(counter())) {
     const entry = counter();
@@ -585,21 +597,40 @@ test("statistics validates required entry fields, unique ids, bounded entries an
     invalid.push(statistics([entry]));
   }
   for (const overrides of [
-    { id: "not-an-identifier" }, { id: "minecraft:😀" }, { label: "" },
-    { label: "x".repeat(257) }, { label: "\uD800" }, { category: "" },
-    { category: "x".repeat(257) }, { category: null }, { category: "movement" },
-    { category: "Other" }, { unit: "seconds" },
-    { unit: null }, { cumulative: -1 }, { cumulative: 0.5 }, { cumulative: "3" },
-    { cumulative: 2147483648 }, { cumulative: Number.MAX_SAFE_INTEGER },
-    { cumulative: Number.MAX_SAFE_INTEGER + 1 }, { cumulative: null, session: 0 },
-    { cumulative: null, session: 1 }, { cumulative: 0, session: 1 },
-    { cumulative: 40, session: 41 }, { session: -1 }, { session: 0.5 },
-    { session: "3" }, { session: Number.MAX_SAFE_INTEGER + 1 }
+    { id: "minecraft:jump" }, { id: "custom/minecraft:jump" }, { id: "minecraft:custom/jump" },
+    { id: "minecraft:a/b/minecraft:jump" }, { label: "" }, { label: "x".repeat(257) }, { label: "\uD800" },
+    { category: "" }, { category: null }, { value: -1 }, { value: 0.5 }, { value: "3" }, { value: 2147483648 },
+    { session: -1 }, { session: 41 }, { session: 0.5 }, { display: "" }, { sessionDisplay: null },
+    { changedAt: -1 }, { changedAt: "now" }
   ]) invalid.push(statistics([counter(overrides)]));
   for (const value of invalid) {
-    assert.throws(() => h.apply(undefined, initial(snapshot({ statistics: value }))));
+    assert.throws(() => h.apply(undefined, initial(snapshot({ statistics: value }))), JSON.stringify(value)?.slice(0, 80));
   }
   assert.throws(() => h.apply(undefined, initial(unavailable({ statistics: statistics() }))));
+  for (const patch of [{ upsert: [counter({ value: -1 })] }, { upsert: null }, { other: [] }]) {
+    assert.throws(() => h.apply(snapshot(), update({ statistics: patch })));
+  }
+  assert.throws(() => h.apply(snapshot({ statistics: null }), update({ statistics: { upsert: [stone()] } })),
+    "a delta needs earlier statistics to merge into");
+});
+
+test("food, saturation and status effects are validated", () => {
+  const h = harness();
+  const speed = { id: "minecraft:speed", name: "Speed", amplifier: 1, endsAt: 1000, beacon: true };
+  const state = snapshot({ food: 0, saturation: 20, effects: [speed, { ...speed, id: "minecraft:night_vision",
+    name: "Night Vision", amplifier: 0, endsAt: null, beacon: false }] });
+  assert.deepEqual(plain(h.apply(undefined, initial(state)).effects), state.effects);
+  const next = h.apply(snapshot(), update({ food: 3, saturation: 0.5, effects: [speed] }));
+  assert.deepEqual([next.food, next.saturation, next.effects.length], [3, 0.5, 1]);
+  for (const overrides of [{ food: 21 }, { food: -1 }, { food: 1.5 }, { food: null }, { saturation: 20.5 },
+    { saturation: -1 }, { saturation: null }, { effects: null }, { effects: [{ ...speed, id: "speed" }] },
+    { effects: [{ ...speed, amplifier: 256 }] }, { effects: [{ ...speed, endsAt: -5 }] },
+    { effects: [{ ...speed, beacon: "yes" }] }, { effects: [{ ...speed, name: "" }] },
+    { effects: Array.from({ length: 65 }, () => speed) }]) {
+    assert.throws(() => h.apply(undefined, initial(snapshot(overrides))), JSON.stringify(overrides).slice(0, 80));
+  }
+  assert.throws(() => h.apply(undefined, initial(unavailable({ food: 20 }))));
+  assert.throws(() => h.apply(undefined, initial(unavailable({ effects: [] }))));
 });
 
 const categories = ["lifecycle", "death", "dimension", "kill", "mine", "place",
@@ -684,7 +715,7 @@ test("statistics and history deltas leave omitted fields unchanged", () => {
   const h = harness();
   const previous = snapshot();
   const before = JSON.stringify(previous);
-  const value = statistics([counter({ cumulative: null, session: null })]);
+  const value = statistics([counter({ value: 0, session: 0, display: "0", sessionDisplay: "0" })]);
   const events = history({ events: [] });
   const next = h.apply(previous, update({ statistics: value, history: events }));
   assert.deepEqual(plain(next.statistics), value);
@@ -695,7 +726,7 @@ test("statistics and history deltas leave omitted fields unchanged", () => {
   assert.deepEqual(plain(healthOnly.history), events);
   assert.equal(h.apply(previous, update({ statistics: null })).statistics, null);
   for (const fields of [
-    { statistics: { entries: [{ id: "minecraft:jump", session: 1 }] } },
+    { statistics: { entries: [{ id: "minecraft:custom/minecraft:jump", session: 1 }] } },
     { history: { events: [] } }, { history: null }, { history: { active: false } }
   ]) assert.throws(() => h.apply(previous, update(fields)));
 });
@@ -712,33 +743,74 @@ test("availability transition snapshots require statistics and history even with
   }
 });
 
-test("statistics renders categorized totals and session changes with units and unavailable values", async () => {
+test("chosen statistics render in order with the game's formatting; recent shows other changes from the last minute", async () => {
   const h = harness();
   await h.flush();
+  const now = Date.now();
   h.sockets[0].message(initial(snapshot({ statistics: statistics([
-    counter(), counter({ id: "minecraft:walk_one_cm", label: "Distance", unit: "cm", cumulative: 12345, session: 50 }),
-    counter({ id: "minecraft:play_time", label: "Play time", category: "General", unit: "ticks",
-      cumulative: 73200, session: 1220 }),
-    counter({ id: "minecraft:deaths", label: "Deaths", category: "Combat", cumulative: null, session: null }),
-    counter({ id: "minecraft:mob_kills", label: "Kills", category: "Combat", cumulative: 0, session: 0 })
+    counter({ changedAt: now - 1000 }),
+    counter({ id: "minecraft:custom/minecraft:walk_one_cm", label: "Distance Walked", value: 12345, session: 50,
+      display: "123.45 m", sessionDisplay: "0.5 m", changedAt: now - 2000 }),
+    counter({ id: "minecraft:custom/minecraft:play_time", label: "Time Played", display: "1.02 h",
+      changedAt: now - 500 }),
+    stone({ changedAt: now - 3000 }),
+    stone({ id: "minecraft:used/minecraft:diamond_pickaxe", label: "Diamond Pickaxe", category: "Used",
+      changedAt: now - 1000 }),
+    stone({ id: "minecraft:mined/minecraft:dirt", label: "Dirt", changedAt: now - 61_000 })
   ]) })));
-  const rendered = h.get("#statistics-entries");
-  assert.equal(rendered.children.length, 3);
-  const rows = rendered.children.flatMap(group => group.children.slice(1));
-  const row = label => rows.find(value => value.children[0].textContent === label);
-  assert.deepEqual(row("Jumps").children.map(cell => cell.textContent), ["Jumps", "40", "+3"]);
-  assert.deepEqual(row("Distance").children.map(cell => cell.textContent), ["Distance", "123.45 m", "+0.5 m"]);
-  assert.deepEqual(row("Play time").children.map(cell => cell.textContent), ["Play time", "1h 1m", "+1m 1s"]);
-  assert.deepEqual(row("Deaths").children.map(cell => cell.textContent), ["Deaths", "Unavailable", ""]);
-  assert.equal(row("Jumps").className, "counter-row prio-2", "minor counters are dropped first when compact");
-  assert.equal(row("Distance").className, "counter-row");
-  assert.equal(rendered.children[0].children[0].className, "prio-3");
-  const replacements = rendered.replacements;
+  const pinned = h.get("#statistics-entries").children;
+  const cells = row => row.children.map(cell => cell.textContent);
+  assert.deepEqual(pinned.map(cells), [["Distance Walked", "123.45 m", "+0.5 m"], ["Jumps", "40", "+3"],
+    ["Time Played", "1.02 h", "+3"]], "chosen statistics follow the settings order");
+  const recent = h.get("#statistics-recent").children;
+  assert.deepEqual(recent.map(cells), [["Diamond PickaxeUsed", "12", "+12"], ["StoneMined", "12", "+12"]],
+    "recent excludes chosen, excluded and older-than-a-minute statistics, newest first");
+  assert.equal(h.get("#statistics-recent-section").hidden, false);
+  const replacements = h.get("#statistics-entries").replacements;
   h.sockets[0].message(update({ health: 17 }));
-  assert.equal(rendered.replacements, replacements);
+  assert.equal(h.get("#statistics-entries").replacements, replacements, "unchanged statistics are not rebuilt");
   h.sockets[0].message(update({ baseRevision: 7, revision: 8, statistics: null }));
   assert.equal(h.get("#statistics-status").textContent, "Unavailable");
-  assert.equal(rendered.textContent, "Statistics unavailable.");
+  assert.equal(h.get("#statistics-entries").textContent, "Statistics unavailable.");
+  assert.equal(h.get("#statistics-recent-section").hidden, true);
+});
+
+test("the statistics window chooses shown statistics and what may appear under recent, and saves them", async () => {
+  const requests = [];
+  const h = harness(defaultFetch(null, requests));
+  await h.flush();
+  const now = Date.now();
+  h.sockets[0].message(initial(snapshot({ statistics: statistics([counter(), stone({ changedAt: now - 1000 })]) })));
+  assert.equal(h.get("#statistics-dialog").hidden, true);
+  h.get("#statistics-settings").emit("click");
+  assert.equal(h.get("#statistics-dialog").hidden, false);
+  const options = () => h.get("#statistics-options").children;
+  const row = label => options().flatMap(group => group.children.slice(1))
+    .find(value => value.children[0].textContent === label);
+  assert.deepEqual(options().map(group => group.children[0].textContent), ["General", "Mined", "Not received yet"],
+    "chosen statistics the server has not sent yet are still listed");
+  const [, show, recent] = row("Stone").children;
+  assert.equal(show.children[0].checked, false);
+  assert.equal(recent.children[0].checked, true);
+  show.children[0].checked = true;
+  show.children[0].emit("change");
+  assert.deepEqual(h.get("#statistics-entries").children.at(-1).children[0].textContent, "StoneMined",
+    "a newly shown statistic is pinned");
+  assert.equal(h.get("#statistics-recent").children.length, 0, "and no longer listed as recent");
+  const jumpRecent = row("Jumps").children[2].children[0];
+  jumpRecent.checked = false;
+  jumpRecent.emit("change");
+  assert.equal(plain(h.run("layout.settings.statistics.recentExcluded")).includes("minecraft:custom/minecraft:jump"), true);
+  h.get("#statistics-search").value = "sto";
+  h.get("#statistics-search").emit("input");
+  assert.deepEqual(options().map(group => group.children[0].textContent), ["Mined"]);
+  await h.runTimers(400);
+  const saved = JSON.parse(requests.filter(request => request.method === "PUT").at(-1).body);
+  assert.equal(saved.settings.statistics.shown.at(-1), "minecraft:mined/minecraft:stone");
+  h.get("#statistics-defaults").emit("click");
+  assert.equal(plain(h.run("layout.settings.statistics.shown")).includes("minecraft:mined/minecraft:stone"), false);
+  h.get("#statistics-dialog-close").emit("click");
+  assert.equal(h.get("#statistics-dialog").hidden, true);
 });
 
 test("activity log is newest first with filters, search and safe text, without unchanged rebuilds", async () => {
@@ -892,7 +964,7 @@ test("hovering a slot shows the game's tooltip lines with Minecraft colors and f
   h.sockets[0].message(initial(snapshot({ inventory: { ...inventory(),
     slots: [sword, ...inventory().slots.slice(1)], equipment: { ...inventory().equipment, mainhand: sword } } })));
   const tooltip = h.get("#tooltip");
-  const slot = h.get("#hotbar-slots").children[0];
+  const slot = hotbar(h)[0];
   slot.emit("pointerenter", { clientX: 10, clientY: 20 });
   assert.equal(tooltip.hidden, false);
   assert.equal(tooltip.children.length, 3);
@@ -909,7 +981,7 @@ test("hovering a slot shows the game's tooltip lines with Minecraft colors and f
   assert.equal(tooltip.textContent, "Renamed", "an open tooltip follows item changes");
   slot.emit("pointerleave");
   assert.equal(tooltip.hidden, true);
-  h.get("#hotbar-slots").children[1].emit("pointerenter", { clientX: 0, clientY: 0 });
+  hotbar(h)[1].emit("pointerenter", { clientX: 0, clientY: 0 });
   assert.equal(tooltip.hidden, true, "empty slots have no tooltip");
 });
 
@@ -918,24 +990,24 @@ test("slots show game-rendered icons, counts, durability bars and an animated gl
   await h.flush();
   const socket = h.sockets[0];
   socket.message(initial());
-  const stone = slotParts(h.get("#hotbar-slots").children[0]);
+  const stone = slotParts(hotbar(h)[0]);
   assert.equal(stone.icon.src, "/icon/e0-1a2b.png");
   assert.equal(stone.icon.hidden, false);
   assert.equal(stone.count.textContent, "32");
   assert.equal(stone.glint.hidden, true);
   assert.equal(stone.durability.hidden, true);
   assert.equal(stone.placeholder.hidden, true);
-  assert.equal(h.get("#hotbar-slots").children[0].className, "slot selected");
-  assert.equal(h.get("#hotbar-slots").children[0].attributes["aria-label"], "Stone × 32");
+  assert.equal(hotbar(h)[0].className, "slot selected");
+  assert.equal(hotbar(h)[0].attributes["aria-label"], "Stone × 32");
   assert.equal(h.documentElement.style.getPropertyValue("--glint"), 'url("/glint.png?v=0")');
-  const empty = slotParts(h.get("#hotbar-slots").children[1]);
+  const empty = slotParts(hotbar(h)[1]);
   assert.equal(empty.icon.hidden, true);
   assert.equal(empty.placeholder.hidden, false);
   const tool = item({ name: "Diamond Pickaxe", count: 1, maxCount: 1, damage: 390, maxDamage: 1561,
     remainingDurability: 1171, foil: true, icon: "e3-ff" });
   socket.message(update({ inventory: { slots: [{ index: 1, item: tool }], selectedHotbarSlot: 1,
     equipment: { mainhand: tool, head: tool } } }));
-  const pickaxe = slotParts(h.get("#hotbar-slots").children[1]);
+  const pickaxe = slotParts(hotbar(h)[1]);
   assert.equal(pickaxe.count.textContent, "");
   assert.equal(pickaxe.glint.hidden, false);
   assert.equal(pickaxe.glint.style.maskImage, 'url("/icon/e3-ff.png")');
@@ -944,9 +1016,9 @@ test("slots show game-rendered icons, counts, durability bars and an animated gl
   assert.equal(pickaxe.bar.style.background, "hsl(90, 100%, 50%)");
   assert.equal(h.documentElement.style.getPropertyValue("--glint"), 'url("/glint.png?v=3")',
     "a resource-pack reload refreshes the glint texture");
-  assert.equal(h.get("#hotbar-slots").children[0].className, "slot");
+  assert.equal(hotbar(h)[0].className, "slot");
   assert.equal(h.get("#held-value").textContent, "Holding Diamond Pickaxe");
-  assert.equal(slotParts(h.get("#equipment-slots").children[0]).icon.src, "/icon/e3-ff.png");
+  assert.equal(slotParts(equipment(h)[0]).icon.src, "/icon/e3-ff.png");
   const src = pickaxe.icon.src;
   socket.message(update({ baseRevision: 7, revision: 8, health: 3 }));
   assert.equal(pickaxe.icon.src, src, "unchanged icons are not reloaded");
@@ -1127,4 +1199,156 @@ test("tiles move and resize by dragging only in customize mode, snapping to grid
   assert.deepEqual([resized.w, resized.h], [6, 6]);
   await h.runTimers(400);
   assert.equal(requests.filter(request => request.method === "PUT").length, 1);
+});
+
+test("inventory arrangement shows only whole rows that fit, preferring rows, then slot size, then armor", () => {
+  const h = harness();
+  const arrange = (width, height, armor) => plain(h.run(`inventoryArrangement(${width}, ${height}, ${armor})`));
+  assert.deepEqual(arrange(500, 300, true), { wide: false, slot: 52,
+    rows: ["hotbar", "main3", "main2", "main1", "equipment"], height: 272 });
+  assert.deepEqual(arrange(700, 250, true), { wide: true, slot: 52, rows: ["hotbar", "main3", "main2", "main1"],
+    height: 217 }, "with room for an armor column, armor sits beside the storage rows");
+  assert.equal(arrange(700, 250, false).wide, false);
+  assert.deepEqual(arrange(500, 110, true), { wide: false, slot: 52, rows: ["hotbar", "main3"], height: 107 },
+    "too short for everything: keep full-size slots and add only rows that fully fit");
+  assert.deepEqual(arrange(500, 60, true).rows, ["hotbar"]);
+  assert.deepEqual(arrange(200, 300, false), { wide: false, slot: 19, rows: ["hotbar", "main3", "main2", "main1"],
+    height: 85 }, "narrow tiles shrink slots instead of dropping rows");
+  for (const width of [60, 150, 333, 480, 900]) {
+    for (const height of [20, 45, 100, 170, 260, 500]) {
+      for (const armor of [true, false]) {
+        const result = arrange(width, height, armor);
+        const columns = result.wide ? 11 : 9;
+        assert.ok(result.height <= height, `fits height ${width}x${height}`);
+        assert.ok(columns * result.slot + (columns - 1) * 3 + (result.wide ? 6 : 0) <= width, `fits width ${width}x${height}`);
+        assert.equal(result.rows[0], "hotbar", "the hotbar is always the first row kept");
+      }
+    }
+  }
+});
+
+test("inventory grid places rows and armor, toggles armor and drops rows as the tile shrinks", async () => {
+  const requests = [];
+  const h = harness(defaultFetch(null, requests));
+  await h.flush();
+  h.sockets[0].message(initial());
+  const body = h.get("#inventory-body");
+  const grid = h.get("#inventory-grid");
+  const resize = rect => { body.rect = rect; h.events.resize(); };
+  resize({ left: 0, top: 0, width: 524, height: 340 });
+  assert.equal(grid.style.getPropertyValue("--slot"), "52px");
+  assert.equal(grid.style.gridTemplateColumns, "repeat(9, var(--slot))");
+  assert.deepEqual([hotbar(h)[0].style.gridRow, main(h)[0].style.gridRow, main(h)[26].style.gridRow,
+    equipment(h)[4].style.gridRow, equipment(h)[4].style.gridColumn], ["5", "2", "4", "1", "5"]);
+  assert.equal(h.get("#held-value").hidden, false);
+
+  resize({ left: 0, top: 0, width: 728, height: 280 });
+  assert.equal(grid.style.gridTemplateColumns, "var(--slot) 6px repeat(9, var(--slot)) 6px var(--slot)");
+  assert.deepEqual(equipment(h).map(slot => [slot.style.gridRow, slot.style.gridColumn]),
+    [["1", "1"], ["2", "1"], ["3", "1"], ["4", "1"], ["4", "13"]], "armor column beside rows, offhand by the hotbar");
+  assert.equal(hotbar(h)[0].style.gridColumn, "3");
+
+  h.get("#armor-toggle").emit("click");
+  assert.equal(h.get("#armor-toggle").attributes["aria-pressed"], "false");
+  assert.equal(equipment(h).every(slot => slot.hidden), true);
+  assert.equal(grid.style.gridTemplateColumns, "repeat(9, var(--slot))");
+  await h.runTimers(400);
+  assert.equal(JSON.parse(requests.filter(request => request.method === "PUT").at(-1).body).settings.inventory.showArmor,
+    false, "the armor choice is saved with the layout");
+
+  resize({ left: 0, top: 0, width: 524, height: 100 });
+  assert.equal(main(h).every(slot => slot.hidden), true);
+  assert.equal(hotbar(h).every(slot => !slot.hidden && slot.style.gridRow === "1"), true);
+  assert.equal(grid.style.getPropertyValue("--slot"), "52px");
+  assert.equal(h.get("#held-value").hidden, false, "spare height shows the held item");
+  resize({ left: 0, top: 0, width: 524, height: 80 });
+  assert.equal(h.get("#held-value").hidden, true, "the held-item line gives way before slots shrink");
+  assert.equal(grid.style.getPropertyValue("--slot"), "52px");
+  resize({ left: 0, top: 0, width: 524, height: 128 });
+  assert.deepEqual(main(h).map(slot => slot.hidden), [...Array(18).fill(true), ...Array(9).fill(false)],
+    "the main row next to the hotbar appears first");
+});
+
+test("player tile shows saturation above health, food, and status effects with timers and beacon markers", async () => {
+  const h = harness();
+  await h.flush();
+  const now = Date.now();
+  h.sockets[0].message(initial(snapshot({ saturation: 5, food: 17, effects: [
+    { id: "minecraft:haste", name: "Haste", amplifier: 1, endsAt: now + 12_400, beacon: true },
+    { id: "minecraft:night_vision", name: "Night Vision", amplifier: 0, endsAt: null, beacon: false },
+    { id: "minecraft:speed", name: "Speed", amplifier: 0, endsAt: now + 3_725_000, beacon: false }
+  ] })));
+  assert.equal(h.get("#saturation-fill").style.width, "25%");
+  assert.equal(h.get("#food-value").textContent, "17 / 20 · saturation 5");
+  const effects = h.get("#effects").children;
+  assert.equal(effects.length, 3);
+  const [icon, level, source, timer] = effects[0].children;
+  assert.equal(icon.src, "/effect/minecraft/haste.png");
+  assert.equal(level.textContent, "II");
+  assert.equal(source.hidden, false);
+  assert.equal(effects[0].className, "effect beacon");
+  assert.equal(timer.textContent, "0:13");
+  assert.equal(effects[0].attributes.title, "Haste II · 0:13 · from a beacon");
+  assert.equal(effects[1].children[3].textContent, "∞");
+  assert.equal(effects[1].children[2].hidden, true);
+  assert.equal(effects[2].children[3].textContent, "1:02:05");
+  h.run(`tickEffects(${now + 10_000})`);
+  assert.equal(timer.textContent, "0:03", "timers count down locally");
+  h.run(`tickEffects(${now + 20_000})`);
+  assert.equal(timer.textContent, "0:00");
+  h.sockets[0].message(update({ effects: [{ id: "minecraft:haste", name: "Haste", amplifier: 1,
+    endsAt: now + 30_000, beacon: true }] }));
+  assert.equal(h.get("#effects").children[0], effects[0], "a refreshed effect keeps its element");
+  assert.equal(h.get("#effects").children.length, 1);
+  h.sockets[0].message(update(unavailable({ revision: 8, baseRevision: 7 })));
+  assert.equal(h.get("#effects").children.length, 0);
+  assert.equal(h.get("#saturation-fill").style.width, "0%");
+  assert.equal(h.get("#food-value").textContent, "—");
+});
+
+test("the JourneyMap tile embeds the local web map when it answers and retries while it is offline", async () => {
+  let mapOnline = false;
+  const requests = [];
+  const h = harness(async (url, options = {}) => {
+    requests.push({ url, ...options });
+    if (url.startsWith("http://")) {
+      if (!mapOnline) throw new TypeError("Failed to fetch");
+      return { ok: true };
+    }
+    return defaultFetch(null)(url, options);
+  });
+  await h.flush();
+  assert.equal(requests.some(request => request.url.startsWith("http://")), false, "a hidden map tile is not probed");
+  h.get("#tile-toggles").children[4].emit("click");
+  await h.flush();
+  assert.equal(h.get("#tile-map").hidden, false);
+  assert.equal(h.get("#map-frame").hidden, true);
+  assert.equal(h.get("#map-offline").hidden, false);
+  assert.match(h.get("#map-offline-text").textContent, /reachable at http:\/\/127\.0\.0\.1:8080\//);
+  assert.equal(h.get("#map-status").textContent, "Offline");
+  assert.equal(h.get("#map-open").href, "http://127.0.0.1:8080/");
+  mapOnline = true;
+  await h.runTimers(10_000);
+  assert.equal(h.get("#map-frame").src, "http://127.0.0.1:8080/");
+  assert.equal(h.get("#map-frame").hidden, false);
+  assert.equal(h.get("#map-offline").hidden, true);
+  assert.equal(h.get("#map-status").textContent, "Live");
+  assert.equal([...h.timers.values()].some(timer => timer.delay === 30_000), true, "an online map is rechecked");
+
+  h.get("#map-settings").emit("click");
+  assert.equal(h.get("#map-address").hidden, false);
+  assert.equal(h.get("#map-url").value, "http://127.0.0.1:8080/");
+  h.get("#map-url").value = "https://example.com/";
+  h.get("#map-address").emit("submit");
+  assert.match(h.get("#map-url-error").textContent, /127\.0\.0\.1/);
+  h.get("#map-url").value = "http://localhost:8181/";
+  h.get("#map-address").emit("submit");
+  await h.flush();
+  assert.equal(h.get("#map-address").hidden, true);
+  assert.equal(h.get("#map-frame").src, "http://localhost:8181/");
+  assert.equal(plain(h.run("layout.settings.map")).url, "http://localhost:8181/");
+
+  h.get("#tile-toggles").children[4].emit("click");
+  assert.equal([...h.timers.values()].some(timer => timer.delay === 30_000 || timer.delay === 10_000), false,
+    "hiding the map stops probing");
 });

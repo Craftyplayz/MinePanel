@@ -1,53 +1,58 @@
 package dev.craftyplayz.minepanel.telemetry;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.ArrayList;
+import java.util.function.LongFunction;
 
+/** Tracks per-statistic session baselines and the time each statistic last changed. */
 public final class StatisticsTracker {
-    public static final List<StatisticsSnapshot.Definition> DEFINITIONS = List.of(
-            definition("walk_one_cm", "Distance walked", "Movement", "cm"),
-            definition("sprint_one_cm", "Distance sprinted", "Movement", "cm"),
-            definition("swim_one_cm", "Distance swum", "Movement", "cm"),
-            definition("fly_one_cm", "Distance flown", "Movement", "cm"),
-            definition("jump", "Jumps", "Movement", "count"),
-            definition("deaths", "Deaths", "Combat", "count"),
-            definition("mob_kills", "Mob kills", "Combat", "count"),
-            definition("player_kills", "Player kills", "Combat", "count"),
-            definition("play_time", "Time played", "General", "ticks"),
-            definition("leave_game", "Games quit", "General", "count"));
+    /** One synchronized statistic, with Minecraft's own formatter for its unit. */
+    public record Sample(String id, String label, String category, long value, LongFunction<String> format) {
+    }
+
     private final Map<String, Long> baselines = new HashMap<>();
     private final Map<String, Long> previousValues = new HashMap<>();
-
-    private static StatisticsSnapshot.Definition definition(String id, String label, String category, String unit) {
-        return new StatisticsSnapshot.Definition("minecraft:" + id, label, category, unit);
-    }
+    private final Map<String, Long> changedAt = new HashMap<>();
+    private boolean established;
 
     public void reset() {
         baselines.clear();
         previousValues.clear();
+        changedAt.clear();
+        established = false;
     }
 
-    public StatisticsSnapshot sample(Map<String, Long> receivedValues) {
-        List<StatisticsSnapshot.Entry> entries = new ArrayList<>();
-        for (var definition : DEFINITIONS) {
-            Long cumulative = receivedValues.get(definition.id());
-            Long session = null;
-            if (cumulative != null) {
-                if (cumulative < 0 || cumulative > Integer.MAX_VALUE) {
-                    throw new IllegalArgumentException("Invalid client statistic");
-                }
-                Long baseline = baselines.get(definition.id());
-                Long previous = previousValues.put(definition.id(), cumulative);
-                if (baseline == null || previous != null && cumulative < previous) {
-                    baselines.put(definition.id(), cumulative);
-                    baseline = cumulative;
-                }
-                session = cumulative - baseline;
+    /**
+     * The first non-empty sample is the session baseline. A statistic first seen later started from zero this
+     * session (the server only sends statistics that have a value), so all of it counts as a session change.
+     */
+    public StatisticsSnapshot sample(long now, List<Sample> samples) {
+        List<StatisticsSnapshot.Entry> entries = new ArrayList<>(samples.size());
+        for (Sample sample : samples) {
+            long value = sample.value();
+            if (value < 0 || value > Integer.MAX_VALUE) throw new IllegalArgumentException("Invalid client statistic");
+            String id = sample.id();
+            Long previous = previousValues.put(id, value);
+            Long baseline = baselines.get(id);
+            if (baseline == null) {
+                baseline = established ? 0L : value;
+                baselines.put(id, baseline);
+                if (value > baseline) changedAt.put(id, now);
+            } else if (previous != null && value < previous) {
+                baselines.put(id, value);
+                baseline = value;
+            } else if (previous != null && value > previous) {
+                changedAt.put(id, now);
             }
-            entries.add(new StatisticsSnapshot.Entry(definition, cumulative, session));
+            long session = value - baseline;
+            entries.add(new StatisticsSnapshot.Entry(id, sample.label(), sample.category(), value, session,
+                    sample.format().apply(value), sample.format().apply(session), changedAt.get(id)));
         }
-        return new StatisticsSnapshot(entries);
+        if (!samples.isEmpty()) established = true;
+        entries.sort(Comparator.comparing(StatisticsSnapshot.Entry::id));
+        return new StatisticsSnapshot(entries.subList(0, Math.min(entries.size(), StatisticsSnapshot.MAX_ENTRIES)));
     }
 }
