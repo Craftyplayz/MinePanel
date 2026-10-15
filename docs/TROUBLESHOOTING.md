@@ -18,6 +18,13 @@ JourneyMap Webmap is a separate client addon. Confirm both compatible mods are i
 
 ## Litematica progress is unavailable
 
-Progress requires a supported Litematica version, Malilib, and an active schematic placement with accessible placement data. An unavailable indicator does not mean the schematic is complete.
+The tile's message says why:
+
+- *Install Litematica…* — Litematica is not loaded. Install Litematica 0.27.14+ and MaLiLib 0.28.12+.
+- *This Litematica version is not supported* — the installed Litematica is older than the version in MinePanel's `fabric.mod.json` `suggests` entry; the game log names it.
+- *Build progress stopped after an error* — Litematica's API did not behave as expected (for example a newer release changed it). The game log has one warning with the stack trace; the tile stays off until the game restarts. Gameplay is not affected.
+- *No placement selected in Litematica* — select a placement (and keep it enabled) in Litematica's placement list.
+
+"N chunks not checked yet" means those chunks of the placement have not yet been loaded together with every chunk around them and Litematica's schematic world (which Litematica fills only near you) since you joined: walk near them once. Checked chunks keep their counts when you walk away. Progress is reset when you leave the world. An unavailable indicator does not mean the schematic is complete.
 
 Minecraft 26.1.2 compatibility, optional integration APIs, and browser embedding behavior have not yet been confirmed; see [the implementation plan](IMPLEMENTATION_PLAN.md).

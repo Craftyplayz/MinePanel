@@ -24,7 +24,7 @@ MinePanel exposes no slot-click, equip, consume, item-move, or inventory-changin
 
 Applied and stored/book enchantment components are merged by registry ID with the higher level and sorted for stable comparisons. Readable text is bounded to 256 UTF-16 units without splitting surrogate pairs; controls are replaced and malformed Unicode is repaired. Metadata exceeding the bounded protocol invariants makes the sample unavailable rather than crashing gameplay or publishing partially copied inventory; a generic warning is logged once, without item contents.
 
-JourneyMap is the only map source; MinePanel does not render terrain. Litematica completion is based on verified placement state, never carried inventory. Their compatible versions, APIs, and iframe behavior remain unverified until tested against Minecraft 26.1.2.
+JourneyMap is the only map source; MinePanel does not render terrain. Litematica completion is based on the compared world state, never carried inventory (see below). JourneyMap's compatible versions and iframe behavior remain unverified until tested against Minecraft 26.1.2.
 
 ## Extraction, statistics and session events
 
@@ -41,3 +41,24 @@ Fabric play JOIN defines a new session, including joining another server/world; 
 Fabric disconnect notification can arrive on the network thread. MinePanel schedules its state changes onto the client executor, ignores obsolete listener callbacks, and samples only the joined, matching connection. A lingering player/level after disconnect cannot restart or erase the retained session.
 
 Statistics and history deltas replace their whole bounded objects only when changed; inventory keeps its existing changed-slot delta semantics. Availability transitions send all fields with `statistics:null`, `inventory:null` and inactive retained history. Transport loss clears even stale displayed history until a fresh initial snapshot arrives. Unit tests cover baseline changes, unavailable counters, bounds, serialization, revision suppression and reset semantics; packet injection and live client compatibility remain unverified pending an accessible Minecraft build environment.
+
+## Litematica build progress
+
+Schema version 4 adds the `build` detail field, replaced whole when it changes:
+`{ available, reason, placement: { id, name, total, placed, wrong, extra, uncheckedChunks, scanComplete, checkedAt } | null, materials: [ { itemId, name, icon, left, have } ] }` (at most 128 materials). `reason` is `missing`, `version` or `error` when unavailable, `none` when no placement is selected and `counting` while the schematic's blocks are counted; it is null when a placement is shown.
+
+Code is split in three so Litematica's absence can never break class loading:
+
+- `dev.craftyplayz.minepanel.build` (main source set, pure Java, no Minecraft): `BuildTracker` (counting, chunk scanning, per-chunk cache, materials), `BuildRules` (per-position classification), `ChunkCounts`, the `BuildSource` interface it reads through, and the `BuildProgress` snapshot. Tested by `BuildProgressTest` with fake placements.
+- `dev.craftyplayz.minepanel.litematica` (client): `LitematicaBuildSource`, the **only** code that imports Litematica/MaLiLib (`litematicaIsolation`, part of `check`, enforces this). Compiled against Litematica 0.27.14 / MaLiLib 0.28.12 as `compileOnly`; never bundled (`releaseBuild` rejects `fi/dy/masa/` entries).
+- `BuildProgressCollector` (client): on the first in-world tick, checks that Litematica is loaded and that its version satisfies MinePanel's own `suggests` range, then creates the adapter. Any `LinkageError` or `RuntimeException` from the adapter disables the tile for the game session with one logged warning.
+
+Every Litematica and world read happens on the client thread at END_CLIENT_TICK, within a 2 ms budget per tick and at most 256 chunk readiness checks per tick. Only the immutable `BuildProgress` leaves that thread.
+
+- **Total** is the count of non-air states in the containers of the placement's enabled sub-regions (as `MaterialListUtils.createMaterialListFor`), counted incrementally without loaded chunks.
+- **Scanning** works per chunk of `getTouchedChunks(PLACEMENT_ENABLED)`, comparing every position in `getBoxesWithinChunk`, and only when Litematica's verifier would: the 3×3 client chunks are loaded and the schematic world has the chunk. Each position is classified as Litematica's `checkBlockStates` does (honouring `ignoreCropAge`, `ignoreExistingFluids`, the ignore-existing-blocks list and the placement verifier's ignored mismatches, if that verifier exists). Wrong blocks, wrong states and "different block" matches all count as *wrong*, i.e. not placed. An ignored mismatch is accepted (placed, or nothing for schematic air). Schematic air with a world block is *extra*, shown only as "N to clear". Litematica's render-layer verifier range is not applied: the whole placement is compared.
+- **Cache:** results per chunk, for the last four placements by hash ID; a fingerprint change (schematic, origin, rotation, mirror, enabled sub-regions and their placement) starts that placement over. `ClientLevel.setServerVerifiedBlockState` (`BlockChangeMixin`, the hook Litematica uses) and Fabric chunk loads mark already-scanned chunks for a rescan; a marked chunk keeps its last result until it is ready again. Leaving the world clears the cache.
+- **Materials:** for each state, (schematic count − placed count) converted to items with `MaterialCache` as `MaterialListUtils.convertStatesToStacks` does (waterlogged blocks add a water bucket; flower pots and cauldrons need several items). *Have* sums MinePanel's own inventory snapshot (36 slots and offhand, plus shulker box and bundle contents); it never affects placed/total.
+- A selected but disabled placement is treated as no placement. Litematica's own verifier and material-list tasks are never started, so MinePanel adds no HUD renderers or chat messages.
+
+Porting to a new Minecraft version: bump `litematica_version`/`malilib_version` in `gradle.properties`, compare `LitematicaBuildSource` against the new `LTS/<version>` branch using the API table in [the plan](IMPLEMENTATION_PLAN.md), fix compile errors and re-run the manual checks.
