@@ -6,7 +6,7 @@ const equipmentKeys = ["head", "chest", "legs", "feet", "offhand", "mainhand"];
 const historyCategories = ["lifecycle", "death", "dimension", "kill", "mine", "place",
   "container", "inventory", "drop", "damage", "heal", "advancement", "biome", "weather", "time"];
 const MAX_HISTORY_EVENTS = 500;
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 const has = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -211,7 +211,8 @@ function applyHistory(previous, patch) {
 
 // ------------------------------------------------------------------------------- World, motion and other details
 
-const DETAIL_FIELDS = ["world", "motion", "xp", "portal", "pickups", "advancements", "villagers", "enderChest"];
+const DETAIL_FIELDS = ["world", "motion", "xp", "portal", "pickups", "advancements", "villagers", "enderChest",
+  "build"];
 const WEATHER = ["clear", "rain", "thunder"];
 const GAME_MODES = ["survival", "creative", "adventure", "spectator"];
 const MOTION_MODES = ["ground", "elytra", "swimming", "riding", "flying", "falling"];
@@ -331,6 +332,36 @@ function validateEnderChest(chest) {
   return { seenAt: chest.seenAt, slots: chest.slots.map(slot => validateItem(slot)) };
 }
 
+const BUILD_UNAVAILABLE = ["missing", "version", "error"];
+const BUILD_EMPTY = ["none", "counting"];
+const MAX_MATERIALS = 128;
+
+/** Litematica build progress; mirrors BuildProgress on the Java side. */
+function validateBuild(build) {
+  requireValid(object(build) && typeof build.available === "boolean" && has(build, "reason")
+    && has(build, "placement") && Array.isArray(build.materials) && build.materials.length <= MAX_MATERIALS);
+  const { available, reason, placement } = build;
+  if (!available) requireValid(BUILD_UNAVAILABLE.includes(reason) && placement === null);
+  else if (placement === null) requireValid(BUILD_EMPTY.includes(reason));
+  else requireValid(reason === null);
+  requireValid(placement !== null || build.materials.length === 0);
+  let checked = null;
+  if (placement !== null) {
+    requireValid(object(placement) && validText(placement.id) && validText(placement.name)
+      && ["total", "placed", "wrong", "extra", "uncheckedChunks", "checkedAt"].every(key => integer(placement[key]))
+      && placement.placed + placement.wrong <= placement.total && typeof placement.scanComplete === "boolean");
+    checked = { id: placement.id, name: placement.name, total: placement.total, placed: placement.placed,
+      wrong: placement.wrong, extra: placement.extra, uncheckedChunks: placement.uncheckedChunks,
+      scanComplete: placement.scanComplete, checkedAt: placement.checkedAt };
+  }
+  const materials = build.materials.map(row => {
+    requireValid(object(row) && validIdentifier(row.itemId) && validText(row.name) && validIcon(row.icon)
+      && integer(row.left) && row.left > 0 && integer(row.have));
+    return { itemId: row.itemId, name: row.name, icon: row.icon, left: row.left, have: row.have };
+  });
+  return { available, reason, placement: checked, materials };
+}
+
 /** Validates the detail fields: required while in a world (advancements and ender chest may be null), else null. */
 function validateDetails(state) {
   requireValid(DETAIL_FIELDS.every(key => has(state, key)));
@@ -340,7 +371,7 @@ function validateDetails(state) {
   }
   const validators = { world: validateWorld, motion: validateMotion, xp: validateXp, portal: validatePortal,
     pickups: validatePickups, advancements: validateAdvancements, villagers: validateVillagers,
-    enderChest: validateEnderChest };
+    enderChest: validateEnderChest, build: validateBuild };
   return Object.fromEntries(DETAIL_FIELDS.map(key => {
     const value = state[key];
     // Deltas carry over unchanged fields from the previous state, which were validated when they arrived.
