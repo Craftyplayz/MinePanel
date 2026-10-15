@@ -58,7 +58,8 @@ function defaultSettings() {
     // Custom target levels, each shown with the XP and time still needed.
     xp: { window: 60, goals: [] },
     pickups: { lifetime: 30, maxRows: 8, showSource: true, ignored: [] },
-    advancements: { popupSeconds: 10 }
+    // Tabs (advancement roots) left out, e.g. ones datapacks only use to list themselves.
+    advancements: { popupSeconds: 10, hiddenTabs: [] }
   };
 }
 
@@ -89,7 +90,8 @@ const SETTING_RULES = [
   ["pickups", "maxRows", value => wholeIn(value, 1, 32)],
   ["pickups", "showSource", value => typeof value === "boolean"],
   ["pickups", "ignored", validItemIds],
-  ["advancements", "popupSeconds", value => wholeIn(value, 0, 300)]
+  ["advancements", "popupSeconds", value => wholeIn(value, 0, 300)],
+  ["advancements", "hiddenTabs", validItemIds]
 ];
 
 /** Copies only known, valid settings out of {@code value}; rejects present-but-malformed ones. */

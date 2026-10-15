@@ -161,11 +161,13 @@
         <div class="xp-level prio-1"><strong id="xp-level">—</strong><div class="xp-bar"><span id="xp-fill"></span></div></div>
         <p class="xp-rate prio-1"><span id="xp-rate">— XP/h</span> <span class="hint">over</span> <button type="button" class="chip small" id="xp-window" aria-haspopup="true" title="Choose how long to average over">60 s</button></p>
         <p class="xp-gained prio-2" id="xp-gained"></p>
-        <dl class="facts prio-2">
-          <div><dt>Next level</dt><dd id="xp-next">—</dd></div>
-          <div><dt id="xp-hundred-label">Level 100</dt><dd id="xp-hundred">—</dd></div>
-        </dl>
-        <dl class="facts prio-2" id="xp-goals" aria-label="Level goals" hidden></dl>
+        <div class="xp-facts prio-2">
+          <dl class="facts">
+            <div><dt>Next level</dt><dd id="xp-next">—</dd></div>
+            <div><dt id="xp-hundred-label">Level 100</dt><dd id="xp-hundred">—</dd></div>
+          </dl>
+          <dl class="facts" id="xp-goals" aria-label="Level goals" hidden></dl>
+        </div>
         <div class="popover" id="xp-window-menu" role="menu" hidden></div>
       </div>
     </article>
@@ -184,8 +186,8 @@
           <label class="option-toggle"><input id="pickups-source" type="checkbox"> <span>Show where items came from</span></label>
           <p class="hint" id="pickups-ignored"></p>
         </form>
-        <p class="empty-note" id="pickups-empty">Nothing picked up yet.</p>
-        <div class="pickup-list scroll" id="pickups-list" aria-label="Recently picked up items"></div>
+        <p class="empty-note" id="pickups-empty">No inventory changes yet.</p>
+        <div class="pickup-list scroll" id="pickups-list" aria-label="Items recently added to or removed from the inventory"></div>
       </div>
     </article>
     <article class="tile" id="tile-advancements" data-tile="advancements" aria-labelledby="advancements-title">
@@ -194,6 +196,7 @@
       <div class="tile-body column">
         <form class="tile-settings" id="advancements-form" hidden>
           <label>Pop up when you make one for <input id="advancements-popup-seconds" type="number" min="0" max="300"> seconds <span class="hint">(0 = never)</span></label>
+          <p class="hint" id="advancements-hidden-tabs"></p>
         </form>
         <div class="advancement-tabs prio-2" id="advancement-tabs"></div>
         <div class="history-filters prio-3">

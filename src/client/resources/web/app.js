@@ -66,6 +66,7 @@ const EQUIPMENT_SLOTS = [["head", "Head"], ["chest", "Chest"], ["legs", "Legs"],
 const ROW_HEIGHT = 40;
 const GRID_GAP = 10;
 const HELD_LINE_HEIGHT = 22;
+const RECONNECT_MILLIS = 5_000;
 
 let activeSocket;
 let reconnectTimer;
@@ -309,7 +310,7 @@ function hideTooltip() {
 // ------------------------------------------------------------------------------------- Player and statistics
 
 function setConnection(online) {
-  connection.textContent = online ? "Connected" : "Disconnected · reconnecting";
+  connection.textContent = online ? "Connected" : "Disconnected · retrying every 5 s";
   dot.className = online ? "dot online" : "dot offline";
 }
 
@@ -425,9 +426,12 @@ function renderStatisticOptions() {
   }
   const query = statisticsSearch.value.trim().toLowerCase();
   const groups = new Map();
+  const shown = new Set(settings.shown);
+  // Within each category, pinned statistics come first, so pinning or unpinning one moves it.
   [...known.values()]
     .filter(entry => `${entry.label} ${entry.category}`.toLowerCase().includes(query))
-    .sort((a, b) => a.category.localeCompare(b.category) || a.label.localeCompare(b.label))
+    .sort((a, b) => a.category.localeCompare(b.category) || shown.has(b.id) - shown.has(a.id)
+      || a.label.localeCompare(b.label))
     .forEach(entry => {
       if (!groups.has(entry.category)) {
         const group = create("section", "option-group");
@@ -1001,10 +1005,10 @@ setEditing(false);
 
 // ------------------------------------------------------------------------------------------------ Connection
 
-function scheduleReconnect(delay) {
+function scheduleReconnect() {
   if (pageHidden) return;
   window.clearTimeout(reconnectTimer);
-  reconnectTimer = window.setTimeout(connect, delay);
+  reconnectTimer = window.setTimeout(connect, RECONNECT_MILLIS);
 }
 
 async function connect() {
@@ -1053,7 +1057,7 @@ async function connect() {
       activeSocket = undefined;
       clearLiveData();
       setConnection(false);
-      scheduleReconnect(2000);
+      scheduleReconnect();
     }, { once: true });
     socket.addEventListener("error", () => {
       if (isCurrent()) {
@@ -1067,7 +1071,7 @@ async function connect() {
     if (pageHidden || attempt !== generation) return;
     clearLiveData();
     setConnection(false);
-    scheduleReconnect(3000);
+    scheduleReconnect();
   }
 }
 

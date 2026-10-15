@@ -65,17 +65,21 @@
 .pickup-text { flex: 1; display: grid; min-width: 0; font-size: 12px; }
 .pickup-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pickup-meta { color: var(--muted); font-size: 11px; }
+.pickup-row.loss .pickup-name { color: var(--danger); }
 .pickup-hide { opacity: .4; }
 .pickup-row:hover .pickup-hide { opacity: 1; }
 
 /* Advancements */
 .advancement-tabs { flex: none; display: grid; gap: 3px; }
-.advancement-tab { display: grid; grid-template-columns: 1fr 2fr auto; gap: 8px; align-items: center; font-size: 11px; color: #c5cfce; }
+.advancement-tab { display: grid; grid-template-columns: 1fr 2fr auto auto; gap: 8px; align-items: center; font-size: 11px; color: #c5cfce; }
 .advancement-tab .label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .advancement-tab .progress { height: 5px; border-radius: 3px; background: #1a2329; overflow: hidden; }
 .advancement-tab .progress span { display: block; height: 100%; background: var(--accent); }
 .advancement-tab .count { color: var(--muted); font-variant-numeric: tabular-nums; }
-.advancement-list { flex: 1; min-height: 0; }
+.advancement-tab-hide { width: 16px; height: 16px; font-size: 11px; opacity: .4; }
+.advancement-tab:hover .advancement-tab-hide { opacity: 1; }
+/* Room so the scrollbar doesn't cover the progress counts. */
+.advancement-list { flex: 1; min-height: 0; padding-right: 12px; }
 .advancement { border-top: 1px solid var(--line); font-size: 12px; }
 .advancement summary { display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; list-style: none; }
 .advancement summary::-webkit-details-marker { display: none; }

@@ -243,6 +243,9 @@ public final class LayoutStore {
             if (advancements.has("popupSeconds")) {
                 normalized.addProperty("popupSeconds", integer(advancements.get("popupSeconds"), 0, 300));
             }
+            if (advancements.has("hiddenTabs")) {
+                normalized.add("hiddenTabs", itemIds(advancements.getAsJsonArray("hiddenTabs")));
+            }
             result.add("advancements", normalized);
         }
         return result;

@@ -170,7 +170,7 @@ public final class MinePanelClient implements ClientModInitializer {
         worldData.reset();
     }
 
-    /** Client thread: an item arrived in the inventory. */
+    /** Client thread: items were added to (positive count) or removed from (negative count) the inventory. */
     private void pickedUp(String source, ItemStack stack, int count) {
         var minecraft = Minecraft.getInstance();
         try {

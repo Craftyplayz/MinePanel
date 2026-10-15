@@ -39,9 +39,12 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -51,8 +54,17 @@ import java.util.Map;
  */
 public final class ClientActivity {
     private static final long KILL_WINDOW_MILLIS = 10_000;
-    /** A ground pickup is matched against inventory gains seen while a screen is open for this long. */
-    private static final long GROUND_PICKUP_MILLIS = 2_000;
+    /** A ground pickup labels inventory gains of that item for this long. */
+    private static final long GROUND_PICKUP_MILLIS = 3_000;
+    /**
+     * Inventory changes are held this long before they are reported, so a change that is undone meanwhile (an item
+     * moved out of the counted slots and back, a stack the server corrects) cancels out.
+     */
+    private static final long SETTLE_MILLIS = 1_000;
+    /** After joining, the server fills the inventory; that is not reported as items being added. */
+    private static final long JOIN_SETTLE_MILLIS = 3_000;
+    /** How long after mining, placing or dropping an inventory change is put down to it. */
+    private static final long CAUSE_MILLIS = 1_500;
     private static ClientActivity instance;
     private final GameplayTracker tracker;
     private final PortalTracker portals;
@@ -63,14 +75,34 @@ public final class ClientActivity {
     private Map<String, Integer> countsAtOpen;
     private boolean diffPending;
     private String pickupSource;
+    private String lossSource;
+    /** Items the player held at the last tick, or {@code null} before the first tick in a world. */
     private Map<ItemKey, Integer> ownCounts;
-    /** Ground pickups not yet matched to an inventory gain (only tracked while a screen is open). */
+    private long countingSince;
+    /** Inventory changes not yet reported, oldest first. */
+    private final Map<ItemKey, Change> changes = new LinkedHashMap<>();
+    /** Ground pickups not yet matched to an inventory gain. */
     private final Map<ItemKey, int[]> groundPickups = new HashMap<>();
     private long groundPickupAt;
+    private long minedAt;
+    private long placedAt;
+    private long droppedAt;
 
-    /** Receives items added to the inventory and how they got there. */
+    /** Receives items added to (positive count) or removed from (negative count) the inventory and how. */
     interface PickupSink {
         void pickup(String source, ItemStack stack, int count);
+    }
+
+    /** The net change of one item kind since {@code at}, with how the latest gain and loss happened. */
+    private static final class Change {
+        final long at;
+        int count;
+        String gainSource;
+        String lossSource;
+
+        Change(long at) {
+            this.at = at;
+        }
     }
 
     ClientActivity(GameplayTracker tracker, PortalTracker portals, PickupSink pickups) {
@@ -96,27 +128,29 @@ public final class ClientActivity {
         diffPending = false;
         ownCounts = null;
         pickupSource = null;
+        lossSource = null;
+        changes.clear();
         groundPickups.clear();
+        minedAt = placedAt = droppedAt = 0;
     }
 
     /** The pickup-animation packet for an item entity the local player collected. */
     public void pickedUp(ItemStack stack, int count) {
         if (stack.isEmpty() || count <= 0) return;
-        if (ownCounts != null) {
-            // A screen is open, so the inventory diff will see this gain; make sure it is labelled "Picked up".
-            groundPickups.computeIfAbsent(new ItemKey(stack), key -> new int[1])[0] += count;
-            groundPickupAt = now();
-        }
-        pickups.pickup("Picked up", stack, count);
+        // The inventory diff reports the gain itself; this only labels it "Picked up".
+        groundPickups.computeIfAbsent(new ItemKey(stack), key -> new int[1])[0] += count;
+        groundPickupAt = now();
     }
 
     void blockMined(BlockPos pos, BlockState state) {
         Block block = state.getBlock();
+        minedAt = now();
         tracker.blockMined(now(), BuiltInRegistries.BLOCK.getKey(block).toString(), block.getName().getString(),
                 pos.getX(), pos.getY(), pos.getZ());
     }
 
     public void blockPlaced(Block block, BlockPos pos) {
+        placedAt = now();
         tracker.blockPlaced(now(), BuiltInRegistries.BLOCK.getKey(block).toString(), block.getName().getString(),
                 pos.getX(), pos.getY(), pos.getZ());
         if (block == Blocks.OBSIDIAN) portals.obsidianPlaced(now(), pos.getX(), pos.getY(), pos.getZ());
@@ -124,6 +158,7 @@ public final class ClientActivity {
 
     public void itemDropped(ItemStack stack, int count) {
         if (stack.isEmpty() || count <= 0) return;
+        droppedAt = now();
         tracker.itemDropped(now(), BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(),
                 stack.getHoverName().getString(), count);
     }
@@ -161,15 +196,12 @@ public final class ClientActivity {
         tracker.containerOpened(now(), openTitle);
         var menu = ((AbstractContainerScreen<?>) screen).getMenu();
         pickupSource = pickupSource(screen, menu);
-        ownCounts = ownItems(minecraft.player, menu);
-        groundPickups.clear();
+        lossSource = lossSource(screen, menu, pickupSource);
     }
 
     void screenClosed(Screen screen) {
         if (screen != openScreen) return;
         openScreen = null;
-        ownCounts = null;
-        groundPickups.clear();
         // The carried stack returns to the inventory after closing, so compare on the next tick.
         diffPending = true;
     }
@@ -199,28 +231,81 @@ public final class ClientActivity {
             tracker.inventoryChanged(now, openTitle, changes);
             countsAtOpen = null;
         }
-        if (ownCounts != null && openScreen instanceof AbstractContainerScreen<?> screen && minecraft.player != null) {
-            trackGains(minecraft.player, screen.getMenu(), now);
-        }
+        if (minecraft.player != null) trackInventory(minecraft.player, now);
     }
 
-    /** Reports items that arrived in the inventory since the last tick while a screen is open. */
-    private void trackGains(Player player, AbstractContainerMenu menu, long now) {
-        if (now - groundPickupAt > GROUND_PICKUP_MILLIS) groundPickups.clear();
+    /**
+     * Compares the items the player holds with the last tick and reports each change once it has settled, however it
+     * happened (including mods that put mined items straight into the inventory).
+     */
+    private void trackInventory(Player player, long now) {
+        AbstractContainerMenu menu = openScreen instanceof AbstractContainerScreen<?> screen ? screen.getMenu()
+                : player.containerMenu;
         Map<ItemKey, Integer> current = ownItems(player, menu);
-        for (var entry : current.entrySet()) {
-            int gain = entry.getValue() - ownCounts.getOrDefault(entry.getKey(), 0);
-            if (gain <= 0) continue;
-            int[] ground = groundPickups.get(entry.getKey());
-            if (ground != null) {
-                int matched = Math.min(gain, ground[0]);
-                gain -= matched;
-                ground[0] -= matched;
-                if (ground[0] == 0) groundPickups.remove(entry.getKey());
-            }
-            if (gain > 0) pickups.pickup(pickupSource, entry.getKey().stack, gain);
+        if (ownCounts == null) countingSince = now;
+        if (now - countingSince < JOIN_SETTLE_MILLIS) {
+            ownCounts = current;
+            return;
         }
+        String gain = openScreen != null ? pickupSource : now - minedAt <= CAUSE_MILLIS ? "Mined" : "Added";
+        String loss = player.isDeadOrDying() ? "Died" : now - droppedAt <= CAUSE_MILLIS ? "Dropped"
+                : openScreen != null ? lossSource : now - placedAt <= CAUSE_MILLIS ? "Placed" : "Used";
+        Map<ItemKey, Integer> deltas = new HashMap<>();
+        ownCounts.forEach((key, count) -> deltas.merge(key, -count, Integer::sum));
+        current.forEach((key, count) -> deltas.merge(key, count, Integer::sum));
+        deltas.forEach((key, delta) -> {
+            if (delta == 0) return;
+            Change change = changes.computeIfAbsent(key, ignored -> new Change(now));
+            change.count += delta;
+            if (delta > 0) change.gainSource = gain;
+            else change.lossSource = loss;
+            if (change.count == 0) changes.remove(key);
+        });
         ownCounts = current;
+        reportSettled(now);
+    }
+
+    private void reportSettled(long now) {
+        if (now - groundPickupAt > GROUND_PICKUP_MILLIS) groundPickups.clear();
+        List<Map.Entry<ItemKey, Change>> due = new ArrayList<>();
+        for (Iterator<Map.Entry<ItemKey, Change>> iterator = changes.entrySet().iterator(); iterator.hasNext(); ) {
+            var entry = iterator.next();
+            if (now - entry.getValue().at < SETTLE_MILLIS) continue;
+            due.add(Map.entry(entry.getKey(), entry.getValue()));
+            iterator.remove();
+        }
+        // An item whose components changed (a bundle filled, a book renamed) is one kind lost and another gained;
+        // that is not an item arriving or leaving.
+        for (int index = 0; index < due.size(); index++) {
+            var entry = due.get(index);
+            for (int other = index + 1; other < due.size(); other++) {
+                var candidate = due.get(other);
+                if (candidate.getValue().count == -entry.getValue().count
+                        && candidate.getKey().stack.getItem() == entry.getKey().stack.getItem()) {
+                    due.remove(other);
+                    due.remove(index--);
+                    break;
+                }
+            }
+        }
+        for (var entry : due) {
+            ItemKey key = entry.getKey();
+            Change change = entry.getValue();
+            int count = change.count;
+            if (count < 0) {
+                pickups.pickup(change.lossSource, key.stack, count);
+                continue;
+            }
+            int[] ground = groundPickups.get(key);
+            if (ground != null) {
+                int matched = Math.min(count, ground[0]);
+                count -= matched;
+                ground[0] -= matched;
+                if (ground[0] == 0) groundPickups.remove(key);
+                pickups.pickup("Picked up", key.stack, matched);
+            }
+            if (count > 0) pickups.pickup(change.gainSource, key.stack, count);
+        }
     }
 
     /**
@@ -272,6 +357,15 @@ public final class ClientActivity {
         if (menu instanceof BrewingStandMenu) return "Brewed";
         String title = screen.getTitle().getString();
         return "from " + (title.isBlank() ? "container" : title.length() > 200 ? title.substring(0, 200) : title);
+    }
+
+    /** How an item that leaves the inventory while this screen is open went. */
+    private static String lossSource(Screen screen, AbstractContainerMenu menu, String pickupSource) {
+        if (screen instanceof CreativeModeInventoryScreen) return pickupSource;
+        if (menu instanceof InventoryMenu) return "Dropped";
+        if (isWorkspace(menu)) return pickupSource;
+        String title = screen.getTitle().getString();
+        return "to " + (title.isBlank() ? "container" : title.length() > 200 ? title.substring(0, 200) : title);
     }
 
     private static void addOwn(Map<ItemKey, Integer> counts, ItemStack stack) {

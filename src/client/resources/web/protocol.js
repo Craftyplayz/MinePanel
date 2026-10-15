@@ -84,7 +84,8 @@ function validateInventory(inventory) {
     && inventory.slots.length === 36 && object(inventory.equipment)
     && Object.keys(inventory.equipment).every(key => equipmentKeys.includes(key))
     && integer(inventory.selectedHotbarSlot) && inventory.selectedHotbarSlot <= 8);
-  const slots = inventory.slots.map(validateItem);
+  // Not map(validateItem): map passes the slot index as validateItem's `nested` flag.
+  const slots = inventory.slots.map(item => validateItem(item));
   const equipment = Object.fromEntries(equipmentKeys.map(key =>
     [key, validateItem(inventory.equipment[key])]));
   requireValid(JSON.stringify(equipment.mainhand) === JSON.stringify(slots[inventory.selectedHotbarSlot]));
@@ -271,7 +272,7 @@ function validatePickups(pickups) {
   requireValid(Array.isArray(pickups) && pickups.length <= 32);
   return pickups.map(pickup => {
     requireValid(object(pickup) && integer(pickup.id) && pickup.id > 0 && integer(pickup.at)
-      && validText(pickup.source) && integer(pickup.count) && pickup.count > 0);
+      && validText(pickup.source) && Number.isSafeInteger(pickup.count) && pickup.count !== 0);
     return { id: pickup.id, at: pickup.at, source: pickup.source, item: filledItem(pickup.item), count: pickup.count };
   });
 }

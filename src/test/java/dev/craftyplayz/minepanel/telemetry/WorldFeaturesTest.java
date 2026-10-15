@@ -76,9 +76,15 @@ public final class WorldFeaturesTest {
                 "the same item and source merge; a different source is its own entry");
         tracker.add(9000, "stone", "Picked up", stone, 1);
         check(tracker.pickups().size() == 3 && tracker.pickups().getLast().count() == 1, "old entries do not merge");
+        tracker.add(9100, "stone", "Picked up", stone, -2);
+        check(tracker.pickups().size() == 4 && tracker.pickups().getLast().count() == -2
+                && tracker.pickups().getLast().toJson().contains("\"count\":-2"), "removals are their own entry");
+        tracker.add(9200, "stone", "Picked up", stone, -1);
+        check(tracker.pickups().size() == 4 && tracker.pickups().getLast().count() == -3, "removals merge with removals");
         for (int index = 0; index < 40; index++) tracker.add(10_000 + index * 10_000L, "k" + index, "Crafted", stone, 1);
         check(tracker.pickups().size() == PickupTracker.MAX_PICKUPS, "the list is bounded");
         invalid(() -> new PickupTracker.Pickup(1, 0, "", stone, 1));
+        invalid(() -> new PickupTracker.Pickup(1, 0, "Used", stone, 0));
     }
 
     private static void testWorldLogging() {

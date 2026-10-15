@@ -103,7 +103,8 @@ function harness(fetchImpl = defaultFetch()) {
       this.classList = {
         add(name) { if (!owner.classList.contains(name)) owner.className = `${owner.className} ${name}`.trim(); },
         remove(name) { owner.className = owner.className.split(" ").filter(part => part !== name).join(" "); },
-        contains(name) { return owner.className.split(" ").includes(name); }
+        contains(name) { return owner.className.split(" ").includes(name); },
+        toggle(name, force) { if (force ?? !owner.classList.contains(name)) owner.classList.add(name); else owner.classList.remove(name); }
       };
       this.rect = { left: 0, top: 0, width: 100, height: 40 };
     }
@@ -234,6 +235,19 @@ test("slot movement, stack split, counts, equipment and selection apply together
   assert.equal(next.inventory.selectedHotbarSlot, 2);
   assert.equal(next.inventory.equipment.offhand.count, 1);
   assert.equal(JSON.stringify(previous), before);
+});
+
+test("shulker boxes and bundles are accepted in any inventory slot", () => {
+  const h = harness();
+  const shulker = item({ itemId: "minecraft:shulker_box", name: "Shulker Box", count: 1, maxCount: 1,
+    contents: [item(), ...Array.from({ length: 26 }, empty)] });
+  const bundle = item({ itemId: "minecraft:bundle", name: "Bundle", count: 1, maxCount: 1, contents: [item()] });
+  const next = h.apply(snapshot(), update({ inventory: {
+    slots: [{ index: 5, item: shulker }, { index: 20, item: bundle }] } }));
+  assert.equal(next.inventory.slots[5].contents.length, 27);
+  assert.equal(next.inventory.slots[20].contents[0].itemId, "minecraft:stone");
+  const nested = item({ contents: [item({ contents: [] })] });
+  assert.throws(() => h.apply(snapshot(), update({ inventory: { slots: [{ index: 5, item: nested }] } })));
 });
 
 test("damage, durability and enchantment changes replace a full item", () => {
@@ -846,7 +860,8 @@ test("the statistics window chooses shown statistics and what may appear under r
   const h = harness(defaultFetch(null, requests));
   await h.flush();
   const now = Date.now();
-  h.sockets[0].message(initial(snapshot({ statistics: statistics([counter(), stone({ changedAt: now - 1000 })]) })));
+  h.sockets[0].message(initial(snapshot({ statistics: statistics([counter(), stone({ changedAt: now - 1000 }),
+    stone({ id: "minecraft:mined/minecraft:sand", label: "Sand", changedAt: null })]) })));
   assert.equal(h.get("#statistics-dialog").hidden, true);
   h.get("#statistics-settings").emit("click");
   assert.equal(h.get("#statistics-dialog").hidden, false);
@@ -863,6 +878,14 @@ test("the statistics window chooses shown statistics and what may appear under r
   assert.deepEqual(h.get("#statistics-entries").children.at(-1).children[0].textContent, "StoneMined",
     "a newly shown statistic is pinned");
   assert.equal(h.get("#statistics-recent").children.length, 0, "and no longer listed as recent");
+  const labels = category => options().find(group => group.children[0].textContent === category)
+    .children.slice(1).map(value => value.children[0].textContent);
+  assert.deepEqual(labels("Mined"), ["Stone", "Sand"], "pinned statistics sort first in their category");
+  show.children[0].checked = false;
+  show.children[0].emit("change");
+  assert.deepEqual(labels("Mined"), ["Sand", "Stone"], "and unpinning sorts them back");
+  show.children[0].checked = true;
+  show.children[0].emit("change");
   const jumpRecent = row("Jumps").children[2].children[0];
   jumpRecent.checked = false;
   jumpRecent.emit("change");
@@ -1598,7 +1621,7 @@ test("link portal appears after a Nether trip, guides the player and checks obsi
   const arrow = box.children[0].navigator.arrow;
   assert.equal(arrow.style.transform, "rotate(0deg)", "facing north (yaw 180) with the target north: straight ahead");
   socket.message(update({ revision: 6, baseRevision: 5, motion: { ...details().motion, yaw: 270 } }));
-  assert.equal(arrow.style.transform, "rotate(270deg)", "facing east, the target is to the left");
+  assert.equal(arrow.style.transform, "rotate(-90deg)", "facing east, the target is to the left: a quarter turn back, not three quarters forward");
   socket.message(update({ revision: 7, baseRevision: 6,
     portal: { crossing: crossing(), obsidian: [{ id: 9, at: 2000, x: 97, y: 70, z: -207 }], lit: null } }));
   assert.match(box.children[2].textContent, /✗ .*6\.7 blocks away\. Build it 3 E and 6 S/);
@@ -1691,12 +1714,14 @@ test("recent pickups list newest first with source, expire, and can hide an item
   const pickup = (id, name, source, count, at = now()) => ({ id, at, source, count,
     item: item({ name, itemId: `minecraft:${name.toLowerCase()}`, count: 1 }) });
   h.sockets[0].message(initial(snapshot({ pickups: [pickup(1, "Dirt", "Picked up", 3, now() - 60_000),
-    pickup(2, "Cobblestone", "Picked up", 23), pickup(3, "Diamond", "from Chest", 2)] })));
+    pickup(2, "Cobblestone", "Picked up", 23), pickup(3, "Diamond", "from Chest", 2), pickup(4, "Torch", "Placed", -3)] })));
   const rows = () => h.get("#pickups-list").children;
   assert.deepEqual(rows().map(row => row.children[1].textContent),
-    ["+2 Diamondfrom Chest · now", "+23 CobblestonePicked up · now"], "older than the 30 s default lifetime is hidden");
-  rows()[0].children[2].emit("click");
-  assert.deepEqual(rows().map(row => row.children[1].children[0].textContent), ["+23 Cobblestone"]);
+    ["−3 TorchPlaced · now", "+2 Diamondfrom Chest · now", "+23 CobblestonePicked up · now"],
+    "older than the 30 s default lifetime is hidden");
+  assert.deepEqual(rows().map(row => row.classList.contains("loss")), [true, false, false], "removed items are marked");
+  rows()[1].children[2].emit("click");
+  assert.deepEqual(rows().map(row => row.children[1].children[0].textContent), ["−3 Torch", "+23 Cobblestone"]);
   assert.deepEqual(plain(h.run("layout.settings.pickups.ignored")), ["minecraft:diamond"]);
 });
 

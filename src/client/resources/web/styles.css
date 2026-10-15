@@ -84,6 +84,8 @@ button, input, select { font: inherit; }
 .facts div { display: grid; gap: 3px; }
 .facts dt { color: #74828a; font-size: 10px; }
 .facts dd { margin: 0; color: #c5cfce; font-size: 12px; }
+/* Goals continue on the same row as the built-in facts while there is room, then wrap. */
+.xp-facts { display: flex; flex-wrap: wrap; column-gap: 22px; }
 @container tile (max-height: 90px) { .position { margin-top: 6px; } }
 .effects { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
 .effects:empty { display: none; }

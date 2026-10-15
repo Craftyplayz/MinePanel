@@ -37,6 +37,16 @@ function formatEta(seconds) {
 const formatWindow = seconds => seconds >= 3600 ? `${seconds / 3600} h` : seconds >= 60 ? `${seconds / 60} min` : `${seconds} s`;
 const playerPosition = player => player.position;
 
+/**
+ * Rotates an element to an angle by the shortest turn from where it points now, so the CSS transition swings
+ * 359° → 1° across north instead of spinning all the way round.
+ */
+function rotateTo(element, degrees) {
+  const current = element.rotation ?? degrees;
+  element.rotation = current + ((degrees - current) % 360 + 540) % 360 - 180;
+  element.style.transform = `rotate(${Math.round(element.rotation)}deg)`;
+}
+
 // ----------------------------------------------------------------------------------------------- Navigator
 
 /**
@@ -82,7 +92,7 @@ function renderNavigator(container, { title, target, dimension, player, vertical
   const position = playerPosition(player);
   const distance = horizontalDistance(position, target);
   const bearing = bearingTo(position, target);
-  nav.arrow.style.transform = `rotate(${relativeBearing(player.motion.yaw, bearing).toFixed(0)}deg)`;
+  rotateTo(nav.arrow, relativeBearing(player.motion.yaw, bearing));
   writeText(nav.distance, distance < 1.5 ? "You're here"
     : `${formatCount(distance)} blocks ${COMPASS_WORDS[compassPoint(bearing)]}`);
   const dy = target.y - position.y;
@@ -181,7 +191,7 @@ function renderMovement(player) {
   // Compass degrees: 0 = north, 90 = east (Minecraft's yaw has 0 = south).
   const heading = (motion.yaw + 180) % 360;
   writeText(movementParts.facing, `Facing ${COMPASS_WORDS[compassPoint(motion.yaw)]} · ${Math.round(heading)}°`);
-  movementParts.needle.style.transform = `rotate(${Math.round(heading)}deg)`;
+  rotateTo(movementParts.needle, heading);
   const vertical = motion.verticalSpeed;
   writeText(movementParts.vertical, settings.showVertical && Math.abs(vertical) >= 0.1
     ? `${vertical > 0 ? "↑ Rising" : "↓ Falling"} ${Math.abs(vertical).toFixed(1)} blocks/s` : "");
@@ -385,7 +395,8 @@ function renderPickups(player, now = Date.now()) {
     }
     retained.set(pickup.id, node);
     renderSlot(node.slot, { ...pickup.item, count: 1 }, false);
-    writeText(node.name, `+${formatCount(pickup.count)} ${pickup.item.name}`);
+    writeText(node.name, `${pickup.count > 0 ? "+" : "−"}${formatCount(Math.abs(pickup.count))} ${pickup.item.name}`);
+    node.row.classList.toggle("loss", pickup.count < 0);
     writeText(node.meta, (settings.showSource ? `${pickup.source} · ` : "") + formatAgo(now - pickup.at));
     return node.row;
   });
@@ -395,14 +406,15 @@ function renderPickups(player, now = Date.now()) {
     pickupViewKey = key;
     pickupParts.list.replaceChildren(...rows);
   }
-  writeText(pickupParts.empty, rows.length ? "" : "Nothing picked up yet.");
+  writeText(pickupParts.empty, rows.length ? "" : "No inventory changes yet.");
 }
 
 // --------------------------------------------------------------------------------------------- Advancements
 
 const advancementParts = { status: $("#advancements-status"), tabs: $("#advancement-tabs"),
   list: $("#advancement-list"), empty: $("#advancements-empty"), filter: $("#advancement-filter"),
-  form: $("#advancements-form"), seconds: $("#advancements-popup-seconds"), popup: $("#advancement-popup") };
+  form: $("#advancements-form"), seconds: $("#advancements-popup-seconds"), hiddenTabs: $("#advancements-hidden-tabs"),
+  popup: $("#advancement-popup") };
 const MAX_ADVANCEMENT_ROWS = 150;
 let advancementKey;
 let advancementNodes = new Map();
@@ -412,7 +424,7 @@ let advancementPopupTimer;
 stopDrag($("#advancements-settings"));
 $("#advancements-settings").addEventListener("click", () => {
   setHidden(advancementParts.form, !advancementParts.form.hidden);
-  advancementParts.seconds.value = String(displaySettings().advancements.popupSeconds);
+  renderAdvancementSettings();
 });
 advancementParts.seconds.addEventListener("change", () => {
   const seconds = Math.round(Number(advancementParts.seconds.value));
@@ -423,6 +435,21 @@ advancementParts.filter.addEventListener("change", () => {
   renderAdvancements(currentPlayerState);
 });
 
+function renderAdvancementSettings() {
+  const settings = displaySettings().advancements;
+  advancementParts.seconds.value = String(settings.popupSeconds);
+  const titles = new Map((currentPlayerState?.advancements?.tabs ?? []).map(tab => [tab.id, tab.title]));
+  const chips = settings.hiddenTabs.map(id => {
+    const chip = create("button", "chip small", `${titles.get(id) ?? id} ×`);
+    chip.type = "button";
+    chip.title = "Show this tab again";
+    chip.addEventListener("click", () => changeSettings("advancements",
+      { hiddenTabs: displaySettings().advancements.hiddenTabs.filter(value => value !== id) }));
+    return chip;
+  });
+  advancementParts.hiddenTabs.replaceChildren(...(chips.length ? [create("span", "", "Hidden tabs: "), ...chips] : []));
+}
+
 /** An advancement shown like an item slot: its icon, with the title and description as the tooltip. */
 function advancementItem(entry, secret) {
   return { empty: false, itemId: "minecraft:stone", name: secret ? "???" : entry.title, count: 1, maxCount: 1,
@@ -432,8 +459,8 @@ function advancementItem(entry, secret) {
 }
 
 function renderAdvancements(player) {
-  const advancements = player?.available ? player.advancements : null;
-  if (!advancements) {
+  const all = player?.available ? player.advancements : null;
+  if (!all) {
     writeText(advancementParts.status, "Unavailable");
     advancementParts.tabs.replaceChildren();
     advancementParts.list.replaceChildren();
@@ -441,6 +468,9 @@ function renderAdvancements(player) {
     writeText(advancementParts.empty, player?.available ? "Waiting for the server to send advancements." : "");
     return;
   }
+  const hiddenTabs = displaySettings().advancements.hiddenTabs;
+  const advancements = { tabs: all.tabs.filter(tab => !hiddenTabs.includes(tab.id)),
+    entries: all.entries.filter(entry => !hiddenTabs.includes(entry.tab)) };
   const done = advancements.entries.filter(entry => entry.done).length;
   writeText(advancementParts.status, `${done} / ${advancements.entries.length}`);
   const filter = advancementParts.filter.value || "closest";
@@ -456,6 +486,13 @@ function renderAdvancements(player) {
     bar.appendChild(fill);
     row.appendChild(bar);
     row.appendChild(create("span", "count", `${tab.done}/${tab.total}`));
+    const hide = create("button", "icon-button advancement-tab-hide", "×");
+    hide.type = "button";
+    hide.setAttribute("aria-label", `Hide the ${tab.title} tab`);
+    hide.title = `Hide the ${tab.title} tab`;
+    hide.addEventListener("click", () => changeSettings("advancements",
+      { hiddenTabs: [...displaySettings().advancements.hiddenTabs, tab.id] }));
+    row.appendChild(hide);
     return row;
   }));
   const fraction = entry => entry.criteriaTotal ? entry.criteriaDone / entry.criteriaTotal : 0;
@@ -1104,6 +1141,8 @@ featureHooks.layout.push(() => {
   renderXpSettings();
   renderPickups(currentPlayerState);
   renderPickupSettings();
+  renderAdvancements(currentPlayerState);
+  renderAdvancementSettings();
   syncPinnedWindows();
 });
 featureHooks.tick.push(() => {
