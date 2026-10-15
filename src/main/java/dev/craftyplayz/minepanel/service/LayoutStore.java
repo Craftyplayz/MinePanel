@@ -46,18 +46,31 @@ public final class LayoutStore {
     public static final List<String> CONDITION_TYPES = List.of("world", "dimension", "biome", "time", "gameMode",
             "health", "food", "saturation", "effect", "movement", "elytra", "advancement", "combat");
     public static final List<Integer> XP_WINDOWS = List.of(10, 30, 60, 300, 600, 3600);
+    public static final int MAX_XP_GOALS = 8;
+    public static final int MAX_XP_GOAL_LEVEL = 10000;
     public static final List<String> PIN_SOURCES = List.of("inventory", "enderchest", "enderchest-item");
+    /** How often the game samples the player for the dashboard; one client tick is 50 ms, so 50 is the fastest. */
+    public static final List<Integer> UPDATE_INTERVALS = List.of(50, 100, 250, 500, 1000);
+    public static final int DEFAULT_UPDATE_INTERVAL = 250;
     private final Path file;
+    private volatile int updateIntervalMillis = DEFAULT_UPDATE_INTERVAL;
 
     public LayoutStore(Path file) {
         this.file = file;
+    }
+
+    /** The update interval from the last layout loaded or saved; read by the game thread every tick. */
+    public int updateIntervalMillis() {
+        return updateIntervalMillis;
     }
 
     /** Returns the stored layout, or {@code null} when none is saved or the file is unreadable/invalid. */
     public synchronized String load() {
         try {
             if (!Files.isRegularFile(file) || Files.size(file) > MAX_BYTES) return null;
-            return normalize(Files.readString(file, StandardCharsets.UTF_8));
+            String normalized = normalize(Files.readString(file, StandardCharsets.UTF_8));
+            updateIntervalMillis = updateInterval(normalized);
+            return normalized;
         } catch (IOException | RuntimeException invalid) {
             return null;
         }
@@ -73,6 +86,14 @@ public final class LayoutStore {
         } catch (AtomicMoveNotSupportedException unsupported) {
             Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
         }
+        updateIntervalMillis = updateInterval(normalized);
+    }
+
+    /** The update interval of a normalized layout, or the default when it has none. */
+    static int updateInterval(String normalized) {
+        JsonObject updates = JsonParser.parseString(normalized).getAsJsonObject().getAsJsonObject("updates");
+        return updates != null && updates.has("intervalMillis")
+                ? updates.get("intervalMillis").getAsInt() : DEFAULT_UPDATE_INTERVAL;
     }
 
     /** Validates a layout and re-serializes only the known fields. */
@@ -114,7 +135,19 @@ public final class LayoutStore {
         }
         if (root.has("rules")) result.add("rules", rules(root.getAsJsonArray("rules"), profileIds));
         if (root.has("pinned")) result.add("pinned", pinned(root.getAsJsonArray("pinned")));
+        if (root.has("updates")) result.add("updates", updates(root.getAsJsonObject("updates")));
         return result.toString();
+    }
+
+    /** Global, not per profile: the game samples at one rate whichever profile the browser shows. */
+    private static JsonObject updates(JsonObject source) {
+        JsonObject result = new JsonObject();
+        if (source.has("intervalMillis")) {
+            int interval = integer(source.get("intervalMillis"), 1, 1000);
+            if (!UPDATE_INTERVALS.contains(interval)) throw new IllegalArgumentException("unknown update interval");
+            result.addProperty("intervalMillis", interval);
+        }
+        return result;
     }
 
     private static JsonArray tiles(JsonArray tiles) {
@@ -160,6 +193,10 @@ public final class LayoutStore {
             for (String key : List.of("shown", "recentExcluded")) {
                 if (statistics.has(key)) normalized.add(key, statisticIds(statistics.getAsJsonArray(key)));
             }
+            if (statistics.has("recentLifetime")) {
+                normalized.addProperty("recentLifetime", integer(statistics.get("recentLifetime"), 0, 3600));
+            }
+            if (statistics.has("recentRows")) normalized.addProperty("recentRows", integer(statistics.get("recentRows"), 1, 32));
             result.add("statistics", normalized);
         }
         if (source.has("map")) {
@@ -188,6 +225,7 @@ public final class LayoutStore {
                 if (!XP_WINDOWS.contains(window)) throw new IllegalArgumentException("unknown XP window");
                 normalized.addProperty("window", window);
             }
+            if (xp.has("goals")) normalized.add("goals", xpGoals(xp.getAsJsonArray("goals")));
             result.add("xp", normalized);
         }
         if (source.has("pickups")) {
@@ -309,6 +347,18 @@ public final class LayoutStore {
             String id = element.getAsJsonPrimitive().getAsString();
             if (!StatisticsSnapshot.validId(id)) throw new IllegalArgumentException("invalid statistic id");
             if (seen.add(id)) result.add(id);
+        }
+        return result;
+    }
+
+    /** Custom target levels for the Experience tile, without duplicates. */
+    private static JsonArray xpGoals(JsonArray source) {
+        if (source.size() > MAX_XP_GOALS) throw new IllegalArgumentException("too many XP goals");
+        Set<Integer> seen = new HashSet<>();
+        JsonArray result = new JsonArray();
+        for (JsonElement element : source) {
+            int level = integer(element, 1, MAX_XP_GOAL_LEVEL);
+            if (seen.add(level)) result.add(level);
         }
         return result;
     }

@@ -21,7 +21,7 @@
 .nav-title { font-size: 12px; }
 .nav-body { display: flex; align-items: center; gap: 12px; margin-top: 6px; }
 .nav-dial { flex: none; display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid #2c363c; border-radius: 50%; background: #0b1015; }
-.nav-arrow { display: inline-block; color: var(--accent); font-size: 22px; line-height: 1; transition: transform .2s; }
+.nav-arrow { display: block; width: 20px; height: 26px; background: var(--accent); clip-path: polygon(50% 0, 100% 46%, 66% 46%, 66% 100%, 34% 100%, 34% 46%, 0 46%); transition: transform .2s; }
 .nav-info { display: grid; gap: 2px; min-width: 0; }
 .nav-distance { color: #edf2f5; font-weight: 600; }
 .nav-vertical.up { color: #7fe3f0; }
@@ -53,6 +53,8 @@
 #xp-fill { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #7ec850, #c8f560); transition: width .25s; }
 .xp-rate { margin: 10px 0 0; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .xp-gained { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+#xp-form { margin-bottom: 10px; }
+#xp-goal-error:empty { display: none; }
 .popover { position: absolute; z-index: 10; top: 36px; right: 10px; display: flex; flex-wrap: wrap; gap: 4px; max-width: 220px; padding: 8px; border: 1px solid #2c363c; border-radius: 8px; background: #11191f; box-shadow: 0 10px 30px #000a; }
 .popover .chip[aria-checked="true"] { border-color: #3a4c43; color: var(--accent); background: #73e0b118; }
 

@@ -9,19 +9,22 @@ import java.util.regex.Pattern;
 
 /**
  * Every statistic the server has synchronized, keyed as {@code <stat type>/<value>}
- * (for example {@code minecraft:mined/minecraft:stone}), with Minecraft-formatted display text.
+ * (for example {@code minecraft:mined/minecraft:stone}), with Minecraft-formatted display text. The rates are
+ * per-hour averages over the session and over the last minute, or null while there is no change to average.
  */
 public record StatisticsSnapshot(List<Entry> entries) {
     public static final int MAX_ENTRIES = 4096;
     private static final Pattern ID = Pattern.compile("[a-z0-9_.-]+:[a-z0-9_.-]+/[a-z0-9_.-]+:[a-z0-9/._-]+");
 
     public record Entry(String id, String label, String category, long value, long session,
-                        String display, String sessionDisplay, Long changedAt) {
+                        String display, String sessionDisplay, Long changedAt,
+                        String sessionRate, String recentRate) {
         public Entry {
             if (id == null || id.length() > 256 || !ID.matcher(id).matches()
                     || !text(label) || !text(category) || !text(display) || !text(sessionDisplay)
                     || value < 0 || value > Integer.MAX_VALUE || session < 0 || session > value
-                    || changedAt != null && changedAt < 0) {
+                    || changedAt != null && changedAt < 0
+                    || sessionRate != null && !text(sessionRate) || recentRate != null && !text(recentRate)) {
                 throw new IllegalArgumentException("Invalid statistic");
             }
         }
@@ -31,7 +34,8 @@ public record StatisticsSnapshot(List<Entry> entries) {
                     + ",\"category\":" + PlayerSnapshot.string(category) + ",\"value\":" + value
                     + ",\"session\":" + session + ",\"display\":" + PlayerSnapshot.string(display)
                     + ",\"sessionDisplay\":" + PlayerSnapshot.string(sessionDisplay)
-                    + ",\"changedAt\":" + changedAt + "}";
+                    + ",\"changedAt\":" + changedAt + ",\"sessionRate\":" + PlayerSnapshot.string(sessionRate)
+                    + ",\"recentRate\":" + PlayerSnapshot.string(recentRate) + "}";
         }
 
         private static boolean text(String value) {

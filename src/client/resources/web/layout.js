@@ -21,6 +21,8 @@ const TILE_MINIMUMS = {
 const MAX_STATISTIC_SETTINGS = 512;
 const DEFAULT_MAP_URL = "http://127.0.0.1:8080/";
 const XP_WINDOW_CHOICES = [10, 30, 60, 300, 600, 3600];
+const MAX_XP_GOALS = 8;
+const MAX_XP_GOAL_LEVEL = 10000;
 const MAX_PROFILES = 16;
 const MAX_RULES = 64;
 const MAX_RULE_GROUPS = 8;
@@ -28,6 +30,10 @@ const MAX_GROUP_CONDITIONS = 8;
 const MAX_CONDITION_VALUES = 32;
 const MAX_PINNED = 16;
 const PIN_SOURCES = ["inventory", "enderchest", "enderchest-item"];
+// How often the game samples the player, in ms; one client tick is 50 ms, so 50 is the fastest. Global, not per
+// profile: the game samples at one rate whichever profile is shown.
+const UPDATE_INTERVAL_CHOICES = [50, 100, 250, 500, 1000];
+const DEFAULT_UPDATE_INTERVAL = 250;
 /** Condition types and what they take: a list of values, a min/max range, a duration, or nothing. */
 const CONDITION_TYPES = {
   world: "values", dimension: "values", biome: "values", time: "values", gameMode: "values",
@@ -42,11 +48,15 @@ function defaultSettings() {
     statistics: {
       shown: ["walk_one_cm", "sprint_one_cm", "jump", "deaths", "mob_kills", "player_kills", "play_time"].map(custom),
       // Timers tick constantly, so they would always be "recent".
-      recentExcluded: ["play_time", "total_world_time", "time_since_death", "time_since_rest", "sneak_time"].map(custom)
+      recentExcluded: ["play_time", "total_world_time", "time_since_death", "time_since_rest", "sneak_time"].map(custom),
+      // Seconds a change stays under Recent; 0 keeps it until newer changes push it out.
+      recentLifetime: 60,
+      recentRows: 8
     },
     map: { url: DEFAULT_MAP_URL },
     movement: { showVertical: true, showGlider: true },
-    xp: { window: 60 },
+    // Custom target levels, each shown with the XP and time still needed.
+    xp: { window: 60, goals: [] },
     pickups: { lifetime: 30, maxRows: 8, showSource: true, ignored: [] },
     advancements: { popupSeconds: 10 }
   };
@@ -67,10 +77,14 @@ const SETTING_RULES = [
   ["inventory", "showArmor", value => typeof value === "boolean"],
   ["statistics", "shown", validStatisticIds],
   ["statistics", "recentExcluded", validStatisticIds],
+  ["statistics", "recentLifetime", value => wholeIn(value, 0, 3600)],
+  ["statistics", "recentRows", value => wholeIn(value, 1, 32)],
   ["map", "url", validMapUrl],
   ["movement", "showVertical", value => typeof value === "boolean"],
   ["movement", "showGlider", value => typeof value === "boolean"],
   ["xp", "window", value => XP_WINDOW_CHOICES.includes(value)],
+  ["xp", "goals", value => Array.isArray(value) && value.length <= MAX_XP_GOALS
+    && value.every(level => wholeIn(level, 1, MAX_XP_GOAL_LEVEL))],
   ["pickups", "lifetime", value => wholeIn(value, 0, 3600)],
   ["pickups", "maxRows", value => wholeIn(value, 1, 32)],
   ["pickups", "showSource", value => typeof value === "boolean"],
@@ -118,7 +132,7 @@ function defaultLayout() {
     { id: "villagers", enabled: true, x: 0, y: 25, w: 8, h: 8 },
     { id: "map", enabled: false, x: 0, y: 33, w: 6, h: 6 },
     { id: "build", enabled: false, x: 6, y: 33, w: 6, h: 4 }
-  ], profiles: [], rules: [], pinned: [] };
+  ], profiles: [], rules: [], pinned: [], updates: { intervalMillis: DEFAULT_UPDATE_INTERVAL } };
 }
 
 const wholeNumber = value => Number.isSafeInteger(value);
@@ -214,6 +228,14 @@ function normalizePinned(value) {
   });
 }
 
+function normalizeUpdates(value) {
+  if (value === undefined) return { intervalMillis: DEFAULT_UPDATE_INTERVAL };
+  if (!isObject(value)) throw new Error("Invalid update settings");
+  const interval = value.intervalMillis ?? DEFAULT_UPDATE_INTERVAL;
+  if (!UPDATE_INTERVAL_CHOICES.includes(interval)) throw new Error("Invalid update interval");
+  return { intervalMillis: interval };
+}
+
 /** Validates untrusted layout JSON (stored config or an imported file) and fills in any missing tiles. */
 function normalizeLayout(value) {
   if (value === null || typeof value !== "object" || value.version !== 1) throw new Error("Invalid layout");
@@ -241,7 +263,7 @@ function normalizeLayout(value) {
     return normalized;
   });
   return { version: 1, settings: normalizeSettings(value.settings), tiles, profiles, rules,
-    pinned: normalizePinned(value.pinned) };
+    pinned: normalizePinned(value.pinned), updates: normalizeUpdates(value.updates) };
 }
 
 // ------------------------------------------------------------------------------------------------- Profiles

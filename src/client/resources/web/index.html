@@ -33,6 +33,10 @@
     </span>
     <span class="toolbar-label">Tiles</span>
     <span class="tile-toggles" id="tile-toggles"></span>
+    <span class="toolbar-label">Updates</span>
+    <span class="profile-tools">
+      <select id="update-rate" aria-label="Dashboard update rate" title="How often the game sends new player data; faster costs a little more game-thread time"></select>
+    </span>
     <span class="spacer"></span>
     <span class="save-status" id="layout-status" role="status"></span>
     <button type="button" class="button quiet" id="layout-reset">Reset</button>
@@ -49,14 +53,14 @@
           <div class="bars">
             <div class="saturation-bar" title="Saturation"><span id="saturation-fill"></span></div>
             <div class="food-bar" title="Hunger"><span id="food-fill"></span></div>
-            <div class="health-bar" title="Health"><span id="health-fill"></span><span id="absorption-fill"></span></div>
           </div>
+          <span class="food-value" id="food-value" title="Hunger / saturation">—</span>
+          <div class="health-bar" title="Health"><span id="health-fill"></span><span id="absorption-fill"></span></div>
           <strong id="health-value">—</strong>
         </div>
         <p class="position prio-1" id="position-value">Position unavailable</p>
         <div class="effects prio-2" id="effects" aria-label="Status effects"></div>
         <dl class="facts">
-          <div class="prio-2"><dt>Food</dt><dd id="food-value">—</dd></div>
           <div class="prio-3"><dt>Dimension</dt><dd id="dimension-value">—</dd></div>
           <div class="prio-3"><dt>Session</dt><dd id="session-value">—</dd></div>
         </dl>
@@ -74,9 +78,10 @@
       <header class="tile-head" id="head-statistics"><h2 id="statistics-title">Statistics</h2>
         <span class="head-actions"><span class="badge muted" id="statistics-status">Unavailable</span><button type="button" class="icon-button" id="statistics-settings" aria-label="Choose statistics" title="Choose statistics">⚙</button></span></header>
       <div class="tile-body scroll" id="statistics-body">
+        <div class="counter-row counter-head" id="statistics-columns" aria-hidden="true"><span class="label"></span><span class="total">Total</span><span class="session prio-2">Session</span><span class="rate" title="Average per hour this session">Avg/h</span><span class="rate" title="Average per hour over the last 60 seconds">60s/h</span></div>
         <div id="statistics-entries" aria-label="Chosen statistics"></div>
         <section class="recent" id="statistics-recent-section" aria-labelledby="recent-title">
-          <h3 id="recent-title">Recent <span class="hint">· changed in the last minute</span></h3>
+          <h3 id="recent-title">Recent <span class="hint" id="statistics-recent-hint">· changed in the last minute</span></h3>
           <div id="statistics-recent"></div>
         </section>
       </div>
@@ -144,8 +149,15 @@
       </div>
     </article>
     <article class="tile" id="tile-xp" data-tile="xp" aria-labelledby="xp-title">
-      <header class="tile-head" id="head-xp"><h2 id="xp-title">Experience</h2><span class="badge muted" id="xp-status">Unavailable</span></header>
+      <header class="tile-head" id="head-xp"><h2 id="xp-title">Experience</h2>
+        <span class="head-actions"><span class="badge muted" id="xp-status">Unavailable</span><button type="button" class="icon-button" id="xp-settings" aria-label="Level goals" title="Level goals">⚙</button></span></header>
       <div class="tile-body">
+        <form class="tile-settings" id="xp-form" hidden>
+          <label>Goal level <input id="xp-goal" type="number" min="1" max="10000" placeholder="50"></label>
+          <button type="submit" class="button quiet">Add goal</button>
+          <p class="hint" id="xp-goal-error" role="alert"></p>
+          <p class="hint" id="xp-goal-list"></p>
+        </form>
         <div class="xp-level prio-1"><strong id="xp-level">—</strong><div class="xp-bar"><span id="xp-fill"></span></div></div>
         <p class="xp-rate prio-1"><span id="xp-rate">— XP/h</span> <span class="hint">over</span> <button type="button" class="chip small" id="xp-window" aria-haspopup="true" title="Choose how long to average over">60 s</button></p>
         <p class="xp-gained prio-2" id="xp-gained"></p>
@@ -153,6 +165,7 @@
           <div><dt>Next level</dt><dd id="xp-next">—</dd></div>
           <div><dt id="xp-hundred-label">Level 100</dt><dd id="xp-hundred">—</dd></div>
         </dl>
+        <dl class="facts prio-2" id="xp-goals" aria-label="Level goals" hidden></dl>
         <div class="popover" id="xp-window-menu" role="menu" hidden></div>
       </div>
     </article>
@@ -232,6 +245,15 @@
         <button type="button" class="button" id="statistics-dialog-close">Done</button>
       </header>
       <p class="dialog-note"><strong>Show</strong> pins a statistic to the tile. <strong>Recent</strong> lets it appear under Recent when it changes; pinned statistics never appear there twice.</p>
+      <form class="tile-settings dialog-settings" id="statistics-recent-form">
+        <label>Keep recent for
+          <select id="statistics-recent-lifetime">
+            <option value="10">10 seconds</option><option value="30">30 seconds</option><option value="60">1 minute</option>
+            <option value="300">5 minutes</option><option value="0">Until replaced</option>
+          </select>
+        </label>
+        <label>Rows <input id="statistics-recent-rows" type="number" min="1" max="32"></label>
+      </form>
       <div class="dialog-tools">
         <input id="statistics-search" type="search" placeholder="Search statistics" maxlength="100" aria-label="Search statistics">
         <button type="button" class="button quiet" id="statistics-defaults">Defaults</button>

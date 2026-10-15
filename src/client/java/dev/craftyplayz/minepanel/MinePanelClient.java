@@ -45,7 +45,7 @@ import java.util.logging.Logger;
 
 public final class MinePanelClient implements ClientModInitializer {
     private static final Logger LOGGER = Logger.getLogger("MinePanel");
-    private static final long SAMPLE_INTERVAL_NANOS = 250_000_000L;
+    private static final int MILLIS_PER_TICK = 50;
     private static final long STATS_INTERVAL_NANOS = 3_000_000_000L;
     private final TelemetryStore telemetry = new TelemetryStore();
     private final StatisticsTracker statistics = new StatisticsTracker();
@@ -62,6 +62,8 @@ public final class MinePanelClient implements ClientModInitializer {
     private final WorldStore worldStore = new WorldStore(
             FabricLoader.getInstance().getConfigDir().resolve("minepanel").resolve("worlds"));
     private final WorldDataCollector worldData = new WorldDataCollector(worldStore);
+    private final LayoutStore layouts = new LayoutStore(
+            FabricLoader.getInstance().getConfigDir().resolve("minepanel").resolve("layout.json"));
     private final ClientActivity activity = new ClientActivity(history, portals, this::pickedUp);
     private static final int SAVE_INTERVAL_TICKS = 100;
     private int saveTicks;
@@ -70,7 +72,7 @@ public final class MinePanelClient implements ClientModInitializer {
     private volatile String dashboardUrl;
     private volatile boolean fixedPortUnavailable;
     private long sessionStartedNanos;
-    private long lastSampleNanos;
+    private int ticksSinceSample;
     private long lastStatsRequestNanos;
     private ClientPacketListener playConnection;
     private ClientPacketListener initializedConnection;
@@ -201,10 +203,11 @@ public final class MinePanelClient implements ClientModInitializer {
             worldData.tick(client, client.level);
             if (++saveTicks % SAVE_INTERVAL_TICKS == 0) lifecycleExecutor.execute(worldStore::save);
         }
-        if (now - lastSampleNanos < SAMPLE_INTERVAL_NANOS) {
+        // Counted in ticks, not nanoseconds: tick spacing jitters around 50 ms, so a 50 ms clock check would skip ticks.
+        if (++ticksSinceSample < Math.max(1, layouts.updateIntervalMillis() / MILLIS_PER_TICK)) {
             return;
         }
-        lastSampleNanos = now;
+        ticksSinceSample = 0;
 
         if (!inWorld) {
             var events = history.snapshot();
@@ -285,7 +288,7 @@ public final class MinePanelClient implements ClientModInitializer {
     }
 
     private void startDashboard() {
-        var layouts = new LayoutStore(FabricLoader.getInstance().getConfigDir().resolve("minepanel").resolve("layout.json"));
+        layouts.load(); // picks up the saved update interval before any browser connects
         try {
             LocalDashboardServer server;
             try {

@@ -278,19 +278,25 @@ public final class ClientActivity {
         if (!stack.isEmpty()) counts.merge(new ItemKey(stack), stack.getCount(), Integer::sum);
     }
 
-    /** An item kind: the item and its components, ignoring the count. */
+    /**
+     * An item kind: the item and its components, ignoring the count and durability (armor and tools lose durability
+     * as they are used, which must not look like a new item arriving).
+     */
     static final class ItemKey {
         final ItemStack stack;
+        private final ItemStack kind;
         private final int hash;
 
         ItemKey(ItemStack stack) {
             this.stack = stack.copyWithCount(1);
-            hash = ItemStack.hashItemAndComponents(stack);
+            kind = this.stack.copy();
+            if (kind.isDamageableItem()) kind.setDamageValue(0);
+            hash = ItemStack.hashItemAndComponents(kind);
         }
 
         @Override
         public boolean equals(Object other) {
-            return other instanceof ItemKey that && hash == that.hash && ItemStack.isSameItemSameComponents(stack, that.stack);
+            return other instanceof ItemKey that && hash == that.hash && ItemStack.isSameItemSameComponents(kind, that.kind);
         }
 
         @Override

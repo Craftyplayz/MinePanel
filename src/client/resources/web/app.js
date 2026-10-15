@@ -24,12 +24,16 @@ const inventoryGrid = $("#inventory-grid");
 const armorToggle = $("#armor-toggle");
 const heldValue = $("#held-value");
 const statisticsStatus = $("#statistics-status");
+const statisticsColumns = $("#statistics-columns");
 const statisticsEntries = $("#statistics-entries");
 const statisticsRecent = $("#statistics-recent");
 const statisticsRecentSection = $("#statistics-recent-section");
 const statisticsDialog = $("#statistics-dialog");
 const statisticsOptions = $("#statistics-options");
 const statisticsSearch = $("#statistics-search");
+const statisticsRecentHint = $("#statistics-recent-hint");
+const statisticsRecentLifetime = $("#statistics-recent-lifetime");
+const statisticsRecentRows = $("#statistics-recent-rows");
 const mapFrame = $("#map-frame");
 const mapOffline = $("#map-offline");
 const mapOfflineText = $("#map-offline-text");
@@ -61,7 +65,6 @@ const featureHooks = { render: [], layout: [], tick: [] };
 const EQUIPMENT_SLOTS = [["head", "Head"], ["chest", "Chest"], ["legs", "Legs"], ["feet", "Feet"], ["offhand", "Offhand"]];
 const ROW_HEIGHT = 40;
 const GRID_GAP = 10;
-const RECENT_MILLIS = 60_000;
 const HELD_LINE_HEIGHT = 22;
 
 let activeSocket;
@@ -329,6 +332,12 @@ function statisticRow(entry, showCategory, className = "counter-row") {
   row.appendChild(label);
   row.appendChild(create("span", "total", entry.display));
   row.appendChild(create("span", "session prio-2", entry.session > 0 ? `+${entry.sessionDisplay}` : ""));
+  for (const [rate, title] of [[entry.sessionRate, "Average per hour this session"],
+    [entry.recentRate, "Average per hour over the last 60 seconds"]]) {
+    const cell = create("span", "rate", rate ? `${rate}/h` : "");
+    cell.title = title;
+    row.appendChild(cell);
+  }
   return row;
 }
 
@@ -338,16 +347,26 @@ const statisticLabel = id => knownStatisticLabels.get(id)
   ?? id.slice(id.lastIndexOf(":") + 1).replaceAll("_", " ").replace(/\b\w/g, letter => letter.toUpperCase());
 
 function zeroStatistic(id) {
-  return { id, label: statisticLabel(id), category: "General", display: "0", session: 0, sessionDisplay: "0" };
+  return { id, label: statisticLabel(id), category: "General", display: "0", session: 0, sessionDisplay: "0",
+    sessionRate: null, recentRate: null };
 }
 
-/** Statistics changed in the last minute that are neither pinned nor excluded, newest first. */
+/**
+ * Changed statistics that are neither pinned nor excluded, newest first: those within the chosen lifetime
+ * (or all of them for "until replaced"), up to the chosen number of rows.
+ */
 function recentStatistics(statistics, settings, now = Date.now()) {
   const hidden = new Set([...settings.shown, ...settings.recentExcluded]);
   return (statistics?.entries ?? [])
-    .filter(entry => entry.changedAt !== null && now - entry.changedAt < RECENT_MILLIS && !hidden.has(entry.id))
-    .sort((a, b) => b.changedAt - a.changedAt || (a.label < b.label ? -1 : 1));
+    .filter(entry => entry.changedAt !== null && !hidden.has(entry.id)
+      && (settings.recentLifetime === 0 || now - entry.changedAt < settings.recentLifetime * 1000))
+    .sort((a, b) => b.changedAt - a.changedAt || (a.label < b.label ? -1 : 1))
+    .slice(0, settings.recentRows);
 }
+
+const RECENT_LIFETIME_HINTS = { 0: "· latest changes", 10: "· changed in the last 10 seconds",
+  30: "· changed in the last 30 seconds", 60: "· changed in the last minute", 300: "· changed in the last 5 minutes" };
+const recentLifetimeHint = seconds => RECENT_LIFETIME_HINTS[seconds] ?? `· changed in the last ${seconds} seconds`;
 
 function renderStatistics(statistics, now = Date.now()) {
   displayedStatistics = statistics;
@@ -358,9 +377,12 @@ function renderStatistics(statistics, now = Date.now()) {
   // Chosen statistics the game has not reported (or all of them while unavailable) read as zero.
   const pinned = settings.shown.map(id => byId.get(id) ?? zeroStatistic(id));
   const recent = recentStatistics(statistics, settings, now);
-  const key = JSON.stringify([pinned, recent.map(entry => [entry.id, entry.display, entry.session])]);
+  writeText(statisticsRecentHint, recentLifetimeHint(settings.recentLifetime));
+  const key = JSON.stringify([pinned, recent.map(entry =>
+    [entry.id, entry.display, entry.session, entry.sessionRate, entry.recentRate])]);
   if (key === statisticsKey) return;
   statisticsKey = key;
+  setHidden(statisticsColumns, !pinned.length);
   if (!pinned.length) {
     statisticsEntries.replaceChildren(create("p", "empty-note", "No statistics chosen. Use ⚙ to pick some."));
   } else {
@@ -395,6 +417,8 @@ function toggleStatistic(key, id, enabled) {
 
 function renderStatisticOptions() {
   const settings = displaySettings().statistics;
+  statisticsRecentLifetime.value = String(settings.recentLifetime);
+  statisticsRecentRows.value = String(settings.recentRows);
   const known = new Map((displayedStatistics?.entries ?? []).map(entry => [entry.id, entry]));
   for (const id of [...settings.shown, ...settings.recentExcluded]) {
     if (!known.has(id)) known.set(id, { id, label: statisticLabel(id), category: "Not received yet" });
@@ -444,6 +468,12 @@ $("#statistics-settings").addEventListener("click", () => setStatisticsDialog(tr
 $("#statistics-dialog-close").addEventListener("click", () => setStatisticsDialog(false));
 statisticsDialog.addEventListener("click", event => { if (event.target === statisticsDialog) setStatisticsDialog(false); });
 statisticsSearch.addEventListener("input", () => renderStatisticOptions());
+statisticsRecentLifetime.addEventListener("change", () =>
+  changeSettings("statistics", { recentLifetime: Number(statisticsRecentLifetime.value) }));
+statisticsRecentRows.addEventListener("change", () => {
+  const rows = Math.round(Number(statisticsRecentRows.value));
+  if (rows >= 1 && rows <= 32) changeSettings("statistics", { recentRows: rows });
+});
 $("#statistics-defaults").addEventListener("click", () => {
   changeSettings("statistics", defaultSettings().statistics);
   renderStatisticOptions();
@@ -526,7 +556,7 @@ function renderPlayer(player) {
     renderEffects([]);
     return;
   }
-  writeText(foodValue, `${player.food} / 20 · saturation ${formatNumber(player.saturation)}`);
+  writeText(foodValue, `${player.food}/${formatNumber(player.saturation)}`);
   saturationFill.style.width = `${Math.min(100, player.saturation / 20 * 100)}%`;
   foodFill.style.width = `${Math.min(100, player.food / 20 * 100)}%`;
   renderEffects(player.effects);
@@ -837,6 +867,7 @@ function setEditing(value) {
 
 const profileSelect = $("#profile-select");
 const profileName = $("#profile-name");
+const updateRate = $("#update-rate");
 
 function renderProfileTools() {
   const options = [{ id: "default", name: "Default" }, ...layout.profiles].map(profile => {
@@ -850,7 +881,17 @@ function renderProfileTools() {
   profileName.disabled = editingProfile === "default";
   $("#profile-delete").disabled = editingProfile === "default";
   $("#profile-add").disabled = layout.profiles.length >= MAX_PROFILES;
+  updateRate.value = String(layout.updates.intervalMillis);
 }
+
+updateRate.replaceChildren(...UPDATE_INTERVAL_CHOICES.map(millis => {
+  const option = create("option", "", `${1000 / millis}× per second`);
+  option.value = String(millis);
+  return option;
+}));
+// The game picks up the new rate as soon as the layout is saved.
+updateRate.addEventListener("change", () =>
+  changeLayout({ ...layout, updates: { intervalMillis: Number(updateRate.value) } }));
 
 profileSelect.addEventListener("change", () => {
   editingProfile = profileSelect.value;

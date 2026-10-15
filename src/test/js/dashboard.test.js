@@ -33,7 +33,7 @@ function statistics(entries = [counter()]) {
 
 function counter(overrides = {}) {
   return { id: "minecraft:custom/minecraft:jump", label: "Jumps", category: "General", value: 40, session: 3,
-    display: "40", sessionDisplay: "3", changedAt: null, ...overrides };
+    display: "40", sessionDisplay: "3", changedAt: null, sessionRate: "6", recentRate: null, ...overrides };
 }
 
 function history(overrides = {}) {
@@ -615,7 +615,7 @@ test("statistics reject malformed entries, ids, bounds and deltas", () => {
     { id: "minecraft:a/b/minecraft:jump" }, { label: "" }, { label: "x".repeat(257) }, { label: "\uD800" },
     { category: "" }, { category: null }, { value: -1 }, { value: 0.5 }, { value: "3" }, { value: 2147483648 },
     { session: -1 }, { session: 41 }, { session: 0.5 }, { display: "" }, { sessionDisplay: null },
-    { changedAt: -1 }, { changedAt: "now" }
+    { changedAt: -1 }, { changedAt: "now" }, { sessionRate: "" }, { recentRate: 5 }
   ]) invalid.push(statistics([counter(overrides)]));
   for (const value of invalid) {
     assert.throws(() => h.apply(undefined, initial(snapshot({ statistics: value }))), JSON.stringify(value)?.slice(0, 80));
@@ -764,7 +764,7 @@ test("chosen statistics render in order with the game's formatting; recent shows
   h.sockets[0].message(initial(snapshot({ statistics: statistics([
     counter({ changedAt: now - 1000 }),
     counter({ id: "minecraft:custom/minecraft:walk_one_cm", label: "Distance Walked", value: 12345, session: 50,
-      display: "123.45 m", sessionDisplay: "0.5 m", changedAt: now - 2000 }),
+      display: "123.45 m", sessionDisplay: "0.5 m", changedAt: now - 2000, sessionRate: "1.2 m", recentRate: "3 m" }),
     counter({ id: "minecraft:custom/minecraft:play_time", label: "Time Played", display: "1.02 h",
       changedAt: now - 500 }),
     stone({ changedAt: now - 3000 }),
@@ -774,9 +774,11 @@ test("chosen statistics render in order with the game's formatting; recent shows
   ]) })));
   const pinned = h.get("#statistics-entries").children;
   const cells = row => row.children.map(cell => cell.textContent);
-  assert.deepEqual(pinned.map(cells), [["Distance Walked", "123.45 m", "+0.5 m"], ["Sprint One Cm", "0", ""],
-    ["Jumps", "40", "+3"], ["Deaths", "0", ""], ["Mob Kills", "0", ""], ["Player Kills", "0", ""],
-    ["Time Played", "1.02 h", "+3"]], "chosen statistics follow the settings order; ones not received read as zero");
+  assert.deepEqual(pinned.map(cells), [["Distance Walked", "123.45 m", "+0.5 m", "1.2 m/h", "3 m/h"],
+    ["Sprint One Cm", "0", "", "", ""], ["Jumps", "40", "+3", "6/h", ""], ["Deaths", "0", "", "", ""],
+    ["Mob Kills", "0", "", "", ""], ["Player Kills", "0", "", "", ""], ["Time Played", "1.02 h", "+3", "6/h", ""]],
+    "chosen statistics follow the settings order, with hourly rates; ones not received read as zero");
+  assert.equal(h.get("#statistics-columns").hidden, false, "column headings show above chosen statistics");
   const recent = h.get("#statistics-recent").children;
   assert.deepEqual(recent.map(row => cells(row).slice(0, 3)), [["Diamond PickaxeUsed", "12", "+12"], ["StoneMined", "12", "+12"]],
     "recent excludes chosen, excluded and older-than-a-minute statistics, newest first");
@@ -786,7 +788,7 @@ test("chosen statistics render in order with the game's formatting; recent shows
   assert.equal(h.get("#statistics-entries").replacements, replacements, "unchanged statistics are not rebuilt");
   h.sockets[0].message(update({ baseRevision: 7, revision: 8, statistics: null }));
   assert.equal(h.get("#statistics-status").textContent, "Unavailable");
-  assert.deepEqual(h.get("#statistics-entries").children.map(cells), [["Distance Walked", "0", ""],
+  assert.deepEqual(h.get("#statistics-entries").children.map(row => cells(row).slice(0, 3)), [["Distance Walked", "0", ""],
     ["Sprint One Cm", "0", ""], ["Jumps", "0", ""], ["Deaths", "0", ""], ["Mob Kills", "0", ""],
     ["Player Kills", "0", ""], ["Time Played", "0", ""]], "unavailable statistics read as zero under their last known labels");
   assert.equal(h.get("#statistics-recent-section").hidden, true);
@@ -801,17 +803,42 @@ test("recent statistics have buttons to pin them or hide them from recent", asyn
     stone({ id: "minecraft:used/minecraft:diamond_pickaxe", label: "Diamond Pickaxe", category: "Used", changedAt: now - 1000 })
   ]) })));
   const recent = () => h.get("#statistics-recent").children;
-  const [, hide] = recent()[0].children[3].children;
+  const [, hide] = recent()[0].children.at(-1).children;
   hide.emit("click");
   assert.equal(plain(h.run("layout.settings.statistics.recentExcluded")).includes("minecraft:used/minecraft:diamond_pickaxe"), true,
     "hiding keeps a statistic out of recent");
   assert.deepEqual(recent().map(row => row.children[0].textContent), ["StoneMined"]);
-  const [pin] = recent()[0].children[3].children;
+  const [pin] = recent()[0].children.at(-1).children;
   pin.emit("click");
   assert.equal(plain(h.run("layout.settings.statistics.shown")).at(-1), "minecraft:mined/minecraft:stone",
     "pinning adds a statistic to the permanent list");
   assert.equal(h.get("#statistics-entries").children.at(-1).children[0].textContent, "StoneMined");
   assert.equal(h.get("#statistics-recent-section").hidden, true);
+});
+
+test("recent statistics can be kept until replaced, limited to the chosen number of rows", async () => {
+  const h = harness();
+  await h.flush();
+  const now = Date.now();
+  h.sockets[0].message(initial(snapshot({ statistics: statistics([
+    stone({ changedAt: now - 1000 }),
+    stone({ id: "minecraft:mined/minecraft:dirt", label: "Dirt", changedAt: now - 120_000 }),
+    stone({ id: "minecraft:mined/minecraft:sand", label: "Sand", changedAt: now - 600_000 })
+  ]) })));
+  assert.equal(h.get("#statistics-recent").children.length, 1, "the one-minute default hides older changes");
+  assert.equal(h.get("#statistics-recent-hint").textContent, "· changed in the last minute");
+  h.get("#statistics-settings").emit("click");
+  assert.equal(h.get("#statistics-recent-lifetime").value, "60");
+  assert.equal(h.get("#statistics-recent-rows").value, "8");
+  h.get("#statistics-recent-lifetime").value = "0";
+  h.get("#statistics-recent-lifetime").emit("change");
+  assert.equal(plain(h.run("layout.settings.statistics.recentLifetime")), 0);
+  assert.equal(h.get("#statistics-recent").children.length, 3, "until replaced keeps every change");
+  assert.equal(h.get("#statistics-recent-hint").textContent, "· latest changes");
+  h.get("#statistics-recent-rows").value = "2";
+  h.get("#statistics-recent-rows").emit("change");
+  assert.equal(h.get("#statistics-recent").children.length, 2, "newer changes push the oldest out");
+  assert.equal(h.get("#statistics-recent").children[1].children[0].textContent.startsWith("Dirt"), true);
 });
 
 test("the statistics window chooses shown statistics and what may appear under recent, and saves them", async () => {
@@ -1207,6 +1234,29 @@ test("failed layout saves are reported", async () => {
   assert.equal(h.get("#layout-status").className, "save-status error");
 });
 
+test("the update rate is a global layout setting saved for the game to pick up", async () => {
+  const requests = [];
+  const stored = { ...plain(harness().run("defaultLayout()")), updates: { intervalMillis: 100 } };
+  const h = harness(defaultFetch(stored, requests));
+  await h.flush();
+  const select = h.get("#update-rate");
+  assert.deepEqual(select.children.map(option => option.textContent),
+    ["20× per second", "10× per second", "4× per second", "2× per second", "1× per second"]);
+  assert.equal(select.value, "100", "the stored rate is shown");
+
+  select.value = "50";
+  select.emit("change");
+  await h.runTimers(400);
+  const saved = JSON.parse(requests.filter(request => request.method === "PUT").at(-1).body);
+  assert.deepEqual(saved.updates, { intervalMillis: 50 });
+
+  const normalize = value => h.run(`normalizeLayout(${JSON.stringify(value)})`);
+  assert.deepEqual(plain(normalize({ version: 1, tiles: [] }).updates), { intervalMillis: 250 }, "defaults to 4/s");
+  for (const bad of [{ intervalMillis: 16 }, { intervalMillis: "50" }, []]) {
+    assert.throws(() => normalize({ version: 1, tiles: [], updates: bad }), JSON.stringify(bad));
+  }
+});
+
 test("tiles move and resize by dragging only in customize mode, snapping to grid cells", async () => {
   const requests = [];
   const h = harness(defaultFetch(null, requests));
@@ -1323,7 +1373,7 @@ test("player tile shows saturation and hunger above health, food, and status eff
   ] })));
   assert.equal(h.get("#saturation-fill").style.width, "25%");
   assert.equal(h.get("#food-fill").style.width, "85%");
-  assert.equal(h.get("#food-value").textContent, "17 / 20 · saturation 5");
+  assert.equal(h.get("#food-value").textContent, "17/5");
   const effects = h.get("#effects").children;
   assert.equal(effects.length, 3);
   const [icon, level, source, timer] = effects[0].children;
@@ -1603,6 +1653,36 @@ test("experience shows XP/h for the chosen window and the time to the next level
   assert.equal(h.get("#xp-window").textContent, "1 h");
   await h.runTimers(400);
   assert.equal(JSON.parse(requests.filter(request => request.method === "PUT").at(-1).body).settings.xp.window, 3600);
+});
+
+test("experience goals take a custom level and show the XP and time still needed", async () => {
+  const requests = [];
+  const h = harness(defaultFetch(null, requests));
+  await h.flush();
+  h.sockets[0].message(initial(snapshot()));
+  assert.equal(h.get("#xp-goals").hidden, true, "no goals by default");
+  h.get("#xp-settings").emit("click");
+  assert.equal(h.get("#xp-form").hidden, false);
+  for (const value of ["0", "2.5", "10001"]) {
+    h.get("#xp-goal").value = value;
+    h.get("#xp-form").emit("submit");
+    assert.match(h.get("#xp-goal-error").textContent, /whole level/);
+  }
+  for (const value of ["10", "3", "10"]) {
+    h.get("#xp-goal").value = value;
+    h.get("#xp-form").emit("submit");
+  }
+  assert.equal(h.get("#xp-goal-error").textContent, "");
+  assert.equal(h.get("#xp-goal").value, "");
+  assert.deepEqual(plain(h.run("layout.settings.xp.goals")), [3, 10], "sorted without duplicates");
+  const rows = () => h.get("#xp-goals").children.map(row => row.textContent);
+  assert.equal(h.get("#xp-goals").hidden, false);
+  assert.deepEqual(rows(), ["Goal · level 3Reached", "Goal · level 1097 XP · 8 min"]);
+  assert.equal(h.get("#xp-goal-list").textContent, "Goals: Level 3 ×Level 10 ×");
+  h.get("#xp-goal-list").children[1].emit("click");
+  assert.deepEqual(rows(), ["Goal · level 1097 XP · 8 min"]);
+  await h.runTimers(400);
+  assert.deepEqual(JSON.parse(requests.filter(request => request.method === "PUT").at(-1).body).settings.xp.goals, [10]);
 });
 
 test("recent pickups list newest first with source, expire, and can hide an item", async () => {

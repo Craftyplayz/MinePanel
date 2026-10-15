@@ -55,7 +55,7 @@ function renderNavigator(container, { title, target, dimension, player, vertical
     head.appendChild(close);
     const body = create("div", "nav-body");
     const dial = create("div", "nav-dial");
-    const arrow = create("span", "nav-arrow", "▲");
+    const arrow = create("span", "nav-arrow");
     dial.appendChild(arrow);
     const info = create("div", "nav-info");
     const distance = create("span", "nav-distance");
@@ -204,7 +204,10 @@ function renderMovement(player) {
 
 const xpParts = { status: $("#xp-status"), level: $("#xp-level"), fill: $("#xp-fill"), rate: $("#xp-rate"),
   gained: $("#xp-gained"), next: $("#xp-next"), hundredLabel: $("#xp-hundred-label"), hundred: $("#xp-hundred"),
-  window: $("#xp-window"), menu: $("#xp-window-menu") };
+  window: $("#xp-window"), menu: $("#xp-window-menu"), form: $("#xp-form"), goal: $("#xp-goal"),
+  goalError: $("#xp-goal-error"), goalList: $("#xp-goal-list"), goals: $("#xp-goals") };
+let xpGoalNodes = [];
+let xpGoalKey;
 
 xpParts.menu.replaceChildren(...XP_WINDOW_CHOICES.map(seconds => {
   const choice = create("button", "chip small", formatWindow(seconds));
@@ -221,6 +224,68 @@ xpParts.menu.replaceChildren(...XP_WINDOW_CHOICES.map(seconds => {
 stopDrag(xpParts.window);
 xpParts.window.addEventListener("click", () => setHidden(xpParts.menu, !xpParts.menu.hidden));
 
+stopDrag($("#xp-settings"));
+$("#xp-settings").addEventListener("click", () => {
+  setHidden(xpParts.form, !xpParts.form.hidden);
+  writeText(xpParts.goalError, "");
+  renderXpSettings();
+});
+xpParts.form.addEventListener("submit", event => {
+  event.preventDefault();
+  const level = Number(xpParts.goal.value);
+  const goals = displaySettings().xp.goals;
+  if (!Number.isInteger(level) || level < 1 || level > MAX_XP_GOAL_LEVEL) {
+    writeText(xpParts.goalError, `Enter a whole level from 1 to ${formatCount(MAX_XP_GOAL_LEVEL)}.`);
+    return;
+  }
+  if (!goals.includes(level) && goals.length >= MAX_XP_GOALS) {
+    writeText(xpParts.goalError, `At most ${MAX_XP_GOALS} goals; remove one first.`);
+    return;
+  }
+  writeText(xpParts.goalError, "");
+  xpParts.goal.value = "";
+  changeSettings("xp", { goals: [...new Set([...goals, level])].sort((a, b) => a - b) });
+});
+
+function renderXpSettings() {
+  const chips = displaySettings().xp.goals.map(level => {
+    const chip = create("button", "chip small", `Level ${level} ×`);
+    chip.type = "button";
+    chip.title = "Remove this goal";
+    chip.addEventListener("click", () =>
+      changeSettings("xp", { goals: displaySettings().xp.goals.filter(value => value !== level) }));
+    return chip;
+  });
+  xpParts.goalList.replaceChildren(...(chips.length ? [create("span", "", "Goals: "), ...chips] : []));
+}
+
+/** One fact row per custom goal level, rebuilt only when the goals change. */
+function renderXpGoals(xp, perHour) {
+  const goals = displaySettings().xp.goals;
+  const key = goals.join(",");
+  if (key !== xpGoalKey) {
+    xpGoalKey = key;
+    xpGoalNodes = goals.map(level => {
+      const row = create("div");
+      const value = create("dd", "", "—");
+      row.appendChild(create("dt", "", `Goal · level ${level}`));
+      row.appendChild(value);
+      return { level, value, row };
+    });
+    xpParts.goals.replaceChildren(...xpGoalNodes.map(node => node.row));
+    setHidden(xpParts.goals, !goals.length);
+  }
+  for (const { level, value } of xpGoalNodes) {
+    if (!xp) {
+      writeText(value, "—");
+      continue;
+    }
+    const remaining = Math.max(0, xpAtLevel(level) - xp.points);
+    writeText(value, remaining === 0 ? "Reached"
+      : `${formatCount(remaining)} XP · ${formatEta(secondsToGain(remaining, perHour))}`);
+  }
+}
+
 function renderXp(player) {
   const xp = player?.available ? player.xp : null;
   const span = displaySettings().xp.window;
@@ -236,6 +301,7 @@ function renderXp(player) {
     writeText(xpParts.gained, "");
     writeText(xpParts.next, "—");
     writeText(xpParts.hundred, "—");
+    renderXpGoals(null, 0);
     return;
   }
   const perHour = xpPerHour(xp, span);
@@ -250,6 +316,7 @@ function renderXp(player) {
   const toHundred = Math.max(0, xpAtLevel(target) - xp.points);
   writeText(xpParts.hundredLabel, `Level ${target}`);
   writeText(xpParts.hundred, `${formatCount(toHundred)} XP · ${formatEta(secondsToGain(toHundred, perHour))}`);
+  renderXpGoals(xp, perHour);
 }
 
 // ---------------------------------------------------------------------------------------------- Pickups
@@ -1034,6 +1101,7 @@ featureHooks.render.push(player => {
 featureHooks.layout.push(() => {
   renderMovement(currentPlayerState);
   renderXp(currentPlayerState);
+  renderXpSettings();
   renderPickups(currentPlayerState);
   renderPickupSettings();
   syncPinnedWindows();
@@ -1043,7 +1111,7 @@ featureHooks.tick.push(() => {
 });
 
 // Panels that only appear on demand start hidden (the markup says so too).
-for (const element of [xpParts.menu, pickupParts.form, advancementParts.form, advancementParts.popup, portalBox,
+for (const element of [xpParts.menu, xpParts.form, pickupParts.form, advancementParts.form, advancementParts.popup, portalBox,
   villagerParts.nav, rulesDialog, enderChestButton, portalLink]) {
   setHidden(element, true);
 }

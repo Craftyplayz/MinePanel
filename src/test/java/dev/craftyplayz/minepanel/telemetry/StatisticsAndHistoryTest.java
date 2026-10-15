@@ -29,7 +29,7 @@ public final class StatisticsAndHistoryTest {
         check(entry(later, MINED).session() == 3 && entry(later, MINED).changedAt() == 30,
                 "a statistic first seen after the baseline started from zero this session");
         String delta = later.toDeltaJson(changed);
-        check(delta.startsWith("{\"upsert\":[") && delta.contains(MINED) && !delta.contains(JUMP),
+        check(delta.startsWith("{\"upsert\":[") && delta.contains(MINED) && !delta.contains(DEATHS),
                 "statistics deltas only send new or changed entries");
         check(changed.toDeltaJson(later).startsWith("{\"entries\":["), "a removed statistic forces a full replacement");
         check(entry(tracker.sample(40, List.of(jump(2))), JUMP).session() == 0, "counter decrease rebases");
@@ -37,12 +37,29 @@ public final class StatisticsAndHistoryTest {
         check(entry(tracker.sample(50, List.of(jump(60))), JUMP).session() == 0, "new session rebases");
         invalid(() -> tracker.sample(60, List.of(jump(-1))));
         invalid(() -> new StatisticsSnapshot(List.of(first.entries().getFirst(), first.entries().getFirst())));
-        invalid(() -> new StatisticsSnapshot.Entry("minecraft:jump", "Jumps", "General", 1, 2, "1", "2", null));
-        invalid(() -> new StatisticsSnapshot.Entry(JUMP, "Jumps", "General", 2, 3, "2", "3", null));
-        invalid(() -> new StatisticsSnapshot.Entry(JUMP, "", "General", 2, 1, "2", "1", null));
+        invalid(() -> new StatisticsSnapshot.Entry("minecraft:jump", "Jumps", "General", 1, 2, "1", "2", null, null, null));
+        invalid(() -> new StatisticsSnapshot.Entry(JUMP, "Jumps", "General", 2, 3, "2", "3", null, null, null));
+        invalid(() -> new StatisticsSnapshot.Entry(JUMP, "", "General", 2, 1, "2", "1", null, null, null));
+        invalid(() -> new StatisticsSnapshot.Entry(JUMP, "Jumps", "General", 2, 1, "2", "1", null, "", null));
         check(StatisticsSnapshot.validId(MINED) && !StatisticsSnapshot.validId("minecraft:mined/stone"),
                 "ids pair a stat type with a namespaced value");
         immutable(() -> first.entries().clear());
+
+        StatisticsTracker rates = new StatisticsTracker();
+        long minute = StatisticsTracker.RECENT_WINDOW_MILLIS;
+        var start = rates.sample(0, List.of(jump(10), deaths(0)));
+        check(entry(start, JUMP).sessionRate() == null && entry(start, JUMP).recentRate() == null,
+                "no rates before anything changes");
+        var burst = rates.sample(30_000, List.of(jump(20), deaths(0)));
+        check(entry(burst, JUMP).sessionRate().equals("1200 jumps") && entry(burst, JUMP).recentRate().equals("1200 jumps")
+                        && entry(burst, DEATHS).sessionRate() == null && burst.toJson().contains("\"recentRate\":null"),
+                "rates are hourly, and the recent window is the session while it is younger than a minute");
+        var steady = rates.sample(2 * minute, List.of(jump(30), deaths(0)));
+        check(entry(steady, JUMP).sessionRate().equals("600 jumps") && entry(steady, JUMP).recentRate().equals("600 jumps"),
+                "the recent rate only counts the last minute");
+        var idle = rates.sample(4 * minute, List.of(jump(30), deaths(0)));
+        check(entry(idle, JUMP).sessionRate().equals("300 jumps") && entry(idle, JUMP).recentRate() == null,
+                "the recent rate clears once the last minute has no change");
 
         var effect = new StatusEffect("minecraft:speed", "Speed", 1, 5000L, true);
         check(effect.toJson().equals("{\"id\":\"minecraft:speed\",\"name\":\"Speed\",\"amplifier\":1,"

@@ -484,14 +484,16 @@ public final class LocalDashboardServerTest {
     private static void testProfilesRulesAndWorlds() throws Exception {
         String full = "{\"version\":1,\"tiles\":[{\"id\":\"movement\",\"enabled\":true,\"x\":0,\"y\":0,\"w\":4,"
                 + "\"h\":4,\"rulesOnly\":true}],\"settings\":{\"movement\":{\"showVertical\":false,\"showGlider\":true},"
-                + "\"xp\":{\"window\":300},\"pickups\":{\"lifetime\":0,"
+                + "\"statistics\":{\"recentLifetime\":0,\"recentRows\":4},"
+                + "\"xp\":{\"window\":300,\"goals\":[30,50]},\"pickups\":{\"lifetime\":0,"
                 + "\"maxRows\":5,\"showSource\":false,\"ignored\":[\"minecraft:dirt\"]},\"advancements\":{\"popupSeconds\":10}},"
                 + "\"profiles\":[{\"id\":\"nether\",\"name\":\"Nether\",\"tiles\":[],\"settings\":{}}],"
                 + "\"rules\":[{\"id\":\"rule-1\",\"name\":\"Nether flight\",\"enabled\":true,\"groups\":[[{\"type\":"
                 + "\"dimension\",\"values\":[\"nether\"]}],[{\"type\":\"elytra\",\"not\":true},{\"type\":\"health\","
                 + "\"min\":2,\"max\":10}]],\"profile\":\"nether\",\"tiles\":{\"movement\":\"show\"},"
                 + "\"settings\":{\"inventory\":{\"showArmor\":false}}}],"
-                + "\"pinned\":[{\"source\":\"inventory\",\"slot\":12,\"x\":40,\"y\":90}]}";
+                + "\"pinned\":[{\"source\":\"inventory\",\"slot\":12,\"x\":40,\"y\":90}],"
+                + "\"updates\":{\"intervalMillis\":100}}";
         String normalized = LayoutStore.normalize(full);
         check(normalized.equals(full.replace("\"min\":2,\"max\":10", "\"min\":2.0,\"max\":10.0")),
                 "profiles, rules, pinned windows and new tile settings round-trip: " + normalized);
@@ -499,8 +501,13 @@ public final class LocalDashboardServerTest {
                 full.replace("\"profile\":\"nether\"", "\"profile\":\"missing\""),
                 full.replace("\"type\":\"elytra\"", "\"type\":\"weather\""),
                 full.replace("\"window\":300", "\"window\":45"),
+                full.replace("[30,50]", "[0]"),
+                full.replace("[30,50]", "[10001]"),
+                full.replace("[30,50]", "[1.5]"),
+                full.replace("[30,50]", "[1,2,3,4,5,6,7,8,9]"),
                 full.replace("\"movement\":\"show\"", "\"movement\":\"toggle\""),
                 full.replace("\"source\":\"inventory\"", "\"source\":\"chest\""),
+                full.replace("\"intervalMillis\":100", "\"intervalMillis\":16"),
                 full.replace("\"id\":\"nether\"", "\"id\":\"default\""),
                 full.replace("[{\"type\":\"dimension\",\"values\":[\"nether\"]}]", "[]")}) {
             try {
@@ -510,6 +517,17 @@ public final class LocalDashboardServerTest {
                 // rejected as it should be
             }
         }
+
+        java.nio.file.Path layoutFile = java.nio.file.Files.createTempDirectory("minepanel-layout").resolve("layout.json");
+        LayoutStore rates = new LayoutStore(layoutFile);
+        check(rates.updateIntervalMillis() == LayoutStore.DEFAULT_UPDATE_INTERVAL, "update rate defaults to 4/s");
+        rates.save(full);
+        check(rates.updateIntervalMillis() == 100, "saving a layout changes the update rate immediately");
+        LayoutStore reloaded = new LayoutStore(layoutFile);
+        reloaded.load();
+        check(reloaded.updateIntervalMillis() == 100, "the saved update rate is restored on startup");
+        rates.save(full.replace(",\"updates\":{\"intervalMillis\":100}", ""));
+        check(rates.updateIntervalMillis() == LayoutStore.DEFAULT_UPDATE_INTERVAL, "a layout without a rate resets it");
 
         java.nio.file.Path directory = java.nio.file.Files.createTempDirectory("minepanel-worlds");
         var item = com.google.gson.JsonParser.parseString("{\"id\":\"minecraft:emerald\",\"count\":3}");

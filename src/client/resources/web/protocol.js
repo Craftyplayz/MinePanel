@@ -122,9 +122,12 @@ function validateStatistic(entry) {
   requireValid(object(entry) && validStatisticId(entry.id) && validText(entry.label) && validText(entry.category)
     && integer(entry.value) && entry.value <= 2147483647 && integer(entry.session) && entry.session <= entry.value
     && validText(entry.display) && validText(entry.sessionDisplay)
-    && (entry.changedAt === null || integer(entry.changedAt)));
+    && (entry.changedAt === null || integer(entry.changedAt))
+    && (entry.sessionRate === null || validText(entry.sessionRate))
+    && (entry.recentRate === null || validText(entry.recentRate)));
   return { id: entry.id, label: entry.label, category: entry.category, value: entry.value, session: entry.session,
-    display: entry.display, sessionDisplay: entry.sessionDisplay, changedAt: entry.changedAt };
+    display: entry.display, sessionDisplay: entry.sessionDisplay, changedAt: entry.changedAt,
+    sessionRate: entry.sessionRate, recentRate: entry.recentRate };
 }
 
 function validateStatistics(statistics) {
