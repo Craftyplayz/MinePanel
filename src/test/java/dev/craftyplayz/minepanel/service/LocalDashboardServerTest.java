@@ -542,12 +542,12 @@ public final class LocalDashboardServerTest {
         worlds.enderChest(new WorldStore.EnderChest(20, chest));
         check(worlds.revision() > before, "changes bump the revision");
         worlds.save();
-        WorldStore reloaded = new WorldStore(directory);
-        reloaded.open("server:play.example.net");
-        check(reloaded.villagers().equals(worlds.villagers()) && reloaded.enderChest().equals(worlds.enderChest()),
+        WorldStore reloadedWorlds = new WorldStore(directory);
+        reloadedWorlds.open("server:play.example.net");
+        check(reloadedWorlds.villagers().equals(worlds.villagers()) && reloadedWorlds.enderChest().equals(worlds.enderChest()),
                 "villagers and the ender chest survive a restart");
-        reloaded.open("singleplayer:Other World");
-        check(reloaded.villagers().isEmpty() && reloaded.enderChest() == null, "each world has its own data");
+        reloadedWorlds.open("singleplayer:Other World");
+        check(reloadedWorlds.villagers().isEmpty() && reloadedWorlds.enderChest() == null, "each world has its own data");
 
         try (LocalDashboardServer server = new LocalDashboardServer(new TelemetryStore(), 0, null, null, worlds)) {
             server.start();
