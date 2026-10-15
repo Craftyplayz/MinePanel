@@ -483,8 +483,8 @@ public final class LocalDashboardServerTest {
 
     private static void testProfilesRulesAndWorlds() throws Exception {
         String full = "{\"version\":1,\"tiles\":[{\"id\":\"movement\",\"enabled\":true,\"x\":0,\"y\":0,\"w\":4,"
-                + "\"h\":4,\"rulesOnly\":true}],\"settings\":{\"movement\":{\"showVertical\":false,\"showGlider\":true},"
-                + "\"statistics\":{\"recentLifetime\":0,\"recentRows\":4},"
+                + "\"h\":4,\"rulesOnly\":true}],\"settings\":{\"statistics\":{\"recentLifetime\":0,\"recentRows\":4},"
+                + "\"movement\":{\"showVertical\":false,\"showGlider\":true},"
                 + "\"xp\":{\"window\":300,\"goals\":[30,50]},\"pickups\":{\"lifetime\":0,"
                 + "\"maxRows\":5,\"showSource\":false,\"ignored\":[\"minecraft:dirt\"]},\"advancements\":{\"popupSeconds\":10}},"
                 + "\"profiles\":[{\"id\":\"nether\",\"name\":\"Nether\",\"tiles\":[],\"settings\":{}}],"
