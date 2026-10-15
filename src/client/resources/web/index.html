@@ -6,9 +6,12 @@
   <meta name="color-scheme" content="dark">
   <title>MinePanel</title>
   <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/features.css">
   <script src="/protocol.js" defer></script>
   <script src="/layout.js" defer></script>
+  <script src="/rules.js" defer></script>
   <script src="/app.js" defer></script>
+  <script src="/features.js" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -20,6 +23,14 @@
     <button type="button" class="button" id="edit-toggle" aria-pressed="false">Customize</button>
   </header>
   <section class="toolbar" id="edit-toolbar" hidden aria-label="Layout editing">
+    <span class="toolbar-label">Profile</span>
+    <span class="profile-tools">
+      <select id="profile-select" aria-label="Profile to edit"></select>
+      <input id="profile-name" type="text" maxlength="64" aria-label="Profile name" placeholder="Profile name">
+      <button type="button" class="button quiet" id="profile-add" title="Copy this profile into a new one">New</button>
+      <button type="button" class="button quiet" id="profile-delete">Delete</button>
+      <button type="button" class="button quiet" id="rules-open" title="Switch profiles and show or hide tiles based on what happens in game">Rules…</button>
+    </span>
     <span class="toolbar-label">Tiles</span>
     <span class="tile-toggles" id="tile-toggles"></span>
     <span class="spacer"></span>
@@ -37,6 +48,7 @@
         <div class="vitals prio-1">
           <div class="bars">
             <div class="saturation-bar" title="Saturation"><span id="saturation-fill"></span></div>
+            <div class="food-bar" title="Hunger"><span id="food-fill"></span></div>
             <div class="health-bar" title="Health"><span id="health-fill"></span><span id="absorption-fill"></span></div>
           </div>
           <strong id="health-value">—</strong>
@@ -52,7 +64,7 @@
     </article>
     <article class="tile" id="tile-inventory" data-tile="inventory" aria-labelledby="inventory-title">
       <header class="tile-head" id="head-inventory"><h2 id="inventory-title">Inventory</h2>
-        <span class="head-actions"><button type="button" class="chip small" id="armor-toggle" aria-pressed="true">Armor</button><span class="badge muted" id="inventory-status">Unavailable</span></span></header>
+        <span class="head-actions"><button type="button" class="chip small" id="enderchest-open" hidden title="Ender chest contents, as last seen">Ender chest</button><button type="button" class="chip small" id="armor-toggle" aria-pressed="true">Armor</button><span class="badge muted" id="inventory-status">Unavailable</span></span></header>
       <div class="tile-body inventory-body" id="inventory-body">
         <p class="held" id="held-value">Held item unavailable</p>
         <div class="inventory-grid" id="inventory-grid" aria-label="Inventory"></div>
@@ -70,8 +82,10 @@
       </div>
     </article>
     <article class="tile" id="tile-history" data-tile="history" aria-labelledby="history-title">
-      <header class="tile-head" id="head-history"><h2 id="history-title">Activity log</h2><span class="badge muted" id="history-status">No session</span></header>
+      <header class="tile-head" id="head-history"><h2 id="history-title">Activity log</h2>
+        <span class="head-actions"><button type="button" class="chip small accent" id="portal-link" hidden title="Find where to build the portal that links back to the one you just used">Link portal</button><span class="badge muted" id="history-status">No session</span></span></header>
       <div class="tile-body column">
+        <section class="portal-box" id="portal-box" hidden aria-label="Portal linking"></section>
         <div class="history-filters prio-3">
           <label>Category
             <select id="history-category">
@@ -87,6 +101,9 @@
               <option value="inventory">Inventory changes</option>
               <option value="drop">Drops</option>
               <option value="dimension">Dimensions</option>
+              <option value="biome">Biomes</option>
+              <option value="weather">Weather</option>
+              <option value="time">Days</option>
               <option value="lifecycle">Session</option>
             </select>
           </label>
@@ -113,8 +130,101 @@
       <header class="tile-head" id="head-build"><h2 id="build-title">Build progress</h2><span class="badge muted">Unavailable</span></header>
       <div class="tile-body placeholder"><p>Litematica support requires a compatible 26.1.2 release.</p></div>
     </article>
+    <article class="tile" id="tile-movement" data-tile="movement" aria-labelledby="movement-title">
+      <header class="tile-head" id="head-movement"><h2 id="movement-title">Movement</h2><span class="badge muted" id="movement-mode">Unavailable</span></header>
+      <div class="tile-body movement-body">
+        <div class="movement-icon" id="movement-icon"></div>
+        <div class="movement-main">
+          <p class="movement-speed" id="movement-speed">—</p>
+          <p class="movement-facing" id="movement-facing">—</p>
+          <p class="movement-extra prio-2" id="movement-vertical"></p>
+          <p class="movement-extra prio-3" id="movement-glider"></p>
+        </div>
+        <div class="compass prio-2" id="movement-compass" aria-hidden="true"><span class="compass-n">N</span><span class="compass-needle" id="movement-needle"></span></div>
+      </div>
+    </article>
+    <article class="tile" id="tile-xp" data-tile="xp" aria-labelledby="xp-title">
+      <header class="tile-head" id="head-xp"><h2 id="xp-title">Experience</h2><span class="badge muted" id="xp-status">Unavailable</span></header>
+      <div class="tile-body">
+        <div class="xp-level prio-1"><strong id="xp-level">—</strong><div class="xp-bar"><span id="xp-fill"></span></div></div>
+        <p class="xp-rate prio-1"><span id="xp-rate">— XP/h</span> <span class="hint">over</span> <button type="button" class="chip small" id="xp-window" aria-haspopup="true" title="Choose how long to average over">60 s</button></p>
+        <p class="xp-gained prio-2" id="xp-gained"></p>
+        <dl class="facts prio-2">
+          <div><dt>Next level</dt><dd id="xp-next">—</dd></div>
+          <div><dt id="xp-hundred-label">Level 100</dt><dd id="xp-hundred">—</dd></div>
+        </dl>
+        <div class="popover" id="xp-window-menu" role="menu" hidden></div>
+      </div>
+    </article>
+    <article class="tile" id="tile-pickups" data-tile="pickups" aria-labelledby="pickups-title">
+      <header class="tile-head" id="head-pickups"><h2 id="pickups-title">Recent pickups</h2>
+        <span class="head-actions"><button type="button" class="icon-button" id="pickups-settings" aria-label="Pickup settings" title="Pickup settings">⚙</button></span></header>
+      <div class="tile-body column">
+        <form class="tile-settings" id="pickups-form" hidden>
+          <label>Keep for
+            <select id="pickups-lifetime">
+              <option value="10">10 seconds</option><option value="30">30 seconds</option><option value="60">1 minute</option>
+              <option value="300">5 minutes</option><option value="0">Until replaced</option>
+            </select>
+          </label>
+          <label>Rows <input id="pickups-rows" type="number" min="1" max="32"></label>
+          <label class="option-toggle"><input id="pickups-source" type="checkbox"> <span>Show where items came from</span></label>
+          <p class="hint" id="pickups-ignored"></p>
+        </form>
+        <p class="empty-note" id="pickups-empty">Nothing picked up yet.</p>
+        <div class="pickup-list scroll" id="pickups-list" aria-label="Recently picked up items"></div>
+      </div>
+    </article>
+    <article class="tile" id="tile-advancements" data-tile="advancements" aria-labelledby="advancements-title">
+      <header class="tile-head" id="head-advancements"><h2 id="advancements-title">Advancements</h2>
+        <span class="head-actions"><span class="badge muted" id="advancements-status">Unavailable</span><button type="button" class="icon-button" id="advancements-settings" aria-label="Advancement settings" title="Advancement settings">⚙</button></span></header>
+      <div class="tile-body column">
+        <form class="tile-settings" id="advancements-form" hidden>
+          <label>Pop up when you make one for <input id="advancements-popup-seconds" type="number" min="0" max="300"> seconds <span class="hint">(0 = never)</span></label>
+        </form>
+        <div class="advancement-tabs prio-2" id="advancement-tabs"></div>
+        <div class="history-filters prio-3">
+          <label>Show
+            <select id="advancement-filter">
+              <option value="closest">Closest to done</option>
+              <option value="remaining">Not done yet</option>
+              <option value="done">Done</option>
+            </select>
+          </label>
+        </div>
+        <p class="empty-note" id="advancements-empty"></p>
+        <div class="advancement-list scroll" id="advancement-list" aria-label="Advancements"></div>
+      </div>
+    </article>
+    <article class="tile" id="tile-villagers" data-tile="villagers" aria-labelledby="villagers-title">
+      <header class="tile-head" id="head-villagers"><h2 id="villagers-title">Villager trades</h2><span class="badge muted" id="villagers-status">Unavailable</span></header>
+      <div class="tile-body column">
+        <section class="navigator-box" id="villager-nav" hidden aria-label="Directions to a villager"></section>
+        <div class="history-filters prio-3">
+          <label>Search <input id="villager-search" type="search" placeholder="e.g. mending, emerald, librarian" maxlength="100"></label>
+        </div>
+        <p class="empty-note" id="villagers-empty">Trade with a villager to remember its trades.</p>
+        <div class="villager-list scroll" id="villager-list" aria-label="Villagers"></div>
+      </div>
+    </article>
   </main>
+  <div class="windows" id="windows" aria-label="Item windows"></div>
+  <div class="advancement-popup" id="advancement-popup" role="status" hidden></div>
   <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+  <div class="dialog-backdrop" id="rules-dialog" hidden>
+    <section class="dialog wide" role="dialog" aria-modal="true" aria-labelledby="rules-dialog-title">
+      <header class="dialog-head">
+        <h2 id="rules-dialog-title">Rules</h2>
+        <button type="button" class="button" id="rules-dialog-close">Done</button>
+      </header>
+      <p class="dialog-note">A rule applies while its conditions match: every <strong>AND</strong> group needs at least one of its conditions (so “in the Nether” AND “wearing elytra or swimming”). The first active rule that switches profile wins; show/hide and settings from all active rules apply in order. Rules pause while you customize.</p>
+      <div class="dialog-tools">
+        <button type="button" class="button" id="rule-add">Add rule</button>
+        <span class="save-status" id="rules-status" role="status"></span>
+      </div>
+      <div class="dialog-list" id="rules-list"></div>
+    </section>
+  </div>
   <div class="dialog-backdrop" id="statistics-dialog" hidden>
     <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="statistics-dialog-title">
       <header class="dialog-head">

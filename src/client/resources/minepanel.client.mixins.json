@@ -6,7 +6,9 @@
     "AdvancementEventsMixin",
     "BlockPlaceMixin",
     "CombatEventsMixin",
+    "ClientAdvancementsAccessor",
     "ItemDropMixin",
+    "ItemPickupMixin",
     "StatisticsSyncMixin"
   ],
   "injectors": {

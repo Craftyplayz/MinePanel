@@ -72,6 +72,8 @@ button, input, select { font: inherit; }
 .bars { flex: 1; display: grid; gap: 3px; }
 .saturation-bar { position: relative; height: 4px; border-radius: 3px; background: #2b2412; overflow: hidden; }
 #saturation-fill { position: absolute; top: 0; bottom: 0; left: 0; width: 0; background: linear-gradient(90deg, #c9952b, #f2c94c); transition: width .25s; }
+.food-bar { position: relative; height: 4px; border-radius: 3px; background: #2e1a0c; overflow: hidden; }
+#food-fill { position: absolute; top: 0; bottom: 0; left: 0; width: 0; background: linear-gradient(90deg, #d9631e, #f5913a); transition: width .25s; }
 .health-bar { position: relative; height: 10px; border-radius: 6px; background: #2a1316; overflow: hidden; }
 .health-bar span { position: absolute; top: 0; bottom: 0; left: 0; width: 0; transition: width .25s; }
 #health-fill { background: linear-gradient(90deg, #c4313d, #ef5b5b); }
@@ -129,6 +131,10 @@ button, input, select { font: inherit; }
 .recent h3 { margin: 0 0 4px; color: var(--accent); font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .08em; }
 .recent .hint { color: #5f6c72; text-transform: none; letter-spacing: 0; font-weight: 400; }
 .recent-row .session { color: #f0b85a; }
+.recent-actions { display: none; gap: 4px; }
+.grid.editing .recent-actions { display: inline-flex; align-self: center; }
+.grid.editing .recent-row { grid-template-columns: 1fr auto auto auto; }
+@container tile (max-width: 230px) or (max-height: 110px) { .grid.editing .recent-row { grid-template-columns: 1fr auto auto; } }
 
 /* Statistics settings window */
 .dialog-backdrop { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 16px; background: #000a; }

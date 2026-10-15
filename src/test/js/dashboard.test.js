@@ -764,7 +764,7 @@ test("chosen statistics render in order with the game's formatting; recent shows
     ["Jumps", "40", "+3"], ["Deaths", "0", ""], ["Mob Kills", "0", ""], ["Player Kills", "0", ""],
     ["Time Played", "1.02 h", "+3"]], "chosen statistics follow the settings order; ones not received read as zero");
   const recent = h.get("#statistics-recent").children;
-  assert.deepEqual(recent.map(cells), [["Diamond PickaxeUsed", "12", "+12"], ["StoneMined", "12", "+12"]],
+  assert.deepEqual(recent.map(row => cells(row).slice(0, 3)), [["Diamond PickaxeUsed", "12", "+12"], ["StoneMined", "12", "+12"]],
     "recent excludes chosen, excluded and older-than-a-minute statistics, newest first");
   assert.equal(h.get("#statistics-recent-section").hidden, false);
   const replacements = h.get("#statistics-entries").replacements;
@@ -775,6 +775,28 @@ test("chosen statistics render in order with the game's formatting; recent shows
   assert.deepEqual(h.get("#statistics-entries").children.map(cells), [["Distance Walked", "0", ""],
     ["Sprint One Cm", "0", ""], ["Jumps", "0", ""], ["Deaths", "0", ""], ["Mob Kills", "0", ""],
     ["Player Kills", "0", ""], ["Time Played", "0", ""]], "unavailable statistics read as zero under their last known labels");
+  assert.equal(h.get("#statistics-recent-section").hidden, true);
+});
+
+test("recent statistics have buttons to pin them or hide them from recent", async () => {
+  const h = harness();
+  await h.flush();
+  const now = Date.now();
+  h.sockets[0].message(initial(snapshot({ statistics: statistics([
+    stone({ changedAt: now - 3000 }),
+    stone({ id: "minecraft:used/minecraft:diamond_pickaxe", label: "Diamond Pickaxe", category: "Used", changedAt: now - 1000 })
+  ]) })));
+  const recent = () => h.get("#statistics-recent").children;
+  const [, hide] = recent()[0].children[3].children;
+  hide.emit("click");
+  assert.equal(plain(h.run("layout.settings.statistics.recentExcluded")).includes("minecraft:used/minecraft:diamond_pickaxe"), true,
+    "hiding keeps a statistic out of recent");
+  assert.deepEqual(recent().map(row => row.children[0].textContent), ["StoneMined"]);
+  const [pin] = recent()[0].children[3].children;
+  pin.emit("click");
+  assert.equal(plain(h.run("layout.settings.statistics.shown")).at(-1), "minecraft:mined/minecraft:stone",
+    "pinning adds a statistic to the permanent list");
+  assert.equal(h.get("#statistics-entries").children.at(-1).children[0].textContent, "StoneMined");
   assert.equal(h.get("#statistics-recent-section").hidden, true);
 });
 
@@ -1272,7 +1294,7 @@ test("inventory grid places rows and armor, toggles armor and drops rows as the 
     "the main row next to the hotbar appears first");
 });
 
-test("player tile shows saturation above health, food, and status effects with timers and beacon markers", async () => {
+test("player tile shows saturation and hunger above health, food, and status effects with timers and beacon markers", async () => {
   const h = harness();
   await h.flush();
   const now = Date.now();
@@ -1282,6 +1304,7 @@ test("player tile shows saturation above health, food, and status effects with t
     { id: "minecraft:speed", name: "Speed", amplifier: 0, endsAt: now + 3_725_000, beacon: false }
   ] })));
   assert.equal(h.get("#saturation-fill").style.width, "25%");
+  assert.equal(h.get("#food-fill").style.width, "85%");
   assert.equal(h.get("#food-value").textContent, "17 / 20 · saturation 5");
   const effects = h.get("#effects").children;
   assert.equal(effects.length, 3);
@@ -1290,22 +1313,27 @@ test("player tile shows saturation above health, food, and status effects with t
   assert.equal(level.textContent, "II");
   assert.equal(source.hidden, false);
   assert.equal(effects[0].className, "effect beacon");
-  assert.equal(timer.textContent, "0:13");
-  assert.equal(effects[0].attributes.title, "Haste II · 0:13 · from a beacon");
+  assert.equal(timer.textContent, "", "an active beacon effect hides its countdown");
+  assert.equal(timer.hidden, true);
+  assert.equal(effects[0].attributes.title, "Haste II · from a beacon");
   assert.equal(effects[1].children[3].textContent, "∞");
   assert.equal(effects[1].children[2].hidden, true);
   assert.equal(effects[2].children[3].textContent, "1:02:05");
   h.run(`tickEffects(${now + 10_000})`);
-  assert.equal(timer.textContent, "0:03", "timers count down locally");
+  assert.equal(effects[2].children[3].textContent, "1:01:55", "timers count down locally");
   h.run(`tickEffects(${now + 20_000})`);
-  assert.equal(timer.textContent, "0:00");
+  assert.equal(effects[2].children[3].textContent, "1:01:45");
   h.sockets[0].message(update({ effects: [{ id: "minecraft:haste", name: "Haste", amplifier: 1,
-    endsAt: now + 30_000, beacon: true }] }));
+    endsAt: now + 30_000, beacon: false }] }));
   assert.equal(h.get("#effects").children[0], effects[0], "a refreshed effect keeps its element");
+  assert.equal(timer.hidden, false, "the countdown returns once the beacon stops reaching the player");
+  assert.equal(effects[0].className, "effect");
+  assert.match(effects[0].attributes.title, /^Haste II · 0:\d\d$/);
   assert.equal(h.get("#effects").children.length, 1);
   h.sockets[0].message(update(unavailable({ revision: 8, baseRevision: 7 })));
   assert.equal(h.get("#effects").children.length, 0);
   assert.equal(h.get("#saturation-fill").style.width, "0%");
+  assert.equal(h.get("#food-fill").style.width, "0%");
   assert.equal(h.get("#food-value").textContent, "—");
 });
 

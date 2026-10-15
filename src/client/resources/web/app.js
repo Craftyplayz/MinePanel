@@ -12,6 +12,7 @@ const healthValue = $("#health-value");
 const healthFill = $("#health-fill");
 const absorptionFill = $("#absorption-fill");
 const saturationFill = $("#saturation-fill");
+const foodFill = $("#food-fill");
 const foodValue = $("#food-value");
 const effectsList = $("#effects");
 const sessionValue = $("#session-value");
@@ -50,10 +51,13 @@ const layoutStatus = $("#layout-status");
 const layoutFile = $("#layout-file");
 
 const TILE_LABELS = { player: "Player", inventory: "Inventory", statistics: "Statistics",
-  history: "Activity log", map: "JourneyMap", build: "Build progress" };
+  history: "Activity log", map: "JourneyMap", build: "Build progress", movement: "Movement", xp: "Experience",
+  pickups: "Recent pickups", advancements: "Advancements", villagers: "Villager trades" };
 const CATEGORY_LABELS = { lifecycle: "Session", death: "Death", dimension: "Dimension", kill: "Kill",
   mine: "Mined", place: "Placed", container: "Opened", inventory: "Inventory", drop: "Dropped",
-  damage: "Damage", heal: "Healed", advancement: "Advancement" };
+  damage: "Damage", heal: "Healed", advancement: "Advancement", biome: "Biome", weather: "Weather", time: "Day" };
+/** Feature code (features.js) registers here to render with each update, after layout changes, and every second. */
+const featureHooks = { render: [], layout: [], tick: [] };
 const EQUIPMENT_SLOTS = [["head", "Head"], ["chest", "Chest"], ["legs", "Legs"], ["feet", "Feet"], ["offhand", "Offhand"]];
 const ROW_HEIGHT = 40;
 const GRID_GAP = 10;
@@ -202,7 +206,7 @@ function bodySize(element) {
 /** Places slots on the grid so only rows that fully fit are shown; see inventoryArrangement in layout.js. */
 function layoutInventory() {
   const { width, height } = bodySize(inventoryBody);
-  const showArmor = layout.settings.inventory.showArmor;
+  const showArmor = displaySettings().inventory.showArmor;
   const withHeld = inventoryArrangement(width, height - HELD_LINE_HEIGHT, showArmor);
   const full = inventoryArrangement(width, height, showArmor);
   // The "Holding ..." line is a luxury: show it only when it costs no inventory row and no slot size.
@@ -245,7 +249,7 @@ window.addEventListener("resize", () => layoutInventory());
 
 armorToggle.addEventListener("pointerdown", event => event.stopPropagation());
 armorToggle.addEventListener("click", () =>
-  changeLayout(withSettings(layout, "inventory", { showArmor: !layout.settings.inventory.showArmor })));
+  changeSettings("inventory", { showArmor: !displaySettings().inventory.showArmor }));
 
 function renderInventory(inventory) {
   writeText(inventoryStatus, inventory ? `Slot ${inventory.selectedHotbarSlot + 1}` : "Unavailable");
@@ -348,7 +352,7 @@ function recentStatistics(statistics, settings, now = Date.now()) {
 function renderStatistics(statistics, now = Date.now()) {
   displayedStatistics = statistics;
   writeText(statisticsStatus, statistics ? "Session" : "Unavailable");
-  const settings = layout.settings.statistics;
+  const settings = displaySettings().statistics;
   const byId = new Map((statistics?.entries ?? []).map(entry => [entry.id, entry]));
   for (const entry of byId.values()) knownStatisticLabels.set(entry.id, entry.label);
   // Chosen statistics the game has not reported (or all of them while unavailable) read as zero.
@@ -363,18 +367,34 @@ function renderStatistics(statistics, now = Date.now()) {
     statisticsEntries.replaceChildren(...pinned.map(entry => statisticRow(entry, true)));
   }
   setHidden(statisticsRecentSection, recent.length === 0);
-  statisticsRecent.replaceChildren(...recent.map(entry => statisticRow(entry, true, "counter-row recent-row")));
+  statisticsRecent.replaceChildren(...recent.map(recentRow));
   if (!statisticsDialog.hidden) renderStatisticOptions();
 }
 
+/** A recent statistic with edit-mode buttons to pin it or keep it out of Recent; CSS shows them only while editing. */
+function recentRow(entry) {
+  const row = statisticRow(entry, true, "counter-row recent-row");
+  const actions = create("span", "recent-actions");
+  for (const [key, text, title] of [["shown", "📌", `Pin ${entry.label}`], ["recentExcluded", "✕", `Hide ${entry.label} from Recent`]]) {
+    const button = create("button", "icon-button", text);
+    button.type = "button";
+    button.title = title;
+    button.setAttribute("aria-label", title);
+    button.addEventListener("click", () => toggleStatistic(key, entry.id, true));
+    actions.appendChild(button);
+  }
+  row.appendChild(actions);
+  return row;
+}
+
 function toggleStatistic(key, id, enabled) {
-  const current = layout.settings.statistics[key];
+  const current = displaySettings().statistics[key];
   const next = enabled ? [...current.filter(value => value !== id), id] : current.filter(value => value !== id);
-  changeLayout(withSettings(layout, "statistics", { [key]: next }));
+  changeSettings("statistics", { [key]: next });
 }
 
 function renderStatisticOptions() {
-  const settings = layout.settings.statistics;
+  const settings = displaySettings().statistics;
   const known = new Map((displayedStatistics?.entries ?? []).map(entry => [entry.id, entry]));
   for (const id of [...settings.shown, ...settings.recentExcluded]) {
     if (!known.has(id)) known.set(id, { id, label: statisticLabel(id), category: "Not received yet" });
@@ -425,7 +445,7 @@ $("#statistics-dialog-close").addEventListener("click", () => setStatisticsDialo
 statisticsDialog.addEventListener("click", event => { if (event.target === statisticsDialog) setStatisticsDialog(false); });
 statisticsSearch.addEventListener("input", () => renderStatisticOptions());
 $("#statistics-defaults").addEventListener("click", () => {
-  changeLayout(withSettings(layout, "statistics", defaultSettings().statistics));
+  changeSettings("statistics", defaultSettings().statistics);
   renderStatisticOptions();
 });
 window.addEventListener("keydown", event => { if (event.key === "Escape" && !statisticsDialog.hidden) setStatisticsDialog(false); });
@@ -487,6 +507,8 @@ historyCategory.addEventListener("change", () => renderHistory(displayedHistory)
 historySearch.addEventListener("input", () => renderHistory(displayedHistory));
 
 function renderPlayer(player) {
+  updateView(player);
+  for (const hook of featureHooks.render) hook(player);
   renderInventory(player?.available ? player.inventory : null);
   renderStatistics(player?.available ? player.statistics : null);
   renderHistory(player?.history);
@@ -500,11 +522,13 @@ function renderPlayer(player) {
     healthFill.style.width = "0%";
     absorptionFill.style.width = "0%";
     saturationFill.style.width = "0%";
+    foodFill.style.width = "0%";
     renderEffects([]);
     return;
   }
   writeText(foodValue, `${player.food} / 20 · saturation ${formatNumber(player.saturation)}`);
   saturationFill.style.width = `${Math.min(100, player.saturation / 20 * 100)}%`;
+  foodFill.style.width = `${Math.min(100, player.food / 20 * 100)}%`;
   renderEffects(player.effects);
   writeText(gameStatus, "In world");
   writeText(healthValue, `${formatNumber(player.health)} / ${formatNumber(player.maxHealth)}`
@@ -572,10 +596,12 @@ function tickEffects(now = Date.now()) {
   displayedEffects.forEach(effect => {
     const node = effectNodes.get(effect.id);
     if (!node) return;
-    const remaining = formatRemaining(effect.endsAt, now);
+    // A beacon keeps topping the effect up, so its countdown means nothing until the beacon stops reaching the player.
+    const remaining = effect.beacon ? "" : formatRemaining(effect.endsAt, now);
     writeText(node.children[3], remaining);
+    setHidden(node.children[3], effect.beacon);
     node.setAttribute?.("title", `${effect.name}${effect.amplifier > 0 ? ` ${ROMAN[effect.amplifier + 1] ?? effect.amplifier + 1}` : ""}`
-      + ` · ${remaining}${effect.beacon ? " · from a beacon" : ""}`);
+      + (effect.beacon ? " · from a beacon" : ` · ${remaining}`));
   });
 }
 
@@ -593,36 +619,85 @@ let layout = defaultLayout();
 let layoutLoaded = false;
 let layoutChanged = false;
 let editing = false;
+let editingProfile = "default";
 let saveTimer;
 let drag;
+const ruleEngine = createRuleEngine();
+let view = effectiveView(layout, []);
+let viewKey;
 const tileElements = Object.fromEntries(TILE_IDS.map(id => [id, $(`#tile-${id}`)]));
 const tileToggles = Object.fromEntries(TILE_IDS.map(id => {
   const chip = create("button", "chip", TILE_LABELS[id]);
   chip.type = "button";
   chip.addEventListener("click", () => {
-    const tile = layout.tiles.find(value => value.id === id);
-    changeLayout(setTileEnabled(layout, id, !tile.enabled));
+    const tile = getProfile(layout, editingProfile).tiles.find(value => value.id === id);
+    changeProfile(profile => setTileMode(profile, id, tile.enabled ? "off" : "on"));
   });
   $("#tile-toggles").appendChild(chip);
   return [id, chip];
 }));
+// While customizing, each tile can be set to show always or only when a rule shows it (keeping its space).
+const modeToggles = Object.fromEntries(TILE_IDS.map(id => {
+  const button = create("button", "chip small mode-toggle", "Always");
+  button.type = "button";
+  button.title = "Rules only: the tile keeps its place but is hidden until a rule shows it";
+  button.addEventListener("pointerdown", event => event.stopPropagation());
+  button.addEventListener("click", () => {
+    const tile = getProfile(layout, editingProfile).tiles.find(value => value.id === id);
+    changeProfile(profile => setTileMode(profile, id, tile.rulesOnly ? "on" : "rules"));
+  });
+  $(`#head-${id}`).appendChild(button);
+  return [id, button];
+}));
+
+/** The profile on screen: the one being edited while customizing, else the one the rules picked. */
+const shownProfileId = () => editing ? editingProfile : view.profileId;
+
+/** Settings the tiles use now: the edited profile's own while customizing, else with rule overrides. */
+function displaySettings() {
+  return editing ? getProfile(layout, editingProfile).settings : view.settings;
+}
+
+function changeProfile(update) {
+  const id = shownProfileId();
+  changeLayout(withProfile(layout, id, update(getProfile(layout, id))));
+}
+
+function changeSettings(tileId, changes) {
+  changeProfile(profile => withSettings(profile, tileId, changes));
+}
+
+/** Re-evaluates the rules; re-applies the layout only when what should be shown has changed. */
+function updateView(player = currentPlayerState, now = Date.now()) {
+  view = effectiveView(layout, ruleEngine.active(layout, player, now));
+  const key = JSON.stringify([view.profileId, [...view.visible].sort(), view.settings]);
+  if (key === viewKey) return;
+  viewKey = key;
+  applyLayout();
+}
 
 function applyLayout() {
-  const order = [...layout.tiles].sort((a, b) => a.y - b.y || a.x - b.x);
-  for (const tile of layout.tiles) {
+  const profile = getProfile(layout, shownProfileId());
+  const order = [...profile.tiles].sort((a, b) => a.y - b.y || a.x - b.x);
+  for (const tile of profile.tiles) {
     const element = tileElements[tile.id];
-    setHidden(element, !tile.enabled);
+    setHidden(element, editing ? !tile.enabled : !view.visible.has(tile.id));
+    if (tile.rulesOnly) element.classList.add("rules-only");
+    else element.classList.remove("rules-only");
     element.style.setProperty("--grid-column", `${tile.x + 1} / span ${tile.w}`);
     element.style.setProperty("--grid-row", `${tile.y + 1} / span ${tile.h}`);
     element.style.setProperty("--grid-row-span", `span ${tile.h}`);
     element.style.setProperty("--order", String(order.indexOf(tile)));
     tileToggles[tile.id].setAttribute("aria-pressed", String(tile.enabled));
+    writeText(modeToggles[tile.id], tile.rulesOnly ? "Rules only" : "Always");
+    modeToggles[tile.id].setAttribute("aria-pressed", String(Boolean(tile.rulesOnly)));
   }
-  armorToggle.setAttribute("aria-pressed", String(layout.settings.inventory.showArmor));
+  armorToggle.setAttribute("aria-pressed", String(displaySettings().inventory.showArmor));
   layoutInventory();
   statisticsKey = undefined;
   renderStatistics(displayedStatistics);
   updateMap();
+  for (const hook of featureHooks.layout) hook();
 }
 
 // ------------------------------------------------------------------------------------------------- Map
@@ -633,8 +708,9 @@ let mapUrl;
 let mapTimer;
 
 function updateMap() {
-  const enabled = layout.tiles.find(tile => tile.id === "map").enabled;
-  const url = layout.settings.map.url;
+  const enabled = editing ? getProfile(layout, editingProfile).tiles.find(tile => tile.id === "map").enabled
+    : view.visible.has("map");
+  const url = displaySettings().map.url;
   mapOpen.href = url;
   if (!enabled) {
     window.clearTimeout(mapTimer);
@@ -680,7 +756,7 @@ $("#map-settings").addEventListener("pointerdown", event => event.stopPropagatio
 mapOpen.addEventListener("pointerdown", event => event.stopPropagation());
 $("#map-settings").addEventListener("click", () => {
   setHidden(mapAddress, !mapAddress.hidden);
-  mapUrlInput.value = layout.settings.map.url;
+  mapUrlInput.value = displaySettings().map.url;
   writeText(mapUrlError, "");
 });
 mapAddress.addEventListener("submit", event => {
@@ -691,14 +767,23 @@ mapAddress.addEventListener("submit", event => {
     return;
   }
   setHidden(mapAddress, true);
-  changeLayout(withSettings(layout, "map", { url }));
+  changeSettings("map", { url });
 });
 
 function changeLayout(next) {
   layout = next;
   layoutChanged = true;
-  applyLayout();
+  refreshLayout();
   scheduleSave();
+}
+
+/** Applies a new or reloaded layout: profiles or rules may have changed, so re-evaluate them. */
+function refreshLayout() {
+  if (!layout.profiles.some(profile => profile.id === editingProfile)) editingProfile = "default";
+  view = effectiveView(layout, ruleEngine.active(layout, currentPlayerState, Date.now()));
+  viewKey = JSON.stringify([view.profileId, [...view.visible].sort(), view.settings]);
+  applyLayout();
+  renderProfileTools();
 }
 
 function setLayoutStatus(text, error = false) {
@@ -730,7 +815,7 @@ async function loadLayout() {
     layoutLoaded = true;
     if (stored && !layoutChanged) {
       layout = normalizeLayout(stored);
-      applyLayout();
+      refreshLayout();
     }
   } catch {
     // Keep the default layout; the next connection retries.
@@ -738,16 +823,60 @@ async function loadLayout() {
 }
 
 function setEditing(value) {
+  // Customizing edits the profile that is on screen; rules are paused until done.
+  if (value && !editing) editingProfile = view.profileId;
   editing = value;
   grid.className = editing ? "grid editing" : "grid";
   setHidden(editToolbar, !editing);
   editToggle.setAttribute("aria-pressed", String(editing));
   if (!editing) setLayoutStatus("");
+  refreshLayout();
 }
+
+// --------------------------------------------------------------------------------------------- Profiles
+
+const profileSelect = $("#profile-select");
+const profileName = $("#profile-name");
+
+function renderProfileTools() {
+  const options = [{ id: "default", name: "Default" }, ...layout.profiles].map(profile => {
+    const option = create("option", "", profile.name);
+    option.value = profile.id;
+    return option;
+  });
+  profileSelect.replaceChildren(...options);
+  profileSelect.value = editingProfile;
+  profileName.value = getProfile(layout, editingProfile).name;
+  profileName.disabled = editingProfile === "default";
+  $("#profile-delete").disabled = editingProfile === "default";
+  $("#profile-add").disabled = layout.profiles.length >= MAX_PROFILES;
+}
+
+profileSelect.addEventListener("change", () => {
+  editingProfile = profileSelect.value;
+  refreshLayout();
+});
+profileName.addEventListener("change", () => {
+  if (editingProfile !== "default") changeLayout(renameProfile(layout, editingProfile, profileName.value.trim()));
+});
+$("#profile-add").addEventListener("click", () => {
+  const added = addProfile(layout, `Profile ${layout.profiles.length + 1}`, editingProfile);
+  editingProfile = added.id;
+  changeLayout(added.layout);
+});
+$("#profile-delete").addEventListener("click", () => {
+  if (editingProfile === "default") return;
+  const removed = editingProfile;
+  editingProfile = "default";
+  changeLayout(removeProfile(layout, removed));
+});
 
 editToggle.addEventListener("click", () => setEditing(!editing));
 $("#edit-done").addEventListener("click", () => setEditing(false));
-$("#layout-reset").addEventListener("click", () => changeLayout(defaultLayout()));
+$("#layout-reset").addEventListener("click", () => changeProfile(() => {
+  const defaults = defaultLayout();
+  return { tiles: defaults.tiles, settings: defaults.settings };
+}));
 $("#layout-export").addEventListener("click", () => {
   const link = create("a");
   link.href = URL.createObjectURL(new Blob([JSON.stringify(layout, null, 2)], { type: "application/json" }));
@@ -781,7 +910,8 @@ function startDrag(event, id, mode) {
   if (!editing || event.button !== 0) return;
   const element = tileElements[id];
   const box = element.getBoundingClientRect();
-  drag = { id, mode, base: layout, metrics: gridMetrics(), tile: layout.tiles.find(tile => tile.id === id),
+  const base = getProfile(layout, editingProfile);
+  drag = { id, mode, base, metrics: gridMetrics(), tile: base.tiles.find(tile => tile.id === id),
     offsetX: event.clientX - box.left, offsetY: event.clientY - box.top, rect: null };
   event.currentTarget.setPointerCapture(event.pointerId);
   element.classList.add("dragging");
@@ -798,7 +928,7 @@ function dragTo(event) {
         h: Math.round((event.clientY - metrics.top - tile.y * metrics.rowStride + GRID_GAP) / metrics.rowStride) };
   if (JSON.stringify(rect) === JSON.stringify(drag.rect)) return;
   drag.rect = rect;
-  layout = placeTile(drag.base, drag.id, rect, true);
+  layout = withProfile(layout, editingProfile, placeTile(drag.base, drag.id, rect, true));
   applyLayout();
 }
 
@@ -807,7 +937,9 @@ function endDrag() {
   tileElements[drag.id].classList.remove("dragging");
   const finished = drag;
   drag = undefined;
-  if (finished.rect) changeLayout(placeTile(finished.base, finished.id, finished.rect, false));
+  if (finished.rect) {
+    changeLayout(withProfile(layout, editingProfile, placeTile(finished.base, finished.id, finished.rect, false)));
+  }
 }
 
 for (const id of TILE_IDS) {
@@ -919,6 +1051,9 @@ window.addEventListener("pageshow", event => {
 window.setInterval?.(() => {
   tickEffects();
   if (displayedStatistics) renderStatistics(displayedStatistics);
+  // Timed rule conditions ("advancement in the last 10 s", "in combat") expire without a game update.
+  if (!editing) updateView();
+  for (const hook of featureHooks.tick) hook();
 }, 1000);
 
 connect();

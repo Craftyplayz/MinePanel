@@ -2,6 +2,11 @@ package dev.craftyplayz.minepanel;
 
 import dev.craftyplayz.minepanel.service.LayoutStore;
 import dev.craftyplayz.minepanel.service.LocalDashboardServer;
+import dev.craftyplayz.minepanel.service.WorldStore;
+import dev.craftyplayz.minepanel.telemetry.PickupTracker;
+import dev.craftyplayz.minepanel.telemetry.PlayerDetails;
+import dev.craftyplayz.minepanel.telemetry.PortalTracker;
+import dev.craftyplayz.minepanel.telemetry.XpTracker;
 import dev.craftyplayz.minepanel.telemetry.TelemetryStore;
 import dev.craftyplayz.minepanel.telemetry.StatisticsTracker;
 import dev.craftyplayz.minepanel.telemetry.GameplayTracker;
@@ -13,6 +18,7 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.fabric.api.event.client.player.ClientPlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
+import net.fabricmc.fabric.api.event.player.UseEntityCallback;
 import net.fabricmc.fabric.api.resource.v1.ResourceLoader;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.ChatFormatting;
@@ -23,7 +29,9 @@ import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.PackType;
 import net.minecraft.server.packs.resources.ResourceManagerReloadListener;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 
@@ -46,7 +54,18 @@ public final class MinePanelClient implements ClientModInitializer {
     private final HistoryArchive archive = new HistoryArchive(
             FabricLoader.getInstance().getGameDir().resolve("minepanel").resolve("history"));
     private final GameplayTracker history = new GameplayTracker(archive::append);
-    private final ClientActivity activity = new ClientActivity(history);
+    private final PortalTracker portals = new PortalTracker();
+    private final XpTracker experience = new XpTracker();
+    private final PickupTracker pickups = new PickupTracker();
+    private final MotionCollector motion = new MotionCollector();
+    private final AdvancementsCollector advancements = new AdvancementsCollector();
+    private final WorldStore worldStore = new WorldStore(
+            FabricLoader.getInstance().getConfigDir().resolve("minepanel").resolve("worlds"));
+    private final WorldDataCollector worldData = new WorldDataCollector(worldStore);
+    private final ClientActivity activity = new ClientActivity(history, portals, this::pickedUp);
+    private static final int SAVE_INTERVAL_TICKS = 100;
+    private int saveTicks;
+    private int portalScans;
     private volatile LocalDashboardServer dashboard;
     private volatile String dashboardUrl;
     private volatile boolean fixedPortUnavailable;
@@ -78,6 +97,7 @@ public final class MinePanelClient implements ClientModInitializer {
             statistics.reset();
             activity.reset();
             effects.reset();
+            resetSession();
             sessionStartedNanos = 0;
             samplingFailureReported = false;
         });
@@ -89,6 +109,11 @@ public final class MinePanelClient implements ClientModInitializer {
             history.start(now);
             archive.newSession(now);
             MinecraftStatisticsCollector.request(listener);
+            String worldKey = WorldCollector.worldKey(client);
+            lifecycleExecutor.execute(() -> {
+                worldStore.save();
+                worldStore.open(worldKey);
+            });
             client.execute(() -> announceDashboard(client));
         });
         ClientPlayConnectionEvents.DISCONNECT.register((listener, client) -> {
@@ -100,6 +125,8 @@ public final class MinePanelClient implements ClientModInitializer {
                 statistics.reset();
                 activity.reset();
                 effects.reset();
+                resetSession();
+                lifecycleExecutor.execute(worldStore::save);
                 sessionStartedNanos = 0;
                 history.disconnect(System.currentTimeMillis());
                 telemetry.markUnavailable(System.currentTimeMillis(), history.snapshot());
@@ -108,6 +135,10 @@ public final class MinePanelClient implements ClientModInitializer {
         ClientPlayerBlockBreakEvents.AFTER.register((level, player, pos, state) -> activity.blockMined(pos, state));
         AttackEntityCallback.EVENT.register((player, level, hand, entity, hit) -> {
             if (level.isClientSide() && player == Minecraft.getInstance().player) activity.attackedEntity(entity);
+            return InteractionResult.PASS;
+        });
+        UseEntityCallback.EVENT.register((player, level, hand, entity, hit) -> {
+            if (level.isClientSide() && player == Minecraft.getInstance().player) worldData.interacted(entity);
             return InteractionResult.PASS;
         });
         ScreenEvents.AFTER_INIT.register((client, screen, width, height) -> {
@@ -120,10 +151,35 @@ public final class MinePanelClient implements ClientModInitializer {
             history.disconnect(System.currentTimeMillis());
             archive.close();
             lifecycleExecutor.execute(() -> {
+                worldStore.save();
                 stopDashboard();
                 lifecycleExecutor.shutdown();
             });
         });
+    }
+
+    /** Per-connection state; the world store itself is switched on join and saved on disconnect. */
+    private void resetSession() {
+        portals.reset();
+        experience.reset();
+        pickups.reset();
+        motion.reset();
+        advancements.reset();
+        worldData.reset();
+    }
+
+    /** Client thread: an item arrived in the inventory. */
+    private void pickedUp(String source, ItemStack stack, int count) {
+        var minecraft = Minecraft.getInstance();
+        try {
+            ItemStack single = stack.copyWithCount(1);
+            String key = BuiltInRegistries.ITEM.getKey(single.getItem()) + "#"
+                    + Integer.toHexString(ItemStack.hashItemAndComponents(single));
+            pickups.add(System.currentTimeMillis(), key, source, MinecraftInventoryCollector.item(minecraft, single, icons),
+                    count);
+        } catch (RuntimeException invalid) {
+            LOGGER.log(Level.FINE, "Skipped a pickup with unsupported item metadata.", invalid);
+        }
     }
 
     private void tick(Minecraft client) {
@@ -132,10 +188,18 @@ public final class MinePanelClient implements ClientModInitializer {
         boolean inWorld = playConnection != null && playConnection == client.getConnection()
                 && client.player != null && client.level != null;
         if (inWorld) {
+            long millis = System.currentTimeMillis();
+            String dimension = client.level.dimension().identifier().toString();
             activity.tick(client);
-            history.observe(System.currentTimeMillis(), client.level.dimension().identifier().toString(),
+            history.observe(millis, dimension,
                     client.player.isDeadOrDying(), (double) client.player.getHealth(),
                     client.player.getAttributeValue(Attributes.MAX_HEALTH));
+            var feet = client.player.blockPosition();
+            portals.observe(millis, dimension, feet.getX(), feet.getY(), feet.getZ(),
+                    WorldCollector.inNetherPortal(client.level, client.player));
+            motion.tick(client.player);
+            worldData.tick(client, client.level);
+            if (++saveTicks % SAVE_INTERVAL_TICKS == 0) lifecycleExecutor.execute(worldStore::save);
         }
         if (now - lastSampleNanos < SAMPLE_INTERVAL_NANOS) {
             return;
@@ -158,20 +222,34 @@ public final class MinePanelClient implements ClientModInitializer {
         }
 
         var player = client.player;
+        var level = client.level;
         try {
             long millis = System.currentTimeMillis();
             var snapshot = MinecraftInventoryCollector.collect(client, player, icons);
             var counters = statistics.sample(millis, MinecraftStatisticsCollector.collect(client));
             var food = player.getFoodData();
+            var world = WorldCollector.collect(client, level, player);
+            var feet = player.blockPosition();
+            history.observeWorld(millis, world.biome(), world.biomeName(), world.weather(), world.day(),
+                    feet.getX(), feet.getY(), feet.getZ());
+            String dimension = level.dimension().identifier().toString();
+            var crossing = portals.crossing();
+            if (crossing != null && crossing.toDimension().equals(dimension) && ++portalScans % 4 == 0) {
+                portals.lit(WorldCollector.findPortal(level, player, crossing.target()));
+            }
+            var details = new PlayerDetails(world, motion.collect(client, player, icons),
+                    experience.observe(millis, player.experienceLevel, player.experienceProgress), portals.state(),
+                    pickups.pickups(), advancements.collect(client.getConnection(), icons),
+                    worldData.villagers(client, level, icons), worldData.enderChest(client, level, icons));
             telemetry.updatePlayer(
                     millis,
                     (now - sessionStartedNanos) / 1_000_000_000L,
-                    client.level.dimension().identifier().toString(),
+                    dimension,
                     player.getX(), player.getY(), player.getZ(),
                     (double) player.getHealth(), player.getAttributeValue(Attributes.MAX_HEALTH),
                     (double) player.getAbsorptionAmount(), snapshot, counters, history.snapshot(),
                     Math.clamp(food.getFoodLevel(), 0, 20), (double) Math.clamp(food.getSaturationLevel(), 0F, 20F),
-                    effects.collect(player, millis));
+                    effects.collect(player, millis), details);
         } catch (RuntimeException exception) {
             var events = history.snapshot();
             telemetry.markUnavailable(System.currentTimeMillis(),
@@ -211,11 +289,11 @@ public final class MinePanelClient implements ClientModInitializer {
         try {
             LocalDashboardServer server;
             try {
-                server = new LocalDashboardServer(telemetry, LocalDashboardServer.DEFAULT_PORT, icons, layouts);
+                server = new LocalDashboardServer(telemetry, LocalDashboardServer.DEFAULT_PORT, icons, layouts, worldStore);
             } catch (BindException busy) {
                 fixedPortUnavailable = true;
                 LOGGER.warning("Port " + LocalDashboardServer.DEFAULT_PORT + " is in use; MinePanel is using a random port.");
-                server = new LocalDashboardServer(telemetry, 0, icons, layouts);
+                server = new LocalDashboardServer(telemetry, 0, icons, layouts, worldStore);
             }
             server.start();
             dashboard = server;

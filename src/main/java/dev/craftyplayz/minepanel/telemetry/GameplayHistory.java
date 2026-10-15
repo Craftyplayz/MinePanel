@@ -9,7 +9,7 @@ public record GameplayHistory(long sessionId, boolean active, List<Event> events
     public static final int MAX_EVENTS = 500;
     public static final int MAX_DETAILS_LENGTH = 1024;
     public static final List<String> CATEGORIES = List.of("lifecycle", "death", "dimension", "kill", "mine", "place",
-            "container", "inventory", "drop", "damage", "heal", "advancement");
+            "container", "inventory", "drop", "damage", "heal", "advancement", "biome", "weather", "time");
 
     public record Event(long id, long timestamp, String category, String label, String details) {
         public Event {

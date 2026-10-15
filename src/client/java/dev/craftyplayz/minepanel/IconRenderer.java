@@ -64,6 +64,11 @@ final class IconRenderer implements IconSource {
     private record Pending(String key, ItemStack stack, CompletableFuture<byte[]> result) {
     }
 
+    /** Changes whenever icon keys change (resource reload or a full icon cache). */
+    int epoch() {
+        return epoch;
+    }
+
     /** Icon identity: item and components (not count), scoped to the current resource-pack epoch. */
     String keyFor(ItemStack stack) {
         return "e" + epoch + "-" + Integer.toHexString(ItemStack.hashItemAndComponents(stack));

@@ -20,6 +20,8 @@ public final class GameplayTracker {
     static final long DAMAGE_SOURCE_MILLIS = 1_000;
     static final long DEATH_MESSAGE_GRACE_MILLIS = 1_500;
     static final long KILL_ATTRIBUTION_MILLIS = 30_000;
+    /** A biome is only logged once the player has stayed in it this long, so border crossings do not flood the log. */
+    static final long BIOME_SETTLE_MILLIS = 5_000;
 
     private final Consumer<GameplayHistory.Event> archive;
     private long sessionId;
@@ -39,6 +41,13 @@ public final class GameplayTracker {
     private long coalesceCount;
     private double coalesceAmount;
     private final Map<String, ArrayDeque<Long>> attributedKills = new HashMap<>();
+    private String biome;
+    private String biomeName;
+    private String candidateBiome;
+    private String candidateBiomeName;
+    private long candidateSince;
+    private String weather;
+    private Long day;
 
     public GameplayTracker() {
         this(event -> { });
@@ -63,7 +72,60 @@ public final class GameplayTracker {
         events.clear();
         attributedKills.clear();
         coalesceKey = null;
+        biome = null;
+        biomeName = null;
+        candidateBiome = null;
+        weather = null;
+        day = null;
         add(timestamp, "lifecycle", "Session started", "Joined a world/server.");
+    }
+
+    /**
+     * Logs biome changes (after {@link #BIOME_SETTLE_MILLIS} in the new biome), weather changes and new days. The
+     * first observation of a session is the baseline: only the current day is noted.
+     */
+    public void observeWorld(long timestamp, String biomeId, String currentBiomeName, String currentWeather,
+                             long currentDay, int x, int y, int z) {
+        if (!active) return;
+        if (biome == null) {
+            biome = biomeId;
+            biomeName = currentBiomeName;
+            candidateBiome = biomeId;
+            candidateSince = timestamp;
+        } else {
+            if (!biomeId.equals(candidateBiome)) {
+                candidateBiome = biomeId;
+                candidateBiomeName = currentBiomeName;
+                candidateSince = timestamp;
+            }
+            if (!candidateBiome.equals(biome) && timestamp - candidateSince >= BIOME_SETTLE_MILLIS) {
+                add(timestamp, "biome", "Entered " + candidateBiomeName,
+                        "From " + biomeName + " · at " + x + ", " + y + ", " + z);
+                biome = candidateBiome;
+                biomeName = candidateBiomeName;
+            }
+        }
+        if (weather != null && !weather.equals(currentWeather)) {
+            add(timestamp, "weather", weatherLabel(weather, currentWeather), "");
+        }
+        weather = currentWeather;
+        if (day == null) {
+            add(timestamp, "time", "Day " + currentDay, "Current day when joining.");
+        } else if (currentDay > day) {
+            add(timestamp, "time", "Day " + currentDay + " began", currentDay - day > 1
+                    ? "Skipped " + (currentDay - day - 1) + " day" + (currentDay - day > 2 ? "s" : "") : "");
+        } else if (currentDay < day) {
+            add(timestamp, "time", "Time set back to day " + currentDay, "Was day " + day + ".");
+        }
+        day = currentDay;
+    }
+
+    private static String weatherLabel(String before, String after) {
+        return switch (after) {
+            case "thunder" -> "Thunderstorm started";
+            case "rain" -> "thunder".equals(before) ? "Thunderstorm ended; still raining" : "Rain started";
+            default -> "thunder".equals(before) ? "Thunderstorm ended" : "Rain stopped";
+        };
     }
 
     public void disconnect(long timestamp) {

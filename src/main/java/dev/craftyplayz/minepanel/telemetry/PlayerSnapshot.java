@@ -20,8 +20,20 @@ public record PlayerSnapshot(
         GameplayHistory history,
         Integer food,
         Double saturation,
-        List<StatusEffect> effects
+        List<StatusEffect> effects,
+        PlayerDetails details
 ) {
+    public static final int SCHEMA_VERSION = 3;
+
+    public PlayerSnapshot(long revision, long capturedAt, boolean available, Long sessionSeconds, String dimension,
+                          Double x, Double y, Double z, Double health, Double maxHealth, Double absorption,
+                          InventorySnapshot inventory, StatisticsSnapshot statistics, GameplayHistory history,
+                          Integer food, Double saturation, List<StatusEffect> effects) {
+        this(revision, capturedAt, available, sessionSeconds, dimension, x, y, z, health, maxHealth, absorption,
+                inventory, statistics, history, food, saturation, effects,
+                available ? PlayerDetails.placeholder() : null);
+    }
+
     public PlayerSnapshot(long revision, long capturedAt, boolean available, Long sessionSeconds, String dimension,
                           Double x, Double y, Double z, Double health, Double maxHealth, Double absorption,
                           InventorySnapshot inventory, StatisticsSnapshot statistics, GameplayHistory history) {
@@ -61,6 +73,7 @@ public record PlayerSnapshot(
             Objects.requireNonNull(food, "food");
             Objects.requireNonNull(saturation, "saturation");
             Objects.requireNonNull(effects, "effects");
+            Objects.requireNonNull(details, "details");
             if (dimension.length() > 256 || sessionSeconds < 0 || !finite(x, y, z, health, maxHealth, absorption, saturation)
                     || health < 0 || maxHealth < 0 || absorption < 0
                     || food < 0 || food > 20 || saturation < 0 || saturation > 20
@@ -70,7 +83,7 @@ public record PlayerSnapshot(
             effects = List.copyOf(effects);
         } else if (sessionSeconds != null || dimension != null || x != null || y != null || z != null
                 || health != null || maxHealth != null || absorption != null || inventory != null || statistics != null
-                || food != null || saturation != null || effects != null || history.active()) {
+                || food != null || saturation != null || effects != null || details != null || history.active()) {
             throw new IllegalArgumentException("unavailable player values must be null");
         }
     }
@@ -85,7 +98,7 @@ public record PlayerSnapshot(
     }
 
     public String toJson() {
-        return "{\"schemaVersion\":2,\"revision\":" + revision
+        return "{\"schemaVersion\":" + SCHEMA_VERSION + ",\"revision\":" + revision
                 + ",\"capturedAt\":" + capturedAt
                 + ",\"available\":" + available
                 + ",\"sessionSeconds\":" + number(sessionSeconds)
@@ -99,7 +112,13 @@ public record PlayerSnapshot(
                 + ",\"history\":" + history.toJson()
                 + ",\"food\":" + number(food)
                 + ",\"saturation\":" + number(saturation)
-                + ",\"effects\":" + effectsJson() + "}";
+                + ",\"effects\":" + effectsJson() + detailsJson() + "}";
+    }
+
+    private String detailsJson() {
+        StringBuilder json = new StringBuilder();
+        for (String field : PlayerDetails.FIELDS) appendField(json, field, PlayerDetails.fieldJson(details, field));
+        return json.toString();
     }
 
     private String effectsJson() {
@@ -120,7 +139,7 @@ public record PlayerSnapshot(
             String full = toJson();
             return full.substring(0, full.length() - 1) + ",\"baseRevision\":" + previous.revision + "}";
         }
-        StringBuilder json = new StringBuilder("{\"schemaVersion\":2,\"revision\":")
+        StringBuilder json = new StringBuilder("{\"schemaVersion\":" + SCHEMA_VERSION + ",\"revision\":")
                 .append(revision).append(",\"baseRevision\":").append(previous.revision)
                 .append(",\"capturedAt\":").append(capturedAt);
         if (!Objects.equals(sessionSeconds, previous.sessionSeconds)) {
@@ -162,6 +181,11 @@ public record PlayerSnapshot(
         if (!Objects.equals(food, previous.food)) appendField(json, "food", number(food));
         if (!Objects.equals(saturation, previous.saturation)) appendField(json, "saturation", number(saturation));
         if (!Objects.equals(effects, previous.effects)) appendField(json, "effects", effectsJson());
+        for (String field : PlayerDetails.FIELDS) {
+            if (!Objects.equals(PlayerDetails.field(details, field), PlayerDetails.field(previous.details, field))) {
+                appendField(json, field, PlayerDetails.fieldJson(details, field));
+            }
+        }
         return json.append('}').toString();
     }
 
@@ -176,7 +200,8 @@ public record PlayerSnapshot(
                 && Objects.equals(statistics, other.statistics)
                 && Objects.equals(history, other.history)
                 && Objects.equals(food, other.food) && Objects.equals(saturation, other.saturation)
-                && Objects.equals(effects, other.effects);
+                && Objects.equals(effects, other.effects)
+                && Objects.equals(details, other.details);
     }
 
     private static boolean finite(Double... values) {

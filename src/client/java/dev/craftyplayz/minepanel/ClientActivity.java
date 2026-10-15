@@ -1,6 +1,7 @@
 package dev.craftyplayz.minepanel;
 
 import dev.craftyplayz.minepanel.telemetry.GameplayTracker;
+import dev.craftyplayz.minepanel.telemetry.PortalTracker;
 import net.minecraft.advancements.AdvancementType;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
@@ -16,8 +17,26 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.AbstractFurnaceMenu;
+import net.minecraft.world.inventory.AnvilMenu;
+import net.minecraft.world.inventory.BeaconMenu;
+import net.minecraft.world.inventory.BrewingStandMenu;
+import net.minecraft.world.inventory.CartographyTableMenu;
+import net.minecraft.world.inventory.CraftingMenu;
+import net.minecraft.world.inventory.EnchantmentMenu;
+import net.minecraft.world.inventory.GrindstoneMenu;
+import net.minecraft.world.inventory.InventoryMenu;
+import net.minecraft.world.inventory.ItemCombinerMenu;
+import net.minecraft.world.inventory.LoomMenu;
+import net.minecraft.world.inventory.MerchantMenu;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.inventory.SmithingMenu;
+import net.minecraft.world.inventory.SmokerMenu;
+import net.minecraft.world.inventory.StonecutterMenu;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.HashMap;
@@ -32,16 +51,32 @@ import java.util.Map;
  */
 public final class ClientActivity {
     private static final long KILL_WINDOW_MILLIS = 10_000;
+    /** A ground pickup is matched against inventory gains seen while a screen is open for this long. */
+    private static final long GROUND_PICKUP_MILLIS = 2_000;
     private static ClientActivity instance;
     private final GameplayTracker tracker;
+    private final PortalTracker portals;
+    private final PickupSink pickups;
     private final Map<Entity, Long> attacked = new IdentityHashMap<>();
     private Screen openScreen;
     private String openTitle;
     private Map<String, Integer> countsAtOpen;
     private boolean diffPending;
+    private String pickupSource;
+    private Map<ItemKey, Integer> ownCounts;
+    /** Ground pickups not yet matched to an inventory gain (only tracked while a screen is open). */
+    private final Map<ItemKey, int[]> groundPickups = new HashMap<>();
+    private long groundPickupAt;
 
-    ClientActivity(GameplayTracker tracker) {
+    /** Receives items added to the inventory and how they got there. */
+    interface PickupSink {
+        void pickup(String source, ItemStack stack, int count);
+    }
+
+    ClientActivity(GameplayTracker tracker, PortalTracker portals, PickupSink pickups) {
         this.tracker = tracker;
+        this.portals = portals;
+        this.pickups = pickups;
         instance = this;
     }
 
@@ -59,6 +94,20 @@ public final class ClientActivity {
         openScreen = null;
         countsAtOpen = null;
         diffPending = false;
+        ownCounts = null;
+        pickupSource = null;
+        groundPickups.clear();
+    }
+
+    /** The pickup-animation packet for an item entity the local player collected. */
+    public void pickedUp(ItemStack stack, int count) {
+        if (stack.isEmpty() || count <= 0) return;
+        if (ownCounts != null) {
+            // A screen is open, so the inventory diff will see this gain; make sure it is labelled "Picked up".
+            groundPickups.computeIfAbsent(new ItemKey(stack), key -> new int[1])[0] += count;
+            groundPickupAt = now();
+        }
+        pickups.pickup("Picked up", stack, count);
     }
 
     void blockMined(BlockPos pos, BlockState state) {
@@ -70,6 +119,7 @@ public final class ClientActivity {
     public void blockPlaced(Block block, BlockPos pos) {
         tracker.blockPlaced(now(), BuiltInRegistries.BLOCK.getKey(block).toString(), block.getName().getString(),
                 pos.getX(), pos.getY(), pos.getZ());
+        if (block == Blocks.OBSIDIAN) portals.obsidianPlaced(now(), pos.getX(), pos.getY(), pos.getZ());
     }
 
     public void itemDropped(ItemStack stack, int count) {
@@ -109,11 +159,17 @@ public final class ClientActivity {
         if (openTitle.isBlank()) openTitle = "container";
         countsAtOpen = countItems(minecraft.player);
         tracker.containerOpened(now(), openTitle);
+        var menu = ((AbstractContainerScreen<?>) screen).getMenu();
+        pickupSource = pickupSource(screen, menu);
+        ownCounts = ownItems(minecraft.player, menu);
+        groundPickups.clear();
     }
 
     void screenClosed(Screen screen) {
         if (screen != openScreen) return;
         openScreen = null;
+        ownCounts = null;
+        groundPickups.clear();
         // The carried stack returns to the inventory after closing, so compare on the next tick.
         diffPending = true;
     }
@@ -142,6 +198,104 @@ public final class ClientActivity {
             changes.values().removeIf(value -> value == 0);
             tracker.inventoryChanged(now, openTitle, changes);
             countsAtOpen = null;
+        }
+        if (ownCounts != null && openScreen instanceof AbstractContainerScreen<?> screen && minecraft.player != null) {
+            trackGains(minecraft.player, screen.getMenu(), now);
+        }
+    }
+
+    /** Reports items that arrived in the inventory since the last tick while a screen is open. */
+    private void trackGains(Player player, AbstractContainerMenu menu, long now) {
+        if (now - groundPickupAt > GROUND_PICKUP_MILLIS) groundPickups.clear();
+        Map<ItemKey, Integer> current = ownItems(player, menu);
+        for (var entry : current.entrySet()) {
+            int gain = entry.getValue() - ownCounts.getOrDefault(entry.getKey(), 0);
+            if (gain <= 0) continue;
+            int[] ground = groundPickups.get(entry.getKey());
+            if (ground != null) {
+                int matched = Math.min(gain, ground[0]);
+                gain -= matched;
+                ground[0] -= matched;
+                if (ground[0] == 0) groundPickups.remove(entry.getKey());
+            }
+            if (gain > 0) pickups.pickup(pickupSource, entry.getKey().stack, gain);
+        }
+        ownCounts = current;
+    }
+
+    /**
+     * Items the player holds: inventory, armor, offhand, the stack on the cursor and, for crafting-style screens,
+     * the input slots (which hand their items back when the screen closes). Moving items between these never
+     * counts as a gain; taking a result out, or items out of a chest, does.
+     */
+    private static Map<ItemKey, Integer> ownItems(Player player, AbstractContainerMenu menu) {
+        Map<ItemKey, Integer> counts = new HashMap<>();
+        var inventory = player.getInventory();
+        for (int index = 0; index < 36; index++) addOwn(counts, inventory.getItem(index));
+        for (EquipmentSlot slot : new EquipmentSlot[] {EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS,
+                EquipmentSlot.FEET, EquipmentSlot.OFFHAND}) {
+            addOwn(counts, player.getItemBySlot(slot));
+        }
+        addOwn(counts, menu.getCarried());
+        if (isWorkspace(menu)) {
+            for (Slot slot : menu.slots) {
+                ItemStack stack = slot.getItem();
+                // A slot that would not accept the item it holds is an output slot (crafting result, trade, ...).
+                if (slot.container != inventory && !stack.isEmpty() && slot.mayPlace(stack)) addOwn(counts, stack);
+            }
+        }
+        return counts;
+    }
+
+    /** Screens whose input slots start empty and return their items on close (unlike chests and furnaces). */
+    private static boolean isWorkspace(AbstractContainerMenu menu) {
+        return menu instanceof InventoryMenu || menu instanceof CraftingMenu || menu instanceof MerchantMenu
+                || menu instanceof ItemCombinerMenu || menu instanceof GrindstoneMenu || menu instanceof StonecutterMenu
+                || menu instanceof LoomMenu || menu instanceof CartographyTableMenu || menu instanceof EnchantmentMenu
+                || menu instanceof BeaconMenu;
+    }
+
+    /** How an item that arrives while this screen is open was added to the inventory. */
+    private static String pickupSource(Screen screen, AbstractContainerMenu menu) {
+        if (screen instanceof CreativeModeInventoryScreen) return "Creative inventory";
+        if (menu instanceof InventoryMenu || menu instanceof CraftingMenu) return "Crafted";
+        if (menu instanceof SmokerMenu) return "Cooked";
+        if (menu instanceof AbstractFurnaceMenu) return "Smelted";
+        if (menu instanceof MerchantMenu) return "Traded";
+        if (menu instanceof AnvilMenu) return "Anvil";
+        if (menu instanceof SmithingMenu) return "Smithing table";
+        if (menu instanceof GrindstoneMenu) return "Grindstone";
+        if (menu instanceof StonecutterMenu) return "Stonecutter";
+        if (menu instanceof LoomMenu) return "Loom";
+        if (menu instanceof CartographyTableMenu) return "Cartography table";
+        if (menu instanceof EnchantmentMenu) return "Enchanted";
+        if (menu instanceof BrewingStandMenu) return "Brewed";
+        String title = screen.getTitle().getString();
+        return "from " + (title.isBlank() ? "container" : title.length() > 200 ? title.substring(0, 200) : title);
+    }
+
+    private static void addOwn(Map<ItemKey, Integer> counts, ItemStack stack) {
+        if (!stack.isEmpty()) counts.merge(new ItemKey(stack), stack.getCount(), Integer::sum);
+    }
+
+    /** An item kind: the item and its components, ignoring the count. */
+    static final class ItemKey {
+        final ItemStack stack;
+        private final int hash;
+
+        ItemKey(ItemStack stack) {
+            this.stack = stack.copyWithCount(1);
+            hash = ItemStack.hashItemAndComponents(stack);
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            return other instanceof ItemKey that && hash == that.hash && ItemStack.isSameItemSameComponents(stack, that.stack);
+        }
+
+        @Override
+        public int hashCode() {
+            return hash;
         }
     }
 

@@ -19,14 +19,14 @@ public final class InventorySnapshotTest {
         ItemSnapshot empty = ItemSnapshot.emptyItem();
         check(empty.toJson().equals("{\"empty\":true,\"itemId\":null,\"name\":null,\"count\":0,\"maxCount\":0,"
                 + "\"damage\":null,\"maxDamage\":null,\"remainingDurability\":null,\"enchantments\":[],"
-                + "\"icon\":null,\"foil\":false,\"tooltip\":[]}"),
+                + "\"icon\":null,\"foil\":false,\"tooltip\":[],\"contents\":null}"),
                 "empty items have explicit null/zero metadata");
         var name = new ItemSnapshot.TooltipSegment("Sharp \"Sword\"", "#55ffff", "bi");
         var lore = new ItemSnapshot.TooltipSegment("Lore", null, "");
         ItemSnapshot styled = new ItemSnapshot(false, "minecraft:diamond_sword", "Sword", 1, 1, null, null,
                 List.of(), "e0-1a2b", true, List.of(List.of(name), List.of(), List.of(lore)));
         check(styled.toJson().endsWith("\"icon\":\"e0-1a2b\",\"foil\":true,\"tooltip\":[[{\"text\":\"Sharp \\\"Sword\\\"\","
-                        + "\"color\":\"#55ffff\",\"format\":\"bi\"}],[],[{\"text\":\"Lore\",\"color\":null,\"format\":\"\"}]]}"),
+                        + "\"color\":\"#55ffff\",\"format\":\"bi\"}],[],[{\"text\":\"Lore\",\"color\":null,\"format\":\"\"}]],\"contents\":null}"),
                 "icon key, glint and styled tooltip lines serialized");
         invalid(() -> new ItemSnapshot(true, null, null, 0, 0, null, null, List.of(), "e0-1", false, List.of()));
         invalid(() -> new ItemSnapshot(false, "minecraft:stone", "Stone", 1, 64, null, null, List.of(),

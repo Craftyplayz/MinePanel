@@ -196,9 +196,9 @@ public final class StatisticsAndHistoryTest {
         var stats = tracker.sample(100, List.of(jump(2), deaths(1)));
         check(update(store, 100, stats, history.snapshot()), "initial extended snapshot");
         PlayerSnapshot first = store.player();
-        check(first.toJson().contains("\"schemaVersion\":2") && first.toJson().contains("\"statistics\":{\"entries\":[")
+        check(first.toJson().contains("\"schemaVersion\":3") && first.toJson().contains("\"statistics\":{\"entries\":[")
                 && first.toJson().contains("\"history\":{\"sessionId\":1")
-                && first.toJson().endsWith("\"food\":20,\"saturation\":5.0,\"effects\":[]}"), "full fields serialized");
+                && first.toJson().contains("\"food\":20,\"saturation\":5.0,\"effects\":[],\"world\":{"), "full fields serialized");
         check(!update(store, 101, stats, history.snapshot()), "unchanged snapshot suppressed");
         var changed = tracker.sample(102, List.of(jump(4), deaths(1)));
         update(store, 102, changed, history.snapshot());

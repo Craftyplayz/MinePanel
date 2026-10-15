@@ -4,8 +4,9 @@
 
 const equipmentKeys = ["head", "chest", "legs", "feet", "offhand", "mainhand"];
 const historyCategories = ["lifecycle", "death", "dimension", "kill", "mine", "place",
-  "container", "inventory", "drop", "damage", "heal", "advancement"];
+  "container", "inventory", "drop", "damage", "heal", "advancement", "biome", "weather", "time"];
 const MAX_HISTORY_EVENTS = 500;
+const SCHEMA_VERSION = 3;
 
 const has = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -33,7 +34,16 @@ function validateTooltip(tooltip) {
   });
 }
 
-function validateItem(item) {
+/** Shulker boxes and bundles list what they hold (one level deep); other items have null contents. */
+function validateItem(item, nested = false) {
+  requireValid(object(item) && (item.contents === undefined || item.contents === null
+    || !nested && Array.isArray(item.contents) && item.contents.length <= 64));
+  const contents = Array.isArray(item.contents) ? item.contents.map(inner => validateItem(inner, true)) : null;
+  requireValid(!item.empty || contents === null);
+  return { ...validateItemFields(item), contents };
+}
+
+function validateItemFields(item) {
   requireValid(object(item) && typeof item.empty === "boolean"
     && (item.itemId === null || typeof item.itemId === "string")
     && (item.name === null || typeof item.name === "string")
@@ -195,8 +205,152 @@ function applyHistory(previous, patch) {
   return validateHistory({ sessionId: patch.sessionId, active: patch.active, events: merged });
 }
 
+// ------------------------------------------------------------------------------- World, motion and other details
+
+const DETAIL_FIELDS = ["world", "motion", "xp", "portal", "pickups", "advancements", "villagers", "enderChest"];
+const WEATHER = ["clear", "rain", "thunder"];
+const GAME_MODES = ["survival", "creative", "adventure", "spectator"];
+const MOTION_MODES = ["ground", "elytra", "swimming", "riding", "flying", "falling"];
+const XP_WINDOWS = [10, 30, 60, 300, 600, 3600];
+const whole = value => Number.isSafeInteger(value);
+const filledItem = value => { const item = validateItem(value); requireValid(!item.empty); return item; };
+
+function validateWorld(world) {
+  requireValid(object(world) && ["server", "singleplayer"].includes(world.kind) && validText(world.name)
+    && validIdentifier(world.biome) && validText(world.biomeName) && WEATHER.includes(world.weather)
+    && integer(world.day) && integer(world.time) && world.time < 24000 && GAME_MODES.includes(world.gameMode));
+  return { kind: world.kind, name: world.name, biome: world.biome, biomeName: world.biomeName,
+    weather: world.weather, day: world.day, time: world.time, gameMode: world.gameMode };
+}
+
+function validateMotion(motion) {
+  requireValid(object(motion) && MOTION_MODES.includes(motion.mode)
+    && ["speed", "horizontalSpeed"].every(key => finite(motion[key]) && motion[key] >= 0)
+    && finite(motion.verticalSpeed) && finite(motion.yaw) && motion.yaw >= 0 && motion.yaw < 360
+    && finite(motion.pitch) && motion.pitch >= -90 && motion.pitch <= 90);
+  return { mode: motion.mode, speed: motion.speed, horizontalSpeed: motion.horizontalSpeed,
+    verticalSpeed: motion.verticalSpeed, yaw: motion.yaw, pitch: motion.pitch, icon: filledItem(motion.icon),
+    glider: motion.glider === null ? null : filledItem(motion.glider) };
+}
+
+function validateXp(xp) {
+  requireValid(object(xp) && integer(xp.level) && finite(xp.progress) && xp.progress >= 0 && xp.progress <= 1
+    && integer(xp.points) && object(xp.gained) && XP_WINDOWS.every(window => integer(xp.gained[window])));
+  return { level: xp.level, progress: xp.progress, points: xp.points,
+    gained: Object.fromEntries(XP_WINDOWS.map(window => [window, xp.gained[window]])) };
+}
+
+function validatePoint(point) {
+  requireValid(object(point) && whole(point.x) && whole(point.y) && whole(point.z));
+  return { x: point.x, y: point.y, z: point.z };
+}
+
+function validatePortal(portal) {
+  const dimensions = ["minecraft:overworld", "minecraft:the_nether"];
+  requireValid(object(portal) && Array.isArray(portal.obsidian) && portal.obsidian.length <= 16);
+  let crossing = null;
+  if (portal.crossing !== null) {
+    const value = portal.crossing;
+    requireValid(object(value) && integer(value.id) && value.id > 0 && integer(value.at)
+      && dimensions.includes(value.fromDimension) && dimensions.includes(value.toDimension)
+      && value.fromDimension !== value.toDimension);
+    crossing = { id: value.id, at: value.at, fromDimension: value.fromDimension, from: validatePoint(value.from),
+      toDimension: value.toDimension, to: validatePoint(value.to), target: validatePoint(value.target) };
+  }
+  const obsidian = portal.obsidian.map(block => {
+    requireValid(object(block) && integer(block.id) && block.id > 0 && integer(block.at));
+    return { id: block.id, at: block.at, ...validatePoint(block) };
+  });
+  return { crossing, obsidian, lit: portal.lit === null ? null : validatePoint(portal.lit) };
+}
+
+function validatePickups(pickups) {
+  requireValid(Array.isArray(pickups) && pickups.length <= 32);
+  return pickups.map(pickup => {
+    requireValid(object(pickup) && integer(pickup.id) && pickup.id > 0 && integer(pickup.at)
+      && validText(pickup.source) && integer(pickup.count) && pickup.count > 0);
+    return { id: pickup.id, at: pickup.at, source: pickup.source, item: filledItem(pickup.item), count: pickup.count };
+  });
+}
+
+const validIcon = value => value === null || typeof value === "string" && /^[a-z0-9-]{1,64}$/.test(value);
+
+function validateAdvancements(advancements) {
+  if (advancements === null) return null;
+  requireValid(object(advancements) && Array.isArray(advancements.tabs) && advancements.tabs.length <= 2048
+    && Array.isArray(advancements.entries) && advancements.entries.length <= 2048);
+  const tabs = advancements.tabs.map(tab => {
+    requireValid(object(tab) && validIdentifier(tab.id) && validText(tab.title) && validIcon(tab.icon)
+      && typeof tab.foil === "boolean" && integer(tab.done) && integer(tab.total) && tab.done <= tab.total);
+    return { id: tab.id, title: tab.title, icon: tab.icon, foil: tab.foil, done: tab.done, total: tab.total };
+  });
+  const entries = advancements.entries.map(entry => {
+    requireValid(object(entry) && validIdentifier(entry.id) && validIdentifier(entry.tab) && validText(entry.title)
+      && typeof entry.description === "string" && entry.description.length <= 1024
+      && ["task", "goal", "challenge"].includes(entry.frame) && validIcon(entry.icon)
+      && ["foil", "hidden", "done"].every(key => typeof entry[key] === "boolean")
+      && (entry.doneAt === null || integer(entry.doneAt)) && integer(entry.criteriaDone)
+      && integer(entry.criteriaTotal) && entry.criteriaDone <= entry.criteriaTotal
+      && Array.isArray(entry.remaining) && entry.remaining.length <= 256
+      && entry.remaining.every(name => validText(name)));
+    return { id: entry.id, tab: entry.tab, title: entry.title, description: entry.description, frame: entry.frame,
+      icon: entry.icon, foil: entry.foil, hidden: entry.hidden, done: entry.done, doneAt: entry.doneAt,
+      criteriaDone: entry.criteriaDone, criteriaTotal: entry.criteriaTotal, remaining: [...entry.remaining] };
+  });
+  return { tabs, entries };
+}
+
+function validateVillagers(villagers) {
+  requireValid(Array.isArray(villagers) && villagers.length <= 512);
+  return villagers.map(villager => {
+    requireValid(object(villager) && typeof villager.uuid === "string"
+      && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(villager.uuid)
+      && validIdentifier(villager.profession) && validText(villager.professionName)
+      && integer(villager.level) && villager.level >= 1 && villager.level <= 5
+      && (villager.name === null || validText(villager.name)) && validIdentifier(villager.dimension)
+      && ["x", "y", "z"].every(key => finite(villager[key])) && integer(villager.seenAt) && integer(villager.tradedAt)
+      && Array.isArray(villager.trades) && villager.trades.length <= 32);
+    const trades = villager.trades.map(trade => {
+      requireValid(object(trade) && integer(trade.uses) && integer(trade.maxUses));
+      return { costA: filledItem(trade.costA), costB: trade.costB === null ? null : filledItem(trade.costB),
+        result: filledItem(trade.result), uses: trade.uses, maxUses: trade.maxUses };
+    });
+    return { uuid: villager.uuid, profession: villager.profession, professionName: villager.professionName,
+      level: villager.level, name: villager.name, dimension: villager.dimension, x: villager.x, y: villager.y,
+      z: villager.z, seenAt: villager.seenAt, tradedAt: villager.tradedAt, trades };
+  });
+}
+
+function validateEnderChest(chest) {
+  if (chest === null) return null;
+  requireValid(object(chest) && integer(chest.seenAt) && Array.isArray(chest.slots) && chest.slots.length === 27);
+  return { seenAt: chest.seenAt, slots: chest.slots.map(slot => validateItem(slot)) };
+}
+
+/** Validates the detail fields: required while in a world (advancements and ender chest may be null), else null. */
+function validateDetails(state) {
+  requireValid(DETAIL_FIELDS.every(key => has(state, key)));
+  if (!state.available) {
+    requireValid(DETAIL_FIELDS.every(key => state[key] === null));
+    return Object.fromEntries(DETAIL_FIELDS.map(key => [key, null]));
+  }
+  const validators = { world: validateWorld, motion: validateMotion, xp: validateXp, portal: validatePortal,
+    pickups: validatePickups, advancements: validateAdvancements, villagers: validateVillagers,
+    enderChest: validateEnderChest };
+  return Object.fromEntries(DETAIL_FIELDS.map(key => {
+    const value = state[key];
+    // Deltas carry over unchanged fields from the previous state, which were validated when they arrived.
+    if (value !== null && typeof value === "object" && validatedDetails.has(value)) return [key, value];
+    const result = validators[key](value);
+    if (result !== null) validatedDetails.add(result);
+    return [key, result];
+  }));
+}
+
+const validatedDetails = new WeakSet();
+
 function validatePlayer(state) {
-  requireValid(object(state) && state.schemaVersion === 2 && integer(state.revision)
+  requireValid(object(state) && state.schemaVersion === SCHEMA_VERSION && integer(state.revision)
     && integer(state.capturedAt) && typeof state.available === "boolean" && object(state.position)
     && has(state, "inventory") && has(state, "statistics") && has(state, "history")
     && has(state, "food") && has(state, "saturation") && has(state, "effects"));
@@ -214,13 +368,13 @@ function validatePlayer(state) {
   }
   return { ...state, inventory: validateInventory(state.inventory),
     statistics: validateStatistics(state.statistics), history: validateHistory(state.history),
-    effects: validateEffects(state.effects) };
+    effects: validateEffects(state.effects), ...validateDetails(state) };
 }
 
 function applyMessage(previous, message) {
-  requireValid(object(message) && message.schemaVersion === 2
+  requireValid(object(message) && message.schemaVersion === SCHEMA_VERSION
     && ["initial", "update"].includes(message.type) && object(message.state)
-    && message.state.schemaVersion === 2);
+    && message.state.schemaVersion === SCHEMA_VERSION);
   const state = message.state;
   if (message.type === "initial") {
     requireValid(!previous);

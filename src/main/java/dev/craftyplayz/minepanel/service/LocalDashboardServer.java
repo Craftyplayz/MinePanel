@@ -32,13 +32,19 @@ public final class LocalDashboardServer implements AutoCloseable {
             "/app.js", new String[] {"web/app.js", "text/javascript; charset=utf-8"},
             "/protocol.js", new String[] {"web/protocol.js", "text/javascript; charset=utf-8"},
             "/layout.js", new String[] {"web/layout.js", "text/javascript; charset=utf-8"},
+            "/rules.js", new String[] {"web/rules.js", "text/javascript; charset=utf-8"},
+            "/features.js", new String[] {"web/features.js", "text/javascript; charset=utf-8"},
+            "/features.css", new String[] {"web/features.css", "text/css; charset=utf-8"},
             "/styles.css", new String[] {"web/styles.css", "text/css; charset=utf-8"});
+    private static final Pattern VILLAGER_PATH = Pattern.compile(
+            "/api/villagers/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})");
     private final HttpServer server;
     private final ExecutorService executor;
     private final String token;
     private final TelemetryStore telemetry;
     private final IconSource icons;
     private final LayoutStore layouts;
+    private final WorldStore worlds;
     private final LocalWebSocketServer webSocketServer;
 
     public LocalDashboardServer() throws IOException {
@@ -52,9 +58,16 @@ public final class LocalDashboardServer implements AutoCloseable {
     /** @param port the loopback HTTP port, or 0 for an ephemeral port */
     public LocalDashboardServer(TelemetryStore telemetry, int port, IconSource icons, LayoutStore layouts)
             throws IOException {
+        this(telemetry, port, icons, layouts, null);
+    }
+
+    /** @param worlds per-world saved data the dashboard may edit (forgetting villagers), or null */
+    public LocalDashboardServer(TelemetryStore telemetry, int port, IconSource icons, LayoutStore layouts,
+                                WorldStore worlds) throws IOException {
         this.telemetry = telemetry;
         this.icons = icons;
         this.layouts = layouts;
+        this.worlds = worlds;
         byte[] tokenBytes = new byte[32];
         new SecureRandom().nextBytes(tokenBytes);
         token = HexFormat.of().formatHex(tokenBytes);
@@ -108,6 +121,11 @@ public final class LocalDashboardServer implements AutoCloseable {
             String method = exchange.getRequestMethod();
             if ("/api/layout".equals(path) && "PUT".equals(method)) {
                 saveLayout(exchange);
+                return;
+            }
+            var villager = VILLAGER_PATH.matcher(path);
+            if (villager.matches() && "DELETE".equals(method)) {
+                forgetVillager(exchange, villager.group(1));
                 return;
             }
             if (!"GET".equals(method)) {
@@ -208,6 +226,21 @@ public final class LocalDashboardServer implements AutoCloseable {
         respond(exchange, 200, "application/json; charset=utf-8", "{\"saved\":true}");
     }
 
+    /** Removes a remembered villager; same protections as saving the layout (session cookie, same-origin request). */
+    private void forgetVillager(HttpExchange exchange, String uuid) throws IOException {
+        if (!cookieAuthorized(exchange) || exchange.getRequestHeaders().getFirst("Origin") == null) {
+            respond(exchange, 403, "application/json; charset=utf-8", "{\"error\":\"forbidden\"}");
+            return;
+        }
+        if (worlds == null) {
+            respond(exchange, 503, "application/json; charset=utf-8", "{\"error\":\"world data unavailable\"}");
+            return;
+        }
+        boolean removed = worlds.forgetVillager(uuid);
+        exchange.getResponseHeaders().set("Cache-Control", "no-store");
+        respond(exchange, removed ? 200 : 404, "application/json; charset=utf-8", "{\"removed\":" + removed + "}");
+    }
+
     private void serveIcon(HttpExchange exchange, String key) throws IOException {
         byte[] png;
         try {
@@ -283,7 +316,7 @@ public final class LocalDashboardServer implements AutoCloseable {
         if (version == null) {
             version = "development";
         }
-        return "{\"schemaVersion\":2,\"service\":\"connected\",\"game\":"
+        return "{\"schemaVersion\":" + dev.craftyplayz.minepanel.telemetry.PlayerSnapshot.SCHEMA_VERSION + ",\"service\":\"connected\",\"game\":"
                 + (player.available() ? "\"connected\"" : "\"unavailable\"")
                 + ",\"modVersion\":\"" + version + "\","
                 + "\"message\":\"Player state is read-only and session scoped.\","

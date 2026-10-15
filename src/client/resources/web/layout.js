@@ -2,17 +2,38 @@
 
 // Pure tile-layout model: a 12-column grid of whole cells. Tiles never overlap; after a move or resize the
 // other enabled tiles fall upward into the highest free space, keeping their relative order.
+//
+// The top-level tiles and settings are the "Default" profile. Optional profiles are other named layouts; rules
+// (evaluated in rules.js) switch profile, show or hide tiles and override settings based on what happens in game.
+// A "rules-only" tile keeps its place in the grid but stays hidden until a rule shows it, so nothing moves.
 
 const LAYOUT_COLUMNS = 12;
 const LAYOUT_MAX_Y = 1000;
 const LAYOUT_MAX_H = 60;
-const TILE_IDS = ["player", "inventory", "statistics", "history", "map", "build"];
+const TILE_IDS = ["player", "inventory", "statistics", "history", "map", "build",
+  "movement", "xp", "pickups", "advancements", "villagers"];
 const TILE_MINIMUMS = {
   player: { w: 2, h: 2 }, inventory: { w: 3, h: 2 }, statistics: { w: 2, h: 3 },
-  history: { w: 3, h: 3 }, map: { w: 2, h: 2 }, build: { w: 2, h: 2 }
+  history: { w: 3, h: 3 }, map: { w: 2, h: 2 }, build: { w: 2, h: 2 },
+  movement: { w: 2, h: 2 }, xp: { w: 2, h: 2 }, pickups: { w: 2, h: 2 }, advancements: { w: 3, h: 3 },
+  villagers: { w: 3, h: 3 }
 };
 const MAX_STATISTIC_SETTINGS = 512;
 const DEFAULT_MAP_URL = "http://127.0.0.1:8080/";
+const XP_WINDOW_CHOICES = [10, 30, 60, 300, 600, 3600];
+const MAX_PROFILES = 16;
+const MAX_RULES = 64;
+const MAX_RULE_GROUPS = 8;
+const MAX_GROUP_CONDITIONS = 8;
+const MAX_CONDITION_VALUES = 32;
+const MAX_PINNED = 16;
+const PIN_SOURCES = ["inventory", "enderchest", "enderchest-item"];
+/** Condition types and what they take: a list of values, a min/max range, a duration, or nothing. */
+const CONDITION_TYPES = {
+  world: "values", dimension: "values", biome: "values", time: "values", gameMode: "values",
+  health: "range", food: "range", saturation: "range", effect: "values", movement: "values",
+  elytra: "none", advancement: "seconds", combat: "seconds"
+};
 const custom = name => `minecraft:custom/minecraft:${name}`;
 
 function defaultSettings() {
@@ -23,7 +44,11 @@ function defaultSettings() {
       // Timers tick constantly, so they would always be "recent".
       recentExcluded: ["play_time", "total_world_time", "time_since_death", "time_since_rest", "sneak_time"].map(custom)
     },
-    map: { url: DEFAULT_MAP_URL }
+    map: { url: DEFAULT_MAP_URL },
+    movement: { showVertical: true, showGlider: true },
+    xp: { window: 60 },
+    pickups: { lifetime: 30, maxRows: 8, showSource: true, ignored: [] },
+    advancements: { popupSeconds: 10 }
   };
 }
 
@@ -32,29 +57,52 @@ const validMapUrl = value => typeof value === "string" && value.length <= 200
 const validStatisticIds = value => Array.isArray(value) && value.length <= MAX_STATISTIC_SETTINGS
   && value.every(id => typeof id === "string" && id.length <= 256
     && /^[a-z0-9_.-]+:[a-z0-9_.-]+\/[a-z0-9_.-]+:[a-z0-9/._-]+$/.test(id));
+const validItemIds = value => Array.isArray(value) && value.length <= 64
+  && value.every(id => typeof id === "string" && id.length <= 256 && /^[a-z0-9_.-]+:[a-z0-9/._-]+$/.test(id));
+const isObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
+const wholeIn = (value, min, max) => Number.isSafeInteger(value) && value >= min && value <= max;
+
+/** Each known setting: its tile, key and validity check. */
+const SETTING_RULES = [
+  ["inventory", "showArmor", value => typeof value === "boolean"],
+  ["statistics", "shown", validStatisticIds],
+  ["statistics", "recentExcluded", validStatisticIds],
+  ["map", "url", validMapUrl],
+  ["movement", "showVertical", value => typeof value === "boolean"],
+  ["movement", "showGlider", value => typeof value === "boolean"],
+  ["xp", "window", value => XP_WINDOW_CHOICES.includes(value)],
+  ["pickups", "lifetime", value => wholeIn(value, 0, 3600)],
+  ["pickups", "maxRows", value => wholeIn(value, 1, 32)],
+  ["pickups", "showSource", value => typeof value === "boolean"],
+  ["pickups", "ignored", validItemIds],
+  ["advancements", "popupSeconds", value => wholeIn(value, 0, 300)]
+];
+
+/** Copies only known, valid settings out of {@code value}; rejects present-but-malformed ones. */
+function partialSettings(value) {
+  if (value === undefined) return {};
+  if (!isObject(value)) throw new Error("Invalid settings");
+  const result = {};
+  for (const [tile, key, valid] of SETTING_RULES) {
+    if (value[tile] !== undefined && !isObject(value[tile])) throw new Error(`Invalid ${tile} settings`);
+    const setting = value[tile]?.[key];
+    if (setting === undefined) continue;
+    if (!valid(setting)) throw new Error(`Invalid ${tile} settings`);
+    result[tile] = { ...result[tile], [key]: Array.isArray(setting) ? [...new Set(setting)] : setting };
+  }
+  return result;
+}
 
 /** Fills missing settings with defaults; rejects present-but-malformed ones. */
 function normalizeSettings(value) {
-  const settings = defaultSettings();
-  if (value === undefined) return settings;
-  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid settings");
-  const showArmor = value.inventory?.showArmor;
-  if (showArmor !== undefined) {
-    if (typeof showArmor !== "boolean") throw new Error("Invalid inventory settings");
-    settings.inventory.showArmor = showArmor;
-  }
-  for (const key of ["shown", "recentExcluded"]) {
-    const ids = value.statistics?.[key];
-    if (ids === undefined) continue;
-    if (!validStatisticIds(ids)) throw new Error("Invalid statistics settings");
-    settings.statistics[key] = [...new Set(ids)];
-  }
-  const url = value.map?.url;
-  if (url !== undefined) {
-    if (!validMapUrl(url)) throw new Error("Invalid map settings");
-    settings.map.url = url;
-  }
-  return settings;
+  return mergeSettings(defaultSettings(), partialSettings(value));
+}
+
+/** Applies partial overrides (from a rule) on top of complete settings. */
+function mergeSettings(settings, overrides) {
+  const result = { ...settings };
+  for (const [tile, values] of Object.entries(overrides ?? {})) result[tile] = { ...result[tile], ...values };
+  return result;
 }
 
 function defaultLayout() {
@@ -63,35 +111,200 @@ function defaultLayout() {
     { id: "inventory", enabled: true, x: 4, y: 0, w: 8, h: 8 },
     { id: "statistics", enabled: true, x: 0, y: 4, w: 4, h: 9 },
     { id: "history", enabled: true, x: 4, y: 8, w: 8, h: 9 },
-    { id: "map", enabled: false, x: 0, y: 17, w: 6, h: 6 },
-    { id: "build", enabled: false, x: 6, y: 17, w: 6, h: 4 }
-  ] };
+    { id: "movement", enabled: true, x: 0, y: 13, w: 4, h: 4 },
+    { id: "xp", enabled: true, x: 0, y: 17, w: 4, h: 4 },
+    { id: "pickups", enabled: true, x: 4, y: 17, w: 4, h: 6 },
+    { id: "advancements", enabled: true, x: 8, y: 17, w: 4, h: 8 },
+    { id: "villagers", enabled: true, x: 0, y: 25, w: 8, h: 8 },
+    { id: "map", enabled: false, x: 0, y: 33, w: 6, h: 6 },
+    { id: "build", enabled: false, x: 6, y: 33, w: 6, h: 4 }
+  ], profiles: [], rules: [], pinned: [] };
 }
 
 const wholeNumber = value => Number.isSafeInteger(value);
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+const validId = value => typeof value === "string" && /^[a-z0-9-]{1,32}$/.test(value);
+const validName = (value, max = 64) => typeof value === "string" && value.length > 0 && value.length <= max;
 
-/** Validates untrusted layout JSON (stored config or an imported file) and fills in any missing tiles. */
-function normalizeLayout(value) {
-  if (value === null || typeof value !== "object" || value.version !== 1 || !Array.isArray(value.tiles)
-    || value.tiles.length > TILE_IDS.length) {
-    throw new Error("Invalid layout");
-  }
+/** Validates a profile's tile list and fills in any missing tiles (disabled, below the others). */
+function normalizeTiles(value) {
+  if (!Array.isArray(value) || value.length > TILE_IDS.length) throw new Error("Invalid layout");
   const seen = new Set();
-  const tiles = value.tiles.map(tile => {
+  const tiles = value.map(tile => {
     if (tile === null || typeof tile !== "object" || !TILE_IDS.includes(tile.id) || seen.has(tile.id)
-      || typeof tile.enabled !== "boolean" || !["x", "y", "w", "h"].every(key => wholeNumber(tile[key]))) {
+      || typeof tile.enabled !== "boolean" || !["x", "y", "w", "h"].every(key => wholeNumber(tile[key]))
+      || tile.rulesOnly !== undefined && typeof tile.rulesOnly !== "boolean") {
       throw new Error("Invalid layout tile");
     }
     seen.add(tile.id);
-    return resize({ id: tile.id, enabled: tile.enabled, x: tile.x, y: tile.y, w: tile.w, h: tile.h });
+    const result = { id: tile.id, enabled: tile.enabled, x: tile.x, y: tile.y, w: tile.w, h: tile.h };
+    if (tile.rulesOnly) result.rulesOnly = true;
+    return resize(result);
   });
   const bottom = tiles.reduce((max, tile) => Math.max(max, tile.y + tile.h), 0);
   for (const fallback of defaultLayout().tiles) {
     if (!seen.has(fallback.id)) tiles.push({ ...fallback, enabled: false, y: bottom });
   }
-  return { version: 1, settings: normalizeSettings(value.settings), tiles: settle(tiles, null) };
+  return settle(tiles, null);
 }
+
+function normalizeCondition(value) {
+  if (!isObject(value) || !Object.hasOwn(CONDITION_TYPES, value.type)) throw new Error("Invalid condition");
+  const condition = { type: value.type };
+  if (value.not !== undefined && typeof value.not !== "boolean") throw new Error("Invalid condition");
+  if (value.not) condition.not = true;
+  if (value.values !== undefined) {
+    if (!Array.isArray(value.values) || value.values.length > MAX_CONDITION_VALUES
+      || !value.values.every(entry => validName(entry, 128))) {
+      throw new Error("Invalid condition values");
+    }
+    condition.values = [...value.values];
+  }
+  for (const key of ["min", "max"]) {
+    if (value[key] === undefined) continue;
+    if (typeof value[key] !== "number" || !Number.isFinite(value[key]) || value[key] < 0 || value[key] > 1024) {
+      throw new Error("Invalid condition range");
+    }
+    condition[key] = value[key];
+  }
+  if (value.seconds !== undefined) {
+    if (!wholeIn(value.seconds, 1, 3600)) throw new Error("Invalid condition duration");
+    condition.seconds = value.seconds;
+  }
+  return condition;
+}
+
+/** A rule matches when every group has at least one matching condition: (1) and (2 or 3). */
+function normalizeRule(value, profileIds) {
+  if (!isObject(value) || !validId(value.id) || !validName(value.name) || typeof value.enabled !== "boolean"
+    || !Array.isArray(value.groups) || value.groups.length > MAX_RULE_GROUPS) {
+    throw new Error("Invalid rule");
+  }
+  const groups = value.groups.map(group => {
+    if (!Array.isArray(group) || group.length === 0 || group.length > MAX_GROUP_CONDITIONS) {
+      throw new Error("Invalid rule group");
+    }
+    return group.map(normalizeCondition);
+  });
+  const rule = { id: value.id, name: value.name, enabled: value.enabled, groups };
+  if (value.profile !== undefined && value.profile !== null) {
+    if (!profileIds.has(value.profile)) throw new Error("Rule names an unknown profile");
+    rule.profile = value.profile;
+  }
+  if (value.tiles !== undefined) {
+    if (!isObject(value.tiles) || !Object.entries(value.tiles)
+      .every(([id, action]) => TILE_IDS.includes(id) && ["show", "hide"].includes(action))) {
+      throw new Error("Invalid rule tiles");
+    }
+    rule.tiles = { ...value.tiles };
+  }
+  if (value.settings !== undefined) rule.settings = partialSettings(value.settings);
+  return rule;
+}
+
+function normalizePinned(value) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > MAX_PINNED) throw new Error("Invalid pinned windows");
+  return value.map(window => {
+    if (!isObject(window) || !PIN_SOURCES.includes(window.source) || !wholeIn(window.slot, 0, 40)
+      || !wholeIn(window.x, 0, 10000) || !wholeIn(window.y, 0, 10000)) {
+      throw new Error("Invalid pinned window");
+    }
+    return { source: window.source, slot: window.slot, x: window.x, y: window.y };
+  });
+}
+
+/** Validates untrusted layout JSON (stored config or an imported file) and fills in any missing tiles. */
+function normalizeLayout(value) {
+  if (value === null || typeof value !== "object" || value.version !== 1) throw new Error("Invalid layout");
+  const tiles = normalizeTiles(value.tiles);
+  const profileIds = new Set(["default"]);
+  if (value.profiles !== undefined && (!Array.isArray(value.profiles) || value.profiles.length > MAX_PROFILES)) {
+    throw new Error("Invalid profiles");
+  }
+  const profiles = (value.profiles ?? []).map(profile => {
+    if (!isObject(profile) || !validId(profile.id) || profileIds.has(profile.id) || !validName(profile.name)) {
+      throw new Error("Invalid profile");
+    }
+    profileIds.add(profile.id);
+    return { id: profile.id, name: profile.name, tiles: normalizeTiles(profile.tiles),
+      settings: normalizeSettings(profile.settings) };
+  });
+  if (value.rules !== undefined && (!Array.isArray(value.rules) || value.rules.length > MAX_RULES)) {
+    throw new Error("Invalid rules");
+  }
+  const ruleIds = new Set();
+  const rules = (value.rules ?? []).map(rule => {
+    const normalized = normalizeRule(rule, profileIds);
+    if (ruleIds.has(normalized.id)) throw new Error("Duplicate rule");
+    ruleIds.add(normalized.id);
+    return normalized;
+  });
+  return { version: 1, settings: normalizeSettings(value.settings), tiles, profiles, rules,
+    pinned: normalizePinned(value.pinned) };
+}
+
+// ------------------------------------------------------------------------------------------------- Profiles
+
+/** The tiles and settings of a profile; "default" is the top-level layout. */
+function getProfile(layout, id) {
+  if (id === "default") return { id: "default", name: "Default", tiles: layout.tiles, settings: layout.settings };
+  return layout.profiles.find(profile => profile.id === id) ?? getProfile(layout, "default");
+}
+
+/** Replaces a profile's tiles and/or settings. */
+function withProfile(layout, id, profile) {
+  if (id === "default") return { ...layout, tiles: profile.tiles, settings: profile.settings };
+  return { ...layout, profiles: layout.profiles.map(entry => entry.id === id
+    ? { ...entry, tiles: profile.tiles, settings: profile.settings } : entry) };
+}
+
+/** Copies a profile under a new name; returns the layout and the new profile's id. */
+function addProfile(layout, name, fromId) {
+  const used = new Set(["default", ...layout.profiles.map(profile => profile.id)]);
+  const base = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 24) || "profile";
+  let id = base;
+  for (let index = 2; used.has(id); index++) id = `${base}-${index}`;
+  const source = getProfile(layout, fromId);
+  const profile = { id, name: name.slice(0, 64) || "Profile", tiles: source.tiles.map(tile => ({ ...tile })),
+    settings: structuredCopy(source.settings) };
+  return { layout: { ...layout, profiles: [...layout.profiles, profile] }, id };
+}
+
+function renameProfile(layout, id, name) {
+  return { ...layout, profiles: layout.profiles.map(profile => profile.id === id
+    ? { ...profile, name: name.slice(0, 64) || profile.name } : profile) };
+}
+
+/** Removes a profile; rules that switched to it no longer switch profile. */
+function removeProfile(layout, id) {
+  return { ...layout, profiles: layout.profiles.filter(profile => profile.id !== id),
+    rules: layout.rules.map(rule => {
+      if (rule.profile !== id) return rule;
+      const { profile, ...rest } = rule;
+      return rest;
+    }) };
+}
+
+const structuredCopy = value => JSON.parse(JSON.stringify(value));
+
+/** Sets a tile to "off", "on" or "rules" (kept in place, shown only by rules). */
+function setTileMode(profile, id, mode) {
+  const current = profile.tiles.find(tile => tile.id === id);
+  const enabled = mode !== "off";
+  // Switching between "on" and "rules" keeps the tile exactly where it is.
+  const next = current.enabled === enabled ? profile : setTileEnabled(profile, id, enabled);
+  return { ...next, tiles: next.tiles.map(tile => {
+    if (tile.id !== id) return tile;
+    const { rulesOnly, ...rest } = tile;
+    return mode === "rules" ? { ...rest, rulesOnly: true } : rest;
+  }) };
+}
+
+function tileMode(tile) {
+  return !tile.enabled ? "off" : tile.rulesOnly ? "rules" : "on";
+}
+
 
 /** Clamps a tile's size and position into the grid, respecting its minimum size. */
 function resize(tile) {

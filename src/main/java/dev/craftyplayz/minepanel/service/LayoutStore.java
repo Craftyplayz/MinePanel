@@ -15,17 +15,38 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
-/** Persists the dashboard tile layout as a small, strictly validated JSON config file. */
+/**
+ * Persists the dashboard tile layout as a small, strictly validated JSON config file.
+ *
+ * <p>The top-level {@code tiles} and {@code settings} are the "Default" profile. Optional {@code profiles} are other
+ * named layouts, {@code rules} switch between them (or show/hide tiles and change settings) based on what is
+ * happening in game, and {@code pinned} lists item windows the player pinned on screen. The browser evaluates rules;
+ * this class only checks that the file is well formed. Mirrors {@code normalizeLayout} in layout.js.
+ */
 public final class LayoutStore {
     public static final int COLUMNS = 12;
-    public static final int MAX_BYTES = 64 * 1024;
+    public static final int MAX_BYTES = 256 * 1024;
     public static final int MAX_STATISTIC_IDS = 512;
+    public static final int MAX_PROFILES = 16;
+    public static final int MAX_RULES = 64;
+    public static final int MAX_GROUPS = 8;
+    public static final int MAX_CONDITIONS = 8;
+    public static final int MAX_VALUES = 32;
+    public static final int MAX_PINNED = 16;
     private static final Pattern LOOPBACK_URL =
             Pattern.compile("http://(127\\.0\\.0\\.1|localhost)(:[0-9]{1,5})?(/[A-Za-z0-9._~!$&'()*+,;=:@%/?#-]*)?");
-    public static final List<String> TILE_IDS = List.of("player", "inventory", "statistics", "history", "map", "build");
+    private static final Pattern ID = Pattern.compile("[a-z0-9-]{1,32}");
+    private static final Pattern ITEM_ID = Pattern.compile("[a-z0-9_.-]+:[a-z0-9/._-]+");
+    public static final List<String> TILE_IDS = List.of("player", "inventory", "statistics", "history", "map", "build",
+            "movement", "xp", "pickups", "advancements", "villagers");
+    public static final List<String> CONDITION_TYPES = List.of("world", "dimension", "biome", "time", "gameMode",
+            "health", "food", "saturation", "effect", "movement", "elytra", "advancement", "combat");
+    public static final List<Integer> XP_WINDOWS = List.of(10, 30, 60, 300, 600, 3600);
+    public static final List<String> PIN_SOURCES = List.of("inventory", "enderchest", "enderchest-item");
     private final Path file;
 
     public LayoutStore(Path file) {
@@ -69,7 +90,34 @@ public final class LayoutStore {
     private static String normalizeParsed(String json) {
         JsonObject root = JsonParser.parseString(json).getAsJsonObject();
         if (integer(root.get("version"), 1, 1) != 1) throw new IllegalArgumentException("unsupported layout version");
-        JsonArray tiles = root.getAsJsonArray("tiles");
+        JsonObject result = new JsonObject();
+        result.addProperty("version", 1);
+        result.add("tiles", tiles(root.getAsJsonArray("tiles")));
+        if (root.has("settings")) result.add("settings", settings(root.getAsJsonObject("settings")));
+        Set<String> profileIds = new HashSet<>(Set.of("default"));
+        if (root.has("profiles")) {
+            JsonArray profiles = root.getAsJsonArray("profiles");
+            if (profiles.size() > MAX_PROFILES) throw new IllegalArgumentException("too many profiles");
+            JsonArray normalized = new JsonArray();
+            for (JsonElement element : profiles) {
+                JsonObject profile = element.getAsJsonObject();
+                String id = id(profile.get("id"));
+                if (!profileIds.add(id)) throw new IllegalArgumentException("duplicate profile");
+                JsonObject copy = new JsonObject();
+                copy.addProperty("id", id);
+                copy.addProperty("name", text(profile.get("name"), 64));
+                copy.add("tiles", tiles(profile.getAsJsonArray("tiles")));
+                if (profile.has("settings")) copy.add("settings", settings(profile.getAsJsonObject("settings")));
+                normalized.add(copy);
+            }
+            result.add("profiles", normalized);
+        }
+        if (root.has("rules")) result.add("rules", rules(root.getAsJsonArray("rules"), profileIds));
+        if (root.has("pinned")) result.add("pinned", pinned(root.getAsJsonArray("pinned")));
+        return result.toString();
+    }
+
+    private static JsonArray tiles(JsonArray tiles) {
         if (tiles == null || tiles.size() > TILE_IDS.size()) throw new IllegalArgumentException("invalid tile list");
         Set<String> seen = new HashSet<>();
         JsonArray normalizedTiles = new JsonArray();
@@ -90,13 +138,11 @@ public final class LayoutStore {
             normalized.addProperty("y", y);
             normalized.addProperty("w", w);
             normalized.addProperty("h", h);
+            // A rules-only tile keeps its place in the layout but is hidden until a rule shows it.
+            if (tile.has("rulesOnly") && bool(tile.get("rulesOnly"))) normalized.addProperty("rulesOnly", true);
             normalizedTiles.add(normalized);
         }
-        JsonObject result = new JsonObject();
-        result.addProperty("version", 1);
-        result.add("tiles", normalizedTiles);
-        if (root.has("settings")) result.add("settings", settings(root.getAsJsonObject("settings")));
-        return result.toString();
+        return normalizedTiles;
     }
 
     /** Per-tile preferences; unknown keys are dropped, malformed known keys reject the layout. */
@@ -126,6 +172,132 @@ public final class LayoutStore {
             }
             result.add("map", normalized);
         }
+        if (source.has("movement")) {
+            JsonObject movement = source.getAsJsonObject("movement");
+            JsonObject normalized = new JsonObject();
+            for (String key : List.of("showVertical", "showGlider")) {
+                if (movement.has(key)) normalized.addProperty(key, bool(movement.get(key)));
+            }
+            result.add("movement", normalized);
+        }
+        if (source.has("xp")) {
+            JsonObject xp = source.getAsJsonObject("xp");
+            JsonObject normalized = new JsonObject();
+            if (xp.has("window")) {
+                int window = integer(xp.get("window"), 1, 3600);
+                if (!XP_WINDOWS.contains(window)) throw new IllegalArgumentException("unknown XP window");
+                normalized.addProperty("window", window);
+            }
+            result.add("xp", normalized);
+        }
+        if (source.has("pickups")) {
+            JsonObject pickups = source.getAsJsonObject("pickups");
+            JsonObject normalized = new JsonObject();
+            if (pickups.has("lifetime")) normalized.addProperty("lifetime", integer(pickups.get("lifetime"), 0, 3600));
+            if (pickups.has("maxRows")) normalized.addProperty("maxRows", integer(pickups.get("maxRows"), 1, 32));
+            if (pickups.has("showSource")) normalized.addProperty("showSource", bool(pickups.get("showSource")));
+            if (pickups.has("ignored")) normalized.add("ignored", itemIds(pickups.getAsJsonArray("ignored")));
+            result.add("pickups", normalized);
+        }
+        if (source.has("advancements")) {
+            JsonObject advancements = source.getAsJsonObject("advancements");
+            JsonObject normalized = new JsonObject();
+            if (advancements.has("popupSeconds")) {
+                normalized.addProperty("popupSeconds", integer(advancements.get("popupSeconds"), 0, 300));
+            }
+            result.add("advancements", normalized);
+        }
+        return result;
+    }
+
+    private static JsonArray rules(JsonArray source, Set<String> profileIds) {
+        if (source.size() > MAX_RULES) throw new IllegalArgumentException("too many rules");
+        Set<String> ids = new HashSet<>();
+        JsonArray result = new JsonArray();
+        for (JsonElement element : source) {
+            JsonObject rule = element.getAsJsonObject();
+            JsonObject copy = new JsonObject();
+            String id = id(rule.get("id"));
+            if (!ids.add(id)) throw new IllegalArgumentException("duplicate rule");
+            copy.addProperty("id", id);
+            copy.addProperty("name", text(rule.get("name"), 64));
+            copy.addProperty("enabled", bool(rule.get("enabled")));
+            JsonArray groups = rule.getAsJsonArray("groups");
+            if (groups.size() > MAX_GROUPS) throw new IllegalArgumentException("too many condition groups");
+            JsonArray normalizedGroups = new JsonArray();
+            for (JsonElement group : groups) {
+                JsonArray conditions = group.getAsJsonArray();
+                if (conditions.isEmpty() || conditions.size() > MAX_CONDITIONS) {
+                    throw new IllegalArgumentException("a condition group needs 1 to 8 conditions");
+                }
+                JsonArray normalizedConditions = new JsonArray();
+                for (JsonElement condition : conditions) normalizedConditions.add(condition(condition.getAsJsonObject()));
+                normalizedGroups.add(normalizedConditions);
+            }
+            copy.add("groups", normalizedGroups);
+            if (rule.has("profile") && !rule.get("profile").isJsonNull()) {
+                String profile = id(rule.get("profile"));
+                if (!profileIds.contains(profile)) throw new IllegalArgumentException("rule names an unknown profile");
+                copy.addProperty("profile", profile);
+            }
+            if (rule.has("tiles")) {
+                JsonObject tiles = rule.getAsJsonObject("tiles");
+                JsonObject normalized = new JsonObject();
+                for (Map.Entry<String, JsonElement> entry : tiles.entrySet()) {
+                    String action = entry.getValue().getAsString();
+                    if (!TILE_IDS.contains(entry.getKey()) || !List.of("show", "hide").contains(action)) {
+                        throw new IllegalArgumentException("invalid tile action");
+                    }
+                    normalized.addProperty(entry.getKey(), action);
+                }
+                copy.add("tiles", normalized);
+            }
+            if (rule.has("settings")) copy.add("settings", settings(rule.getAsJsonObject("settings")));
+            result.add(copy);
+        }
+        return result;
+    }
+
+    private static JsonObject condition(JsonObject source) {
+        String type = source.get("type").getAsString();
+        if (!CONDITION_TYPES.contains(type)) throw new IllegalArgumentException("unknown condition");
+        JsonObject result = new JsonObject();
+        result.addProperty("type", type);
+        if (source.has("not") && bool(source.get("not"))) result.addProperty("not", true);
+        if (source.has("values")) {
+            JsonArray values = source.getAsJsonArray("values");
+            if (values.size() > MAX_VALUES) throw new IllegalArgumentException("too many condition values");
+            JsonArray normalized = new JsonArray();
+            for (JsonElement value : values) normalized.add(text(value, 128));
+            result.add("values", normalized);
+        }
+        for (String key : List.of("min", "max")) {
+            if (source.has(key)) {
+                double value = source.get(key).getAsJsonPrimitive().getAsDouble();
+                if (!Double.isFinite(value) || value < 0 || value > 1024) {
+                    throw new IllegalArgumentException("condition bound out of range");
+                }
+                result.addProperty(key, value);
+            }
+        }
+        if (source.has("seconds")) result.addProperty("seconds", integer(source.get("seconds"), 1, 3600));
+        return result;
+    }
+
+    private static JsonArray pinned(JsonArray source) {
+        if (source.size() > MAX_PINNED) throw new IllegalArgumentException("too many pinned windows");
+        JsonArray result = new JsonArray();
+        for (JsonElement element : source) {
+            JsonObject window = element.getAsJsonObject();
+            String kind = window.get("source").getAsString();
+            if (!PIN_SOURCES.contains(kind)) throw new IllegalArgumentException("unknown window");
+            JsonObject copy = new JsonObject();
+            copy.addProperty("source", kind);
+            copy.addProperty("slot", integer(window.get("slot"), 0, 40));
+            copy.addProperty("x", integer(window.get("x"), 0, 10000));
+            copy.addProperty("y", integer(window.get("y"), 0, 10000));
+            result.add(copy);
+        }
         return result;
     }
 
@@ -141,8 +313,35 @@ public final class LayoutStore {
         return result;
     }
 
+    private static JsonArray itemIds(JsonArray source) {
+        if (source.size() > 64) throw new IllegalArgumentException("too many items");
+        Set<String> seen = new HashSet<>();
+        JsonArray result = new JsonArray();
+        for (JsonElement element : source) {
+            String id = element.getAsJsonPrimitive().getAsString();
+            if (id.length() > 256 || !ITEM_ID.matcher(id).matches()) throw new IllegalArgumentException("invalid item id");
+            if (seen.add(id)) result.add(id);
+        }
+        return result;
+    }
+
+    private static String id(JsonElement value) {
+        String id = value.getAsJsonPrimitive().getAsString();
+        if (!ID.matcher(id).matches()) throw new IllegalArgumentException("invalid id");
+        return id;
+    }
+
+    private static String text(JsonElement value, int maxLength) {
+        if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) {
+            throw new IllegalArgumentException("expected text");
+        }
+        String text = value.getAsString();
+        if (text.isEmpty() || text.length() > maxLength) throw new IllegalArgumentException("text length out of range");
+        return text;
+    }
+
     private static boolean bool(JsonElement value) {
-        if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isBoolean()) {
+        if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isBoolean()) {
             throw new IllegalArgumentException("expected a boolean");
         }
         return value.getAsBoolean();

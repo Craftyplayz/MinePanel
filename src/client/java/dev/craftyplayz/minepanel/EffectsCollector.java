@@ -13,15 +13,18 @@ import java.util.Map;
 /**
  * Converts active effects into wall-clock end times and detects beacon effects. Beacons (and conduits) apply their
  * effects as "ambient" and re-apply them every few seconds, so an effect counts as a beacon effect if it is ambient
- * or its remaining duration has been topped up repeatedly. Client thread only.
+ * or its remaining duration has been topped up repeatedly. It stops counting once no top-up has arrived for a while,
+ * since a beacon that is out of range or switched off leaves the effect ticking down normally. Client thread only.
  */
 final class EffectsCollector {
     private static final long TICK_MILLIS = 50;
     /** End-time jitter below this is ignored so a steadily ticking effect does not resend every sample. */
     private static final long JITTER_MILLIS = 1_500;
     private static final int REFRESHES_FOR_BEACON = 2;
+    /** Beacons re-apply every 4 seconds; a longer gap means the beacon no longer reaches the player. */
+    private static final long BEACON_TIMEOUT_MILLIS = 6_000;
 
-    private record Tracked(Long endsAt, int duration, int refreshes) {
+    private record Tracked(Long endsAt, int duration, int refreshes, long refreshedAt) {
     }
 
     private final Map<String, Tracked> tracked = new HashMap<>();
@@ -41,17 +44,22 @@ final class EffectsCollector {
             int duration = instance.getDuration();
             Long endsAt = instance.isInfiniteDuration() ? null : now + duration * TICK_MILLIS;
             int refreshes = previous == null ? 0 : previous.refreshes;
-            if (previous != null && !instance.isInfiniteDuration() && duration > previous.duration + 20) refreshes++;
+            long refreshedAt = previous == null ? now : previous.refreshedAt;
+            if (previous != null && !instance.isInfiniteDuration() && duration > previous.duration + 20) {
+                refreshes++;
+                refreshedAt = now;
+            }
             if (endsAt != null && previous != null && previous.endsAt != null
                     && Math.abs(endsAt - previous.endsAt) < JITTER_MILLIS) {
                 endsAt = previous.endsAt;
             }
-            Tracked current = new Tracked(endsAt, duration, refreshes);
+            Tracked current = new Tracked(endsAt, duration, refreshes, refreshedAt);
             seen.put(id, current);
             String name = instance.getEffect().value().getDisplayName().getString();
             result.add(new StatusEffect(id, name.isBlank() ? id : name.length() > 256 ? name.substring(0, 256) : name,
                     Math.min(255, Math.max(0, instance.getAmplifier())), endsAt,
-                    instance.isAmbient() || refreshes >= REFRESHES_FOR_BEACON));
+                    (instance.isAmbient() || refreshes >= REFRESHES_FOR_BEACON)
+                            && now - refreshedAt <= BEACON_TIMEOUT_MILLIS));
         }
         tracked.clear();
         tracked.putAll(seen);
