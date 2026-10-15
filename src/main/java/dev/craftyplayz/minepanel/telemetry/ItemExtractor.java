@@ -36,6 +36,11 @@ public final class ItemExtractor {
         default List<List<TooltipSegmentView>> tooltip() {
             return List.of();
         }
+
+        /** The held items of a shulker box or bundle, or null for items that hold nothing. */
+        default List<? extends ItemView> contents() {
+            return null;
+        }
     }
 
     public record TooltipSegmentView(String text, Integer rgb, String format) {
@@ -53,6 +58,10 @@ public final class ItemExtractor {
     }
 
     public static ItemSnapshot extract(ItemView item) {
+        return extract(item, true);
+    }
+
+    private static ItemSnapshot extract(ItemView item, boolean withContents) {
         Objects.requireNonNull(item, "item");
         if (item.isEmpty()) {
             return ItemSnapshot.emptyItem();
@@ -61,9 +70,20 @@ public final class ItemExtractor {
         collectEnchantments(item.appliedEnchantments(), enchantments);
         collectEnchantments(item.storedEnchantments(), enchantments);
         boolean damageable = item.isDamageable();
+        List<ItemSnapshot> contents = null;
+        List<? extends ItemView> held = withContents ? item.contents() : null;
+        if (held != null) {
+            // Only one level deep: a shulker box inside a bundle shows as an item, not its own grid.
+            contents = new ArrayList<>(Math.min(held.size(), ItemSnapshot.MAX_CONTENTS));
+            for (ItemView inner : held) {
+                if (contents.size() == ItemSnapshot.MAX_CONTENTS) break;
+                contents.add(extract(inner, false));
+            }
+        }
         return new ItemSnapshot(false, item.itemId(), readableText(item.name()), item.count(), item.maxCount(),
                 damageable ? item.damage() : null, damageable ? item.maxDamage() : null,
-                new ArrayList<>(enchantments.values()), item.iconKey(), item.foil(), tooltip(item.tooltip()));
+                new ArrayList<>(enchantments.values()), item.iconKey(), item.foil(), tooltip(item.tooltip()),
+                contents);
     }
 
     /** Truncates oversized tooltips and drops empty runs instead of rejecting a whole inventory sample. */

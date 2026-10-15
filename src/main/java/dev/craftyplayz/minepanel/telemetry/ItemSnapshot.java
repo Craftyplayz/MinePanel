@@ -7,8 +7,11 @@ import java.util.regex.Pattern;
 
 public record ItemSnapshot(boolean empty, String itemId, String name, int count, int maxCount,
                            Integer damage, Integer maxDamage, List<Enchantment> enchantments,
-                           String icon, boolean foil, List<List<TooltipSegment>> tooltip) {
+                           String icon, boolean foil, List<List<TooltipSegment>> tooltip,
+                           List<ItemSnapshot> contents) {
     public static final int MAX_TEXT_LENGTH = 256;
+    /** Shulker boxes hold 27 slots; bundles hold at most 64 separate stacks. */
+    public static final int MAX_CONTENTS = 64;
     public static final int MAX_COUNT = 1_000_000;
     public static final int MAX_ENCHANTMENTS = 64;
     public static final int MAX_ENCHANTMENT_LEVEL = 255;
@@ -25,6 +28,16 @@ public record ItemSnapshot(boolean empty, String itemId, String name, int count,
         this(empty, itemId, name, count, maxCount, damage, maxDamage, enchantments, null, false, List.of());
     }
 
+    public ItemSnapshot(boolean empty, String itemId, String name, int count, int maxCount,
+                        Integer damage, Integer maxDamage, List<Enchantment> enchantments,
+                        String icon, boolean foil, List<List<TooltipSegment>> tooltip) {
+        this(empty, itemId, name, count, maxCount, damage, maxDamage, enchantments, icon, foil, tooltip, null);
+    }
+
+    /**
+     * {@code contents} is null for items that hold nothing; for shulker boxes and bundles it lists the held items
+     * (shulker slots in order, including empty ones). Nested containers are listed without their own contents.
+     */
     public ItemSnapshot {
         Objects.requireNonNull(enchantments, "enchantments");
         Objects.requireNonNull(tooltip, "tooltip");
@@ -43,10 +56,19 @@ public record ItemSnapshot(boolean empty, String itemId, String name, int count,
             copiedTooltip.add(List.copyOf(line));
         }
         tooltip = List.copyOf(copiedTooltip);
+        if (contents != null) {
+            if (contents.size() > MAX_CONTENTS) throw new IllegalArgumentException("too many contained items");
+            for (ItemSnapshot inner : contents) {
+                if (Objects.requireNonNull(inner, "contained item").contents() != null) {
+                    throw new IllegalArgumentException("contained items cannot list their own contents");
+                }
+            }
+            contents = List.copyOf(contents);
+        }
         if (empty) {
             if (itemId != null || name != null || count != 0 || maxCount != 0
                     || damage != null || maxDamage != null || !enchantments.isEmpty()
-                    || icon != null || foil || !tooltip.isEmpty()) {
+                    || icon != null || foil || !tooltip.isEmpty() || contents != null) {
                 throw new IllegalArgumentException("empty item metadata must be explicitly absent");
             }
         } else {
@@ -96,6 +118,13 @@ public record ItemSnapshot(boolean empty, String itemId, String name, int count,
                 json.append(segments.get(index).toJson());
             }
             json.append(']');
+        }
+        json.append("],\"contents\":");
+        if (contents == null) return json.append("null}").toString();
+        json.append('[');
+        for (int index = 0; index < contents.size(); index++) {
+            if (index > 0) json.append(',');
+            json.append(contents.get(index).toJson());
         }
         return json.append("]}").toString();
     }
