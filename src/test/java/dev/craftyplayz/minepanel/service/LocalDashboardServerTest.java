@@ -26,11 +26,13 @@ public final class LocalDashboardServerTest {
         InventorySnapshotTest.main(args);
         ItemExtractorTest.main(args);
         StatisticsAndHistoryTest.main(args);
+        dev.craftyplayz.minepanel.telemetry.WorldFeaturesTest.main(args);
         testTelemetrySnapshots();
         testWebSocketPush();
         testShutdown();
         testPngEncoder();
         testLayoutAndIcons();
+        testProfilesRulesAndWorlds();
         try (LocalDashboardServer server = new LocalDashboardServer()) {
             server.start();
             URI base = URI.create(server.getUrl());
@@ -477,6 +479,85 @@ public final class LocalDashboardServerTest {
                     "oversized layout rejected");
             check(java.nio.file.Files.readString(file).equals(saved), "rejected writes leave the saved layout intact");
         }
+    }
+
+    private static void testProfilesRulesAndWorlds() throws Exception {
+        String full = "{\"version\":1,\"tiles\":[{\"id\":\"movement\",\"enabled\":true,\"x\":0,\"y\":0,\"w\":4,"
+                + "\"h\":4,\"rulesOnly\":true}],\"settings\":{\"movement\":{\"showVertical\":false,\"showGlider\":true},"
+                + "\"xp\":{\"window\":300},\"pickups\":{\"lifetime\":0,"
+                + "\"maxRows\":5,\"showSource\":false,\"ignored\":[\"minecraft:dirt\"]},\"advancements\":{\"popupSeconds\":10}},"
+                + "\"profiles\":[{\"id\":\"nether\",\"name\":\"Nether\",\"tiles\":[],\"settings\":{}}],"
+                + "\"rules\":[{\"id\":\"rule-1\",\"name\":\"Nether flight\",\"enabled\":true,\"groups\":[[{\"type\":"
+                + "\"dimension\",\"values\":[\"nether\"]}],[{\"type\":\"elytra\",\"not\":true},{\"type\":\"health\","
+                + "\"min\":2,\"max\":10}]],\"profile\":\"nether\",\"tiles\":{\"movement\":\"show\"},"
+                + "\"settings\":{\"inventory\":{\"showArmor\":false}}}],"
+                + "\"pinned\":[{\"source\":\"inventory\",\"slot\":12,\"x\":40,\"y\":90}]}";
+        String normalized = LayoutStore.normalize(full);
+        check(normalized.equals(full.replace("\"min\":2,\"max\":10", "\"min\":2.0,\"max\":10.0")),
+                "profiles, rules, pinned windows and new tile settings round-trip: " + normalized);
+        for (String invalid : new String[] {
+                full.replace("\"profile\":\"nether\"", "\"profile\":\"missing\""),
+                full.replace("\"type\":\"elytra\"", "\"type\":\"weather\""),
+                full.replace("\"window\":300", "\"window\":45"),
+                full.replace("\"movement\":\"show\"", "\"movement\":\"toggle\""),
+                full.replace("\"source\":\"inventory\"", "\"source\":\"chest\""),
+                full.replace("\"id\":\"nether\"", "\"id\":\"default\""),
+                full.replace("[{\"type\":\"dimension\",\"values\":[\"nether\"]}]", "[]")}) {
+            try {
+                LayoutStore.normalize(invalid);
+                throw new AssertionError("invalid layout accepted: " + invalid);
+            } catch (IllegalArgumentException expected) {
+                // rejected as it should be
+            }
+        }
+
+        java.nio.file.Path directory = java.nio.file.Files.createTempDirectory("minepanel-worlds");
+        var item = com.google.gson.JsonParser.parseString("{\"id\":\"minecraft:emerald\",\"count\":3}");
+        String uuid = "123e4567-e89b-12d3-a456-426614174000";
+        WorldStore worlds = new WorldStore(directory);
+        worlds.open("server:play.example.net");
+        long before = worlds.revision();
+        worlds.putVillager(new WorldStore.Villager(uuid, "minecraft:librarian", 2, "Bob", "minecraft:overworld",
+                1, 64, 2, 10, 10, java.util.List.of(new WorldStore.Trade(item, null, item, 0, 12))));
+        java.util.List<com.google.gson.JsonElement> chest = new java.util.ArrayList<>();
+        for (int slot = 0; slot < 27; slot++) chest.add(slot == 4 ? item : com.google.gson.JsonNull.INSTANCE);
+        worlds.enderChest(new WorldStore.EnderChest(20, chest));
+        check(worlds.revision() > before, "changes bump the revision");
+        worlds.save();
+        WorldStore reloaded = new WorldStore(directory);
+        reloaded.open("server:play.example.net");
+        check(reloaded.villagers().equals(worlds.villagers()) && reloaded.enderChest().equals(worlds.enderChest()),
+                "villagers and the ender chest survive a restart");
+        reloaded.open("singleplayer:Other World");
+        check(reloaded.villagers().isEmpty() && reloaded.enderChest() == null, "each world has its own data");
+
+        try (LocalDashboardServer server = new LocalDashboardServer(new TelemetryStore(), 0, null, null, worlds)) {
+            server.start();
+            URI base = URI.create(server.getUrl());
+            String origin = base.toString().substring(0, base.toString().length() - 1);
+            String cookie = CLIENT.send(HttpRequest.newBuilder(base.resolve("api/session"))
+                    .header("Sec-Fetch-Site", "same-origin").GET().build(), HttpResponse.BodyHandlers.ofString())
+                    .headers().firstValue("set-cookie").orElseThrow().split(";", 2)[0];
+            URI villager = base.resolve("api/villagers/" + uuid);
+            check(delete(villager, null, origin).statusCode() == 403, "forgetting needs the session cookie");
+            check(delete(villager, cookie, null).statusCode() == 403, "forgetting needs a browser origin");
+            check(delete(villager, cookie, "http://evil.example").statusCode() == 403, "foreign origins are rejected");
+            check(delete(base.resolve("api/villagers/not-a-uuid"), cookie, origin).statusCode() == 405,
+                    "only well-formed villager ids are accepted");
+            check(delete(villager, cookie, origin).statusCode() == 200 && worlds.villagers().isEmpty(),
+                    "a villager is forgotten");
+            check(delete(villager, cookie, origin).statusCode() == 404, "forgetting twice reports not found");
+            for (String asset : new String[] {"rules.js", "features.js", "features.css"}) {
+                check(get(base.resolve(asset)).statusCode() == 200, asset + " is served");
+            }
+        }
+    }
+
+    private static HttpResponse<String> delete(URI uri, String cookie, String origin) throws Exception {
+        HttpRequest.Builder request = HttpRequest.newBuilder(uri).DELETE();
+        if (cookie != null) request.header("Cookie", cookie);
+        if (origin != null) request.header("Origin", origin);
+        return CLIENT.send(request.build(), HttpResponse.BodyHandlers.ofString());
     }
 
     private static HttpResponse<String> put(URI base, String cookie, String origin, String contentType, String body)

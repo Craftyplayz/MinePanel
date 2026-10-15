@@ -6,12 +6,12 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const web = path.join(__dirname, "../../client/resources/web");
-const sources = ["protocol.js", "layout.js", "app.js"].map(name => fs.readFileSync(path.join(web, name), "utf8"));
+const sources = ["protocol.js", "layout.js", "rules.js", "app.js", "features.js"].map(name => fs.readFileSync(path.join(web, name), "utf8"));
 
 function empty() {
   return { empty: true, itemId: null, name: null, count: 0, maxCount: 0,
     damage: null, maxDamage: null, remainingDurability: null, enchantments: [],
-    icon: null, foil: false, tooltip: [] };
+    icon: null, foil: false, tooltip: [], contents: null };
 }
 
 function item(overrides = {}) {
@@ -43,27 +43,41 @@ function history(overrides = {}) {
   ], ...overrides };
 }
 
+function details() {
+  return {
+    world: { kind: "singleplayer", name: "Test World", biome: "minecraft:plains", biomeName: "Plains",
+      weather: "clear", day: 3, time: 6000, gameMode: "survival" },
+    motion: { mode: "ground", speed: 4.3, horizontalSpeed: 4.3, verticalSpeed: 0, yaw: 180, pitch: 0,
+      icon: item({ itemId: "minecraft:netherite_boots", name: "Netherite Boots", count: 1, maxCount: 1 }),
+      glider: null },
+    xp: { level: 5, progress: 0.5, points: 63, gained: { 10: 0, 30: 0, 60: 12, 300: 40, 600: 40, 3600: 90 } },
+    portal: { crossing: null, obsidian: [], lit: null },
+    pickups: [], advancements: null, villagers: [], enderChest: null
+  };
+}
+
 function snapshot(overrides = {}) {
-  return { schemaVersion: 2, revision: 4, capturedAt: 100, available: true,
+  return { schemaVersion: 3, revision: 4, capturedAt: 100, available: true,
     sessionSeconds: 3665, dimension: "minecraft:overworld", position: { x: 1, y: 64, z: -3 },
     health: 18, maxHealth: 20, absorption: 2, inventory: inventory(),
-    statistics: statistics(), history: history(), food: 18, saturation: 5.5, effects: [], ...overrides };
+    statistics: statistics(), history: history(), food: 18, saturation: 5.5, effects: [], ...details(), ...overrides };
 }
 
 function initial(state = snapshot()) {
-  return { schemaVersion: 2, type: "initial", modVersion: "0.1.0", state };
+  return { schemaVersion: 3, type: "initial", modVersion: "0.1.0", state };
 }
 
 function update(state = {}) {
-  return { schemaVersion: 2, type: "update",
-    state: { schemaVersion: 2, baseRevision: 4, revision: 7, capturedAt: 101, ...state } };
+  return { schemaVersion: 3, type: "update",
+    state: { schemaVersion: 3, baseRevision: 4, revision: 7, capturedAt: 101, ...state } };
 }
 
 function unavailable(overrides = {}) {
   return snapshot({ available: false, sessionSeconds: null, dimension: null,
     position: { x: null, y: null, z: null }, health: null, maxHealth: null,
     absorption: null, inventory: null, statistics: null, history: history({ active: false }),
-    food: null, saturation: null, effects: null, ...overrides });
+    food: null, saturation: null, effects: null, world: null, motion: null, xp: null, portal: null, pickups: null,
+    advancements: null, villagers: null, enderChest: null, ...overrides });
 }
 
 function defaultFetch(storedLayout = null, requests = []) {
@@ -296,7 +310,7 @@ test("availability transitions require full snapshots and baseline", () => {
   assert.equal(back.inventory.slots.length, 36);
   assert.throws(() => h.apply(snapshot(), update({ available: false, inventory: null })));
   const missing = unavailable({ revision: 7 });
-  assert.throws(() => h.apply(snapshot(), { schemaVersion: 2, type: "update", state: missing }));
+  assert.throws(() => h.apply(snapshot(), { schemaVersion: 3, type: "update", state: missing }));
   assert.throws(() => h.apply(snapshot(), update({ inventory: null })));
   assert.throws(() => h.apply(undefined, initial(snapshot({ inventory: null }))));
 });
@@ -1060,7 +1074,10 @@ test("layout engine keeps tiles in the grid without overlaps and settles them up
   const result = h.run(`(() => {
     const overlapping = (layout) => layout.tiles.filter(t => t.enabled).some((a, i, all) =>
       all.some((b, j) => i !== j && overlaps(a, b)));
-    const base = defaultLayout();
+    // The original four tiles only, so the expected positions stay readable.
+    const fresh = defaultLayout();
+    const base = { ...fresh, tiles: fresh.tiles.map(t => ["player", "inventory", "statistics", "history"].includes(t.id)
+      ? t : { ...t, enabled: false }) };
     const moved = placeTile(base, "history", { x: 0, y: 0 }, false);
     const resized = placeTile(base, "player", { w: 12, h: 3 }, false);
     const clamped = placeTile(base, "player", { x: 11, y: -5, w: 1, h: 999 }, false);
@@ -1094,7 +1111,7 @@ test("imported or stored layouts are validated and completed", () => {
   const normalize = value => h.run(`normalizeLayout(${JSON.stringify(value)})`);
   const partial = normalize({ version: 1, tiles: [{ id: "history", enabled: true, x: 0, y: 5, w: 12, h: 2 }] });
   assert.deepEqual(plain(partial.tiles[0]), { id: "history", enabled: true, x: 0, y: 0, w: 12, h: 3 });
-  assert.equal(partial.tiles.length, 6);
+  assert.equal(partial.tiles.length, 11);
   assert.equal(partial.tiles.filter(tile => tile.enabled).length, 1, "missing tiles are added disabled");
   for (const bad of [null, [], { version: 2, tiles: [] }, { version: 1 },
     { version: 1, tiles: [{ id: "chat", enabled: true, x: 0, y: 0, w: 1, h: 1 }] },
@@ -1122,7 +1139,8 @@ test("the saved layout is loaded after the session and applied to tile grid plac
   const toggles = h.get("#tile-toggles").children;
   assert.deepEqual(toggles.map(chip => [chip.textContent, chip.attributes["aria-pressed"]]),
     [["Player", "false"], ["Inventory", "true"], ["Statistics", "false"], ["Activity log", "false"],
-      ["JourneyMap", "false"], ["Build progress", "false"]]);
+      ["JourneyMap", "false"], ["Build progress", "false"], ["Movement", "false"], ["Experience", "false"],
+      ["Recent pickups", "false"], ["Advancements", "false"], ["Villager trades", "false"]]);
   h.sockets[0].emit("close");
   await h.reconnect();
   assert.equal(requests.filter(request => request.url === "/api/layout").length, 1, "layout loads once");
@@ -1383,3 +1401,347 @@ test("the JourneyMap tile embeds the local web map when it answers and retries w
   assert.equal([...h.timers.values()].some(timer => timer.delay === 30_000 || timer.delay === 10_000), false,
     "hiding the map stops probing");
 });
+
+// ------------------------------------------------------------------------------------- World features
+
+const now = () => Date.now();
+const shulker = (overrides = {}) => item({ itemId: "minecraft:shulker_box", name: "Shulker Box", count: 1, maxCount: 1,
+  icon: "e0-5b", contents: [item({ name: "Diamond", itemId: "minecraft:diamond" }), ...Array.from({ length: 26 }, empty)],
+  ...overrides });
+const crossing = (overrides = {}) => ({ id: 3, at: 1000, fromDimension: "minecraft:overworld",
+  from: { x: 803, y: 64, z: -1605 }, toDimension: "minecraft:the_nether", to: { x: 99, y: 70, z: -200 },
+  target: { x: 100, y: 64, z: -201 }, ...overrides });
+const inNether = (overrides = {}) => snapshot({ dimension: "minecraft:the_nether", position: { x: 100, y: 70, z: -191 },
+  ...overrides });
+const villager = (overrides = {}) => ({ uuid: "123e4567-e89b-12d3-a456-426614174000", profession: "minecraft:librarian",
+  professionName: "Librarian", level: 3, name: null, dimension: "minecraft:overworld", x: 1, y: 80, z: 23,
+  seenAt: 100, tradedAt: 100, trades: [{ costA: item({ name: "Emerald", itemId: "minecraft:emerald", count: 17 }),
+    costB: item({ name: "Book", itemId: "minecraft:book", count: 1 }),
+    result: item({ name: "Enchanted Book", itemId: "minecraft:enchanted_book", count: 1, maxCount: 1,
+      enchantments: [{ id: "minecraft:mending", name: "Mending", level: 1 }] }), uses: 0, maxUses: 12 }],
+  ...overrides });
+
+test("navigation, portal and experience maths match the game", () => {
+  const h = harness();
+  const result = h.run(`({
+    south: bearingTo({ x: 0, z: 0 }, { x: 0, z: 10 }), west: bearingTo({ x: 0, z: 0 }, { x: -10, z: 0 }),
+    north: bearingTo({ x: 0, z: 0 }, { x: 0, z: -10 }), east: bearingTo({ x: 0, z: 0 }, { x: 10, z: 0 }),
+    right: relativeBearing(0, 90), behind: relativeBearing(270, 90), left: relativeBearing(10, 280),
+    points: [0, 45, 90, 180, 225, 315].map(compassPoint),
+    directions: axisDirections({ x: 97, z: -207 }, { x: 100, z: -201 }),
+    close: obsidianCheck({ crossing: { at: 1, target: { x: 100, y: 64, z: -201 } }, obsidian: [{ at: 2, x: 103, y: 70, z: -199 }] }),
+    far: obsidianCheck({ crossing: { at: 1, target: { x: 100, y: 64, z: -201 } }, obsidian: [{ at: 2, x: 97, y: 70, z: -207 }] }),
+    stale: obsidianCheck({ crossing: { at: 5, target: { x: 0, y: 0, z: 0 } }, obsidian: [{ at: 2, x: 0, y: 0, z: 0 }] }),
+    levels: [0, 15, 16, 30, 31, 100].map(xpAtLevel), costs: [0, 15, 30].map(xpForNextLevel),
+    rate: xpPerHour({ gained: { 60: 50 } }, 60), eta: secondsToGain(100, 3600), idle: secondsToGain(5, 0),
+    hundred: [nextHundred(5), nextHundred(100), nextHundred(250)]
+  })`);
+  assert.deepEqual(plain(result), { south: 0, west: 90, north: 180, east: 270, right: 90, behind: 180, left: 270,
+    points: ["S", "SW", "W", "N", "NE", "SE"], directions: "3 E and 6 S",
+    close: { block: { at: 2, x: 103, y: 70, z: -199 }, distance: Math.hypot(3, 2), ok: true, move: "3 W and 2 N" },
+    far: { block: { at: 2, x: 97, y: 70, z: -207 }, distance: Math.hypot(3, 6), ok: false, move: "3 E and 6 S" },
+    stale: null, levels: [0, 315, 352, 1395, 1507, 30970], costs: [7, 37, 112], rate: 3000, eta: 100, idle: null,
+    hundred: [100, 200, 300] });
+});
+
+test("rules combine AND groups of OR conditions, switch profiles, show rules-only tiles and hold briefly", () => {
+  const h = harness();
+  const result = h.run(`(() => {
+    const player = ${JSON.stringify(inNether({ motion: { ...details().motion, glider: item({ name: "Elytra" }) } }))};
+    const rule = { id: "r", name: "R", enabled: true,
+      groups: [[{ type: "dimension", values: ["nether"] }], [{ type: "health", max: 5 }, { type: "elytra" }]] };
+    const negated = { ...rule, groups: [[{ type: "biome", values: ["desert"], not: true }]] };
+    const base = defaultLayout();
+    const profile = addProfile(base, "Nether", "default");
+    const layout = { ...profile.layout,
+      tiles: base.tiles.map(t => t.id === "movement" ? { ...t, rulesOnly: true } : t),
+      rules: [{ ...rule, profile: profile.id, tiles: { movement: "show", inventory: "hide" },
+        settings: { inventory: { showArmor: false } } }] };
+    const engine = createRuleEngine();
+    const off = effectiveView(layout, []);
+    const on = effectiveView(layout, engine.active(layout, player, 1000));
+    const held = engine.active(layout, { ...player, dimension: "minecraft:overworld" }, 2500).length;
+    const released = engine.active(layout, { ...player, dimension: "minecraft:overworld" }, 3100).length;
+    return {
+      matches: ruleMatches(rule, player, 0),
+      lowHealthOnly: ruleMatches(rule, { ...player, motion: { ...player.motion, glider: null }, health: 4 }, 0),
+      neither: ruleMatches(rule, { ...player, motion: { ...player.motion, glider: null } }, 0),
+      overworld: ruleMatches(rule, { ...player, dimension: "minecraft:overworld" }, 0),
+      negated: ruleMatches(negated, player, 0), disabled: ruleMatches({ ...rule, enabled: false }, player, 0),
+      offline: ruleMatches(rule, { ...player, available: false }, 0),
+      offProfile: off.profileId, offMovement: off.visible.has("movement"),
+      onProfile: on.profileId === profile.id, onMovement: on.visible.has("movement"),
+      onInventory: on.visible.has("inventory"), armor: on.settings.inventory.showArmor, held, released,
+      advancement: conditionMatches({ type: "advancement", seconds: 10 },
+        { ...player, history: { events: [{ category: "advancement", timestamp: 1000 }] } }, 9000),
+      advancementOver: conditionMatches({ type: "advancement", seconds: 10 },
+        { ...player, history: { events: [{ category: "advancement", timestamp: 1000 }] } }, 12000),
+      time: ["dawn", "day", "dusk", "night"].map(v => conditionMatches({ type: "time", values: [v] },
+        { ...player, world: { ...player.world, time: 12500 } }, 0))
+    };
+  })()`);
+  assert.deepEqual(plain(result), { matches: true, lowHealthOnly: true, neither: false, overworld: false,
+    negated: true, disabled: false, offline: false, offProfile: "default", offMovement: false, onProfile: true,
+    onMovement: true, onInventory: false, armor: false, held: 1, released: 0, advancement: true,
+    advancementOver: false, time: [false, false, true, false] });
+});
+
+test("layouts keep profiles, rules and pinned windows, and reject malformed ones", () => {
+  const h = harness();
+  const normalize = value => h.run(`normalizeLayout(${JSON.stringify(value)})`);
+  const rule = { id: "rule-1", name: "Nether", enabled: true, groups: [[{ type: "dimension", values: ["nether"] }]],
+    profile: "nether", tiles: { movement: "show" }, settings: { xp: { window: 300 } } };
+  const value = { version: 1, tiles: [{ id: "movement", enabled: true, x: 0, y: 0, w: 4, h: 4, rulesOnly: true }],
+    profiles: [{ id: "nether", name: "Nether", tiles: [] }], rules: [rule],
+    pinned: [{ source: "inventory", slot: 9, x: 10, y: 20 }] };
+  const layout = normalize(value);
+  assert.deepEqual(plain(layout.rules), [rule]);
+  assert.equal(layout.tiles.find(tile => tile.id === "movement").rulesOnly, true);
+  assert.equal(layout.profiles[0].tiles.length, 11);
+  assert.equal(layout.profiles[0].settings.xp.window, 60, "profile settings are completed with defaults");
+  assert.deepEqual(plain(layout.pinned), value.pinned);
+  for (const bad of [{ ...value, rules: [{ ...rule, profile: "missing" }] },
+    { ...value, rules: [{ ...rule, groups: [[]] }] }, { ...value, rules: [{ ...rule, groups: [[{ type: "weather" }]] }] },
+    { ...value, rules: [rule, rule] }, { ...value, profiles: [{ id: "default", name: "X", tiles: [] }] },
+    { ...value, rules: [{ ...rule, settings: { xp: { window: 45 } } }] },
+    { ...value, pinned: [{ source: "chest", slot: 0, x: 0, y: 0 }] }]) {
+    assert.throws(() => normalize(bad), JSON.stringify(bad).slice(0, 120));
+  }
+  const removed = h.run(`removeProfile(normalizeLayout(${JSON.stringify(value)}), "nether")`);
+  assert.equal(removed.profiles.length, 0);
+  assert.equal(removed.rules[0].profile, undefined, "rules no longer switch to a removed profile");
+});
+
+test("detail fields and item contents are validated", () => {
+  const h = harness();
+  assert.equal(h.apply(undefined, initial(snapshot({ inventory: { ...inventory(),
+    slots: [shulker(), ...inventory().slots.slice(1)], equipment: { ...inventory().equipment, mainhand: shulker() } } })))
+    .inventory.slots[0].contents.length, 27);
+  for (const bad of [{ world: null }, { world: { ...details().world, weather: "snow" } },
+    { motion: { ...details().motion, yaw: 360 } }, { xp: { ...details().xp, gained: { 60: 1 } } },
+    { portal: { crossing: crossing({ toDimension: "minecraft:overworld", fromDimension: "minecraft:overworld" }),
+      obsidian: [], lit: null } },
+    { pickups: [{ id: 1, at: 1, source: "", item: item(), count: 1 }] },
+    { villagers: [villager({ uuid: "nope" })] }, { enderChest: { seenAt: 1, slots: [] } },
+    { inventory: { ...inventory(), slots: [shulker({ contents: [shulker()] }), ...inventory().slots.slice(1)] } }]) {
+    assert.throws(() => h.apply(undefined, initial(snapshot(bad))), JSON.stringify(bad).slice(0, 100));
+  }
+  assert.throws(() => h.apply(undefined, initial(unavailable({ world: details().world }))));
+});
+
+test("link portal appears after a Nether trip, guides the player and checks obsidian", async () => {
+  const h = harness();
+  await h.flush();
+  const socket = h.sockets[0];
+  socket.message(initial(inNether()));
+  assert.equal(h.get("#portal-link").hidden, true, "no button without a portal trip");
+  socket.message(update({ revision: 5, baseRevision: 4, portal: { crossing: crossing(), obsidian: [], lit: null } }));
+  assert.equal(h.get("#portal-link").hidden, false);
+  assert.equal(h.get("#portal-box").hidden, true);
+  h.get("#portal-link").emit("click");
+  assert.equal(h.get("#portal-box").hidden, false);
+  assert.equal(h.get("#portal-link").hidden, true);
+  const box = h.get("#portal-box");
+  assert.match(box.textContent, /X 100 · Z -201/);
+  assert.match(box.textContent, /10 blocks north/, "player at z -191 must go north 10 blocks");
+  assert.match(box.textContent, /X 803 · Z -1605 \(÷ 8\)/);
+  const arrow = box.children[0].navigator.arrow;
+  assert.equal(arrow.style.transform, "rotate(0deg)", "facing north (yaw 180) with the target north: straight ahead");
+  socket.message(update({ revision: 6, baseRevision: 5, motion: { ...details().motion, yaw: 270 } }));
+  assert.equal(arrow.style.transform, "rotate(270deg)", "facing east, the target is to the left");
+  socket.message(update({ revision: 7, baseRevision: 6,
+    portal: { crossing: crossing(), obsidian: [{ id: 9, at: 2000, x: 97, y: 70, z: -207 }], lit: null } }));
+  assert.match(box.children[2].textContent, /✗ .*6\.7 blocks away\. Build it 3 E and 6 S/);
+  socket.message(update({ revision: 8, baseRevision: 7,
+    portal: { crossing: crossing(), obsidian: [{ id: 10, at: 2100, x: 102, y: 70, z: -200 }], lit: null } }));
+  assert.match(box.children[2].textContent, /✓ Your last obsidian .*2\.2 blocks/);
+  socket.message(update({ revision: 9, baseRevision: 8,
+    portal: { crossing: crossing(), obsidian: [], lit: { x: 101, y: 66, z: -201 } } }));
+  assert.match(box.children[2].textContent, /✓ A lit portal is within 4 blocks/);
+  socket.message(update({ revision: 10, baseRevision: 9, portal: { crossing: crossing({ id: 4 }), obsidian: [], lit: null } }));
+  assert.equal(h.get("#portal-box").hidden, true, "a new trip closes the old box and offers a new link");
+  assert.equal(h.get("#portal-link").hidden, false);
+  socket.message(update({ revision: 11, baseRevision: 10, dimension: "minecraft:overworld" }));
+  assert.equal(h.get("#portal-link").hidden, true, "the link is only offered in the arrival dimension");
+});
+
+test("movement shows mode icon, 3D speed in blocks/s and km/h, facing and elytra time", async () => {
+  const h = harness();
+  await h.flush();
+  const elytra = item({ itemId: "minecraft:elytra", name: "Elytra", count: 1, maxCount: 1, damage: 132,
+    maxDamage: 432, remainingDurability: 300, icon: "e0-e1" });
+  h.sockets[0].message(initial(snapshot({ motion: { mode: "elytra", speed: 34.2, horizontalSpeed: 33, verticalSpeed: -8.9,
+    yaw: 225, pitch: 10, icon: elytra, glider: elytra } })));
+  assert.equal(h.get("#movement-mode").textContent, "Elytra");
+  assert.equal(h.get("#movement-speed").textContent, "34.2 blocks/s · 123.1 km/h");
+  assert.equal(h.get("#movement-facing").textContent, "Facing north-east · 45°");
+  assert.equal(h.get("#movement-needle").style.transform, "rotate(45deg)");
+  assert.equal(h.get("#movement-vertical").textContent, "↓ Falling 8.9 blocks/s");
+  assert.equal(h.get("#movement-glider").textContent, "Elytra: 300/432 · about 5 min of flight left");
+  assert.equal(slotParts(h.get("#movement-icon").children[0]).icon.src, "/icon/e0-e1.png");
+});
+
+test("experience shows XP/h for the chosen window and the time to the next level and next hundred", async () => {
+  const requests = [];
+  const h = harness(defaultFetch(null, requests));
+  await h.flush();
+  h.sockets[0].message(initial(snapshot()));
+  assert.equal(h.get("#xp-level").textContent, "Level 5");
+  assert.equal(h.get("#xp-rate").textContent, "720 XP/h");
+  assert.equal(h.get("#xp-gained").textContent, "+12 XP in the last 1 min");
+  assert.equal(h.get("#xp-next").textContent, "9 XP · 45 s");
+  assert.equal(h.get("#xp-hundred-label").textContent, "Level 100");
+  assert.equal(h.get("#xp-hundred").textContent, "30,907 XP · 42 h 56 min");
+  assert.equal(h.get("#xp-window").textContent, "1 min");
+  h.get("#xp-window").emit("click");
+  assert.equal(h.get("#xp-window-menu").hidden, false);
+  const choices = h.get("#xp-window-menu").children;
+  assert.deepEqual(choices.map(choice => choice.textContent), ["10 s", "30 s", "1 min", "5 min", "10 min", "1 h"]);
+  choices[5].emit("click");
+  assert.equal(h.get("#xp-window-menu").hidden, true);
+  assert.equal(h.get("#xp-rate").textContent, "90 XP/h");
+  assert.equal(h.get("#xp-window").textContent, "1 h");
+  await h.runTimers(400);
+  assert.equal(JSON.parse(requests.filter(request => request.method === "PUT").at(-1).body).settings.xp.window, 3600);
+});
+
+test("recent pickups list newest first with source, expire, and can hide an item", async () => {
+  const h = harness();
+  await h.flush();
+  const pickup = (id, name, source, count, at = now()) => ({ id, at, source, count,
+    item: item({ name, itemId: `minecraft:${name.toLowerCase()}`, count: 1 }) });
+  h.sockets[0].message(initial(snapshot({ pickups: [pickup(1, "Dirt", "Picked up", 3, now() - 60_000),
+    pickup(2, "Cobblestone", "Picked up", 23), pickup(3, "Diamond", "from Chest", 2)] })));
+  const rows = () => h.get("#pickups-list").children;
+  assert.deepEqual(rows().map(row => row.children[1].textContent),
+    ["+2 Diamondfrom Chest · now", "+23 CobblestonePicked up · now"], "older than the 30 s default lifetime is hidden");
+  rows()[0].children[2].emit("click");
+  assert.deepEqual(rows().map(row => row.children[1].children[0].textContent), ["+23 Cobblestone"]);
+  assert.deepEqual(plain(h.run("layout.settings.pickups.ignored")), ["minecraft:diamond"]);
+});
+
+test("shulker boxes open a window over the dashboard that can be pinned and saved", async () => {
+  const requests = [];
+  const h = harness(defaultFetch(null, requests));
+  await h.flush();
+  const slots = [shulker(), ...inventory().slots.slice(1)];
+  h.sockets[0].message(initial(snapshot({ inventory: { ...inventory(), slots,
+    equipment: { ...inventory().equipment, mainhand: slots[0] } } })));
+  const placement = h.get("#tile-inventory").style.getPropertyValue("--grid-row");
+  hotbar(h)[0].emit("click", { clientX: 50, clientY: 60 });
+  const windows = () => h.get("#windows").children;
+  assert.equal(windows().length, 1);
+  const [head, , grid] = windows()[0].children;
+  assert.equal(head.children[0].textContent, "Shulker Box");
+  assert.equal(grid.children.length, 27);
+  assert.equal(slotParts(grid.children[0]).fallback.textContent, "DI");
+  assert.equal(h.get("#tile-inventory").style.getPropertyValue("--grid-row"), placement, "tiles do not move");
+  h.events.pointerdown({ target: {} });
+  assert.equal(windows().length, 0, "clicking elsewhere closes an unpinned window");
+  hotbar(h)[0].emit("click", { clientX: 50, clientY: 60 });
+  windows()[0].children[0].children[1].emit("click");
+  h.events.pointerdown({ target: {} });
+  assert.equal(windows().length, 1, "a pinned window stays");
+  await h.runTimers(400);
+  assert.deepEqual(JSON.parse(requests.filter(request => request.method === "PUT").at(-1).body).pinned,
+    [{ source: "inventory", slot: 0, x: 62, y: 72 }]);
+  h.sockets[0].message(update({ inventory: { slots: [{ index: 0, item: empty() }], equipment: { mainhand: empty() } } }));
+  assert.match(windows()[0].children[1].textContent, /Not in your inventory/);
+  assert.equal(windows()[0].children[2].children.length, 27, "the last contents stay visible");
+});
+
+test("villager trades are searchable, navigable with height arrows and can be forgotten", async () => {
+  const requests = [];
+  const h = harness(defaultFetch(null, requests));
+  await h.flush();
+  const farmer = villager({ uuid: "223e4567-e89b-12d3-a456-426614174000", profession: "minecraft:farmer",
+    professionName: "Farmer", x: 500, z: 500, trades: [{ costA: item({ name: "Wheat", count: 20 }), costB: null,
+      result: item({ name: "Emerald", count: 1 }), uses: 12, maxUses: 12 }] });
+  h.sockets[0].message(initial(snapshot({ villagers: [farmer, villager()] })));
+  const list = h.get("#villager-list");
+  assert.equal(list.children.length, 2);
+  assert.match(list.children[0].textContent, /Librarian · Journeyman.*26 m S/, "nearest first");
+  assert.match(list.children[0].textContent, /Mending I/);
+  assert.match(list.children[1].textContent, /Out of stock/);
+  h.get("#villager-search").value = "mending";
+  h.get("#villager-search").emit("input");
+  assert.equal(list.children.length, 1);
+  list.children[0].children[0].children[2].emit("click");
+  const nav = h.get("#villager-nav");
+  assert.equal(nav.hidden, false);
+  assert.match(nav.textContent, /▲ 16 blocks up/, "more than 5 blocks above shows an up arrow");
+  list.children[0].children[0].children[3].emit("click");
+  await h.flush();
+  assert.equal(requests.at(-1).url, "/api/villagers/123e4567-e89b-12d3-a456-426614174000");
+  assert.equal(requests.at(-1).method, "DELETE");
+  assert.equal(nav.hidden, true);
+});
+
+test("a new advancement pops up for the configured time, but old ones do not", async () => {
+  const h = harness();
+  await h.flush();
+  h.sockets[0].message(initial(snapshot({ history: history({ events: [
+    { id: 1, timestamp: 100, category: "advancement", label: "Advancement made: Old", details: "" }] }) })));
+  assert.equal(h.get("#advancement-popup").hidden, true);
+  h.sockets[0].message(update({ history: { sessionId: 1, active: true, firstId: 1, upsert: [
+    { id: 2, timestamp: 200, category: "advancement", label: "Goal reached: Hot Stuff", details: "Fill a bucket with lava" }] } }));
+  assert.equal(h.get("#advancement-popup").hidden, false);
+  assert.match(h.get("#advancement-popup").textContent, /Hot Stuff/);
+  assert.equal([...h.timers.values()].some(timer => timer.delay === 10_000), true);
+});
+
+test("advancements list shows tab progress, closest first, and hides secrets as ???", async () => {
+  const h = harness();
+  await h.flush();
+  const entry = (id, overrides) => ({ id: `minecraft:adventure/${id}`, tab: "minecraft:adventure/root", title: id,
+    description: `Do ${id}`, frame: "task", icon: "e0-aa", foil: false, hidden: false, done: false, doneAt: null,
+    criteriaDone: 0, criteriaTotal: 1, remaining: [], ...overrides });
+  h.sockets[0].message(initial(snapshot({ advancements: { tabs: [{ id: "minecraft:adventure/root", title: "Adventure",
+    icon: "e0-aa", foil: false, done: 1, total: 4 }], entries: [
+    entry("done", { done: true, criteriaDone: 1 }), entry("adventuring_time", { criteriaDone: 40, criteriaTotal: 53,
+      remaining: ["Badlands", "Cherry grove"] }), entry("monster_hunter", { criteriaDone: 10, criteriaTotal: 35 }),
+    entry("secret", { hidden: true })] } })));
+  assert.equal(h.get("#advancements-status").textContent, "1 / 4");
+  assert.match(h.get("#advancement-tabs").textContent, /Adventure1\/4/);
+  const rows = h.get("#advancement-list").children;
+  assert.deepEqual(rows.map(row => row.children[0].children[1].textContent), ["adventuring_time", "monster_hunter", "???"]);
+  assert.equal(rows[0].children[2].textContent, "BadlandsCherry grove");
+  assert.equal(rows[2].children[1].textContent, "Hidden advancement: keep playing to reveal it.");
+});
+
+test("a rules-only tile keeps its space and appears when a rule made in the editor matches", async () => {
+  const requests = [];
+  const h = harness(defaultFetch(null, requests));
+  await h.flush();
+  h.sockets[0].message(initial(snapshot()));
+  h.get("#edit-toggle").emit("click");
+  const movement = h.get("#tile-movement");
+  const position = movement.style.getPropertyValue("--grid-row");
+  const modeToggle = h.get("#head-movement").children.at(-1);
+  modeToggle.emit("click");
+  assert.equal(modeToggle.textContent, "Rules only");
+  assert.equal(movement.hidden, false, "still shown while customizing");
+  h.get("#rules-open").emit("click");
+  h.get("#rule-add").emit("click");
+  assert.equal(h.run("layout.rules.length"), 1);
+  assert.deepEqual(plain(h.run("layout.rules[0].groups")), [[{ type: "dimension", values: ["minecraft:the_nether"] }]]);
+  const card = h.get("#rules-list").children[0];
+  const tileSelects = card.children[2].children[2].children;
+  const movementSelect = tileSelects[TILE_INDEX_MOVEMENT].children[1];
+  movementSelect.value = "show";
+  movementSelect.emit("change");
+  assert.equal(h.run("layout.rules[0].tiles.movement"), "show");
+  h.get("#rules-dialog-close").emit("click");
+  h.get("#edit-done").emit("click");
+  assert.equal(movement.hidden, true, "rules-only tiles are hidden until a rule shows them");
+  assert.equal(movement.style.getPropertyValue("--grid-row"), position, "and keep their place");
+  h.sockets[0].message(update({ dimension: "minecraft:the_nether" }));
+  assert.equal(movement.hidden, false, "the rule shows the tile in the Nether");
+  assert.equal(h.get("#tile-statistics").style.getPropertyValue("--grid-row"), "5 / span 9", "nothing else moves");
+  await h.runTimers(400);
+  const saved = JSON.parse(requests.filter(request => request.method === "PUT").at(-1).body);
+  assert.equal(saved.tiles.find(tile => tile.id === "movement").rulesOnly, true);
+  assert.equal(saved.rules[0].tiles.movement, "show");
+});
+
+const TILE_INDEX_MOVEMENT = 6;

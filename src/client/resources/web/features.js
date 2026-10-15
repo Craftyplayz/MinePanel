@@ -223,10 +223,10 @@ xpParts.window.addEventListener("click", () => setHidden(xpParts.menu, !xpParts.
 
 function renderXp(player) {
   const xp = player?.available ? player.xp : null;
-  const window = displaySettings().xp.window;
-  writeText(xpParts.window, formatWindow(window));
+  const span = displaySettings().xp.window;
+  writeText(xpParts.window, formatWindow(span));
   for (const choice of xpParts.menu.children) {
-    choice.setAttribute("aria-checked", String(choice.dataset.window === String(window)));
+    choice.setAttribute("aria-checked", String(choice.dataset.window === String(span)));
   }
   if (!xp) {
     writeText(xpParts.status, "Unavailable");
@@ -238,12 +238,12 @@ function renderXp(player) {
     writeText(xpParts.hundred, "—");
     return;
   }
-  const perHour = xpPerHour(xp, window);
+  const perHour = xpPerHour(xp, span);
   writeText(xpParts.status, perHour > 0 ? "Gaining" : "Idle");
   writeText(xpParts.level, `Level ${xp.level}`);
   xpParts.fill.style.width = `${Math.round(xp.progress * 100)}%`;
   writeText(xpParts.rate, `${formatCount(perHour)} XP/h`);
-  writeText(xpParts.gained, `+${formatCount(xp.gained[window])} XP in the last ${formatWindow(window)}`);
+  writeText(xpParts.gained, `+${formatCount(xp.gained[span])} XP in the last ${formatWindow(span)}`);
   const toNext = Math.max(0, Math.ceil(xpForNextLevel(xp.level) * (1 - xp.progress)));
   writeText(xpParts.next, `${formatCount(toNext)} XP · ${formatEta(secondsToGain(toNext, perHour))}`);
   const target = nextHundred(xp.level);
@@ -1042,4 +1042,9 @@ featureHooks.tick.push(() => {
   renderPickups(currentPlayerState);
 });
 
+// Panels that only appear on demand start hidden (the markup says so too).
+for (const element of [xpParts.menu, pickupParts.form, advancementParts.form, advancementParts.popup, portalBox,
+  villagerParts.nav, rulesDialog, enderChestButton, portalLink]) {
+  setHidden(element, true);
+}
 featureHooks.layout.forEach(hook => hook());

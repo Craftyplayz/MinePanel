@@ -36,7 +36,7 @@ function validateTooltip(tooltip) {
 
 /** Shulker boxes and bundles list what they hold (one level deep); other items have null contents. */
 function validateItem(item, nested = false) {
-  requireValid(object(item) && (item.contents === undefined || item.contents === null
+  requireValid(object(item) && (item.contents === null
     || !nested && Array.isArray(item.contents) && item.contents.length <= 64));
   const contents = Array.isArray(item.contents) ? item.contents.map(inner => validateItem(inner, true)) : null;
   requireValid(!item.empty || contents === null);

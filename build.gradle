@@ -59,7 +59,7 @@ def serviceTest = tasks.register('serviceTest', JavaExec) {
 
 def frontendSyntax = tasks.register('frontendSyntax', Exec) {
     // node --check accepts one file, so check each dashboard script in turn.
-    commandLine 'node', '-e', "for (const file of ['protocol.js', 'layout.js', 'app.js']) " +
+    commandLine 'node', '-e', "for (const file of ['protocol.js', 'layout.js', 'rules.js', 'app.js', 'features.js']) " +
             "require('child_process').execFileSync(process.execPath, ['--check', 'src/client/resources/web/' + file], { stdio: 'inherit' })"
 }
 
