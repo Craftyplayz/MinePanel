@@ -760,8 +760,9 @@ test("chosen statistics render in order with the game's formatting; recent shows
   ]) })));
   const pinned = h.get("#statistics-entries").children;
   const cells = row => row.children.map(cell => cell.textContent);
-  assert.deepEqual(pinned.map(cells), [["Distance Walked", "123.45 m", "+0.5 m"], ["Jumps", "40", "+3"],
-    ["Time Played", "1.02 h", "+3"]], "chosen statistics follow the settings order");
+  assert.deepEqual(pinned.map(cells), [["Distance Walked", "123.45 m", "+0.5 m"], ["Sprint One Cm", "0", ""],
+    ["Jumps", "40", "+3"], ["Deaths", "0", ""], ["Mob Kills", "0", ""], ["Player Kills", "0", ""],
+    ["Time Played", "1.02 h", "+3"]], "chosen statistics follow the settings order; ones not received read as zero");
   const recent = h.get("#statistics-recent").children;
   assert.deepEqual(recent.map(cells), [["Diamond PickaxeUsed", "12", "+12"], ["StoneMined", "12", "+12"]],
     "recent excludes chosen, excluded and older-than-a-minute statistics, newest first");
@@ -771,7 +772,9 @@ test("chosen statistics render in order with the game's formatting; recent shows
   assert.equal(h.get("#statistics-entries").replacements, replacements, "unchanged statistics are not rebuilt");
   h.sockets[0].message(update({ baseRevision: 7, revision: 8, statistics: null }));
   assert.equal(h.get("#statistics-status").textContent, "Unavailable");
-  assert.equal(h.get("#statistics-entries").textContent, "Statistics unavailable.");
+  assert.deepEqual(h.get("#statistics-entries").children.map(cells), [["Distance Walked", "0", ""],
+    ["Sprint One Cm", "0", ""], ["Jumps", "0", ""], ["Deaths", "0", ""], ["Mob Kills", "0", ""],
+    ["Player Kills", "0", ""], ["Time Played", "0", ""]], "unavailable statistics read as zero under their last known labels");
   assert.equal(h.get("#statistics-recent-section").hidden, true);
 });
 
@@ -902,7 +905,7 @@ test("history stays as previous session on world exit but clears on disconnect a
   assert.equal(h.get("#history-status").textContent, "No session");
   assert.equal(h.get("#history-entries").children.length, 0);
   assert.equal(h.get("#history-empty").textContent, "No gameplay events.");
-  assert.equal(h.get("#statistics-entries").textContent, "Statistics unavailable.");
+  assert.equal(h.get("#statistics-entries").children.every(row => row.children[1].textContent === "0"), true);
   await h.reconnect();
   h.sockets[1].message(initial(snapshot({ history: history({ sessionId: 0, active: false, events: [] }) })));
   assert.equal(h.get("#history-status").textContent, "No session");

@@ -328,6 +328,15 @@ function statisticRow(entry, showCategory, className = "counter-row") {
   return row;
 }
 
+// Labels the game has sent, so statistics keep their names while they read as zero.
+const knownStatisticLabels = new Map();
+const statisticLabel = id => knownStatisticLabels.get(id)
+  ?? id.slice(id.lastIndexOf(":") + 1).replaceAll("_", " ").replace(/\b\w/g, letter => letter.toUpperCase());
+
+function zeroStatistic(id) {
+  return { id, label: statisticLabel(id), category: "General", display: "0", session: 0, sessionDisplay: "0" };
+}
+
 /** Statistics changed in the last minute that are neither pinned nor excluded, newest first. */
 function recentStatistics(statistics, settings, now = Date.now()) {
   const hidden = new Set([...settings.shown, ...settings.recentExcluded]);
@@ -341,16 +350,15 @@ function renderStatistics(statistics, now = Date.now()) {
   writeText(statisticsStatus, statistics ? "Session" : "Unavailable");
   const settings = layout.settings.statistics;
   const byId = new Map((statistics?.entries ?? []).map(entry => [entry.id, entry]));
-  const pinned = settings.shown.map(id => byId.get(id)).filter(Boolean);
+  for (const entry of byId.values()) knownStatisticLabels.set(entry.id, entry.label);
+  // Chosen statistics the game has not reported (or all of them while unavailable) read as zero.
+  const pinned = settings.shown.map(id => byId.get(id) ?? zeroStatistic(id));
   const recent = recentStatistics(statistics, settings, now);
-  const key = JSON.stringify([statistics ? pinned : null, recent.map(entry => [entry.id, entry.display, entry.session])]);
+  const key = JSON.stringify([pinned, recent.map(entry => [entry.id, entry.display, entry.session])]);
   if (key === statisticsKey) return;
   statisticsKey = key;
-  if (!statistics) {
-    statisticsEntries.replaceChildren(create("p", "empty-note", "Statistics unavailable."));
-  } else if (!pinned.length) {
-    statisticsEntries.replaceChildren(create("p", "empty-note",
-      statistics.entries.length ? "No statistics chosen. Use ⚙ to pick some." : "Waiting for statistics from the server."));
+  if (!pinned.length) {
+    statisticsEntries.replaceChildren(create("p", "empty-note", "No statistics chosen. Use ⚙ to pick some."));
   } else {
     statisticsEntries.replaceChildren(...pinned.map(entry => statisticRow(entry, true)));
   }
@@ -369,7 +377,7 @@ function renderStatisticOptions() {
   const settings = layout.settings.statistics;
   const known = new Map((displayedStatistics?.entries ?? []).map(entry => [entry.id, entry]));
   for (const id of [...settings.shown, ...settings.recentExcluded]) {
-    if (!known.has(id)) known.set(id, { id, label: id.slice(id.lastIndexOf(":") + 1).replaceAll("_", " "), category: "Not received yet" });
+    if (!known.has(id)) known.set(id, { id, label: statisticLabel(id), category: "Not received yet" });
   }
   const query = statisticsSearch.value.trim().toLowerCase();
   const groups = new Map();
