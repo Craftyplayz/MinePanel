@@ -19,10 +19,6 @@ import java.util.ArrayDeque;
 final class MotionCollector {
     /** Speed is averaged over this many ticks (half a second) so it reads steadily. */
     private static final int WINDOW_TICKS = 10;
-    private static final ItemStack BOOTS = new ItemStack(Items.NETHERITE_BOOTS);
-    private static final ItemStack TURTLE_SHELL = new ItemStack(Items.TURTLE_HELMET);
-    private static final ItemStack SADDLE = new ItemStack(Items.SADDLE);
-    private static final ItemStack ELYTRA = new ItemStack(Items.ELYTRA);
 
     private final ArrayDeque<Vec3> positions = new ArrayDeque<>();
 
@@ -56,25 +52,25 @@ final class MotionCollector {
         if (player.isFallFlying()) {
             mode = "elytra";
             ItemStack glider = glider(player);
-            icon = glider.isEmpty() ? ELYTRA : glider;
+            icon = glider.isEmpty() ? new ItemStack(Items.ELYTRA) : glider;
         } else if (player.getVehicle() != null) {
             mode = "riding";
             // A horse (or any ridden animal) wearing armor shows that armor, enchantments and all.
             ItemStack armor = player.getVehicle() instanceof LivingEntity mount
                     ? mount.getItemBySlot(EquipmentSlot.BODY) : ItemStack.EMPTY;
-            icon = armor.isEmpty() ? SADDLE : armor;
+            icon = armor.isEmpty() ? new ItemStack(Items.SADDLE) : armor;
         } else if (player.isSwimming() || player.isInWater() && !player.onGround()) {
             mode = "swimming";
-            icon = TURTLE_SHELL;
+            icon = new ItemStack(Items.TURTLE_HELMET);
         } else if (player.getAbilities().flying) {
             mode = "flying";
-            icon = BOOTS;
+            icon = new ItemStack(Items.NETHERITE_BOOTS);
         } else if (!player.onGround() && vertical < -1) {
             mode = "falling";
-            icon = BOOTS;
+            icon = new ItemStack(Items.NETHERITE_BOOTS);
         } else {
             mode = "ground";
-            icon = BOOTS;
+            icon = new ItemStack(Items.NETHERITE_BOOTS);
         }
         ItemStack glider = glider(player);
         return Motion.rounded(mode, speed, horizontal, vertical, player.getYRot(), player.getXRot(),
