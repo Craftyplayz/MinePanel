@@ -4,7 +4,7 @@ MinePanel is a client-side Fabric companion dashboard targeting Minecraft Java E
 
 ## Requirements and build
 
-The verified Fabric 26.1.2 example uses Java 25, Fabric Loader 0.19.5, Fabric API 0.155.3+26.1.2, Loom 1.18-SNAPSHOT, and Gradle 9.7.1. Build and test the release with:
+MinePanel builds with Java 25, Fabric Loader 0.19.3, Fabric API 0.154.0+26.1.2, Loom 1.18-SNAPSHOT, and Gradle 9.7.1, and requires at least that Loader and Fabric API at runtime. Build and test the release with:
 
 ```sh
 ./gradlew releaseBuild
