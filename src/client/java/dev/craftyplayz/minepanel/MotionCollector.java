@@ -20,14 +20,37 @@ final class MotionCollector {
     /** Speed is averaged over this many ticks (half a second) so it reads steadily. */
     private static final int WINDOW_TICKS = 10;
 
+    /** Moving this far (blocks) from where the player last was active counts as moving; bobbing in water does not. */
+    private static final double IDLE_DRIFT = 0.25;
+
     private final ArrayDeque<Vec3> positions = new ArrayDeque<>();
+    // Where the player, their view and the mouse cursor were when they were last active, and when that was.
+    private Vec3 idleAnchor;
+    private float idleYaw;
+    private float idlePitch;
+    private double idleMouseX;
+    private double idleMouseY;
+    private long idleSince;
 
     void reset() {
         positions.clear();
+        idleAnchor = null;
     }
 
-    void tick(Player player) {
+    void tick(Minecraft minecraft, Player player) {
         Vec3 position = player.position();
+        double mouseX = minecraft.mouseHandler.xpos();
+        double mouseY = minecraft.mouseHandler.ypos();
+        if (idleAnchor == null || idleAnchor.distanceToSqr(position) > IDLE_DRIFT * IDLE_DRIFT
+                || player.getYRot() != idleYaw || player.getXRot() != idlePitch
+                || mouseX != idleMouseX || mouseY != idleMouseY) {
+            idleAnchor = position;
+            idleYaw = player.getYRot();
+            idlePitch = player.getXRot();
+            idleMouseX = mouseX;
+            idleMouseY = mouseY;
+            idleSince = System.currentTimeMillis();
+        }
         // A jump of more than 100 blocks in one tick is a teleport or dimension change, not movement.
         if (!positions.isEmpty() && positions.peekLast().distanceToSqr(position) > 100 * 100) positions.clear();
         positions.addLast(position);
@@ -75,7 +98,8 @@ final class MotionCollector {
         ItemStack glider = glider(player);
         return Motion.rounded(mode, speed, horizontal, vertical, player.getYRot(), player.getXRot(),
                 withoutContents(MinecraftInventoryCollector.item(minecraft, icon, icons)),
-                glider.isEmpty() ? null : withoutContents(MinecraftInventoryCollector.item(minecraft, glider, icons)));
+                glider.isEmpty() ? null : withoutContents(MinecraftInventoryCollector.item(minecraft, glider, icons)),
+                idleAnchor == null ? null : idleSince);
     }
 
     /** The equipped item that lets the player glide (normally an elytra in the chest slot). */

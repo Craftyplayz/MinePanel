@@ -69,7 +69,8 @@ final class LayoutRules {
             Map.entry("map", new int[] {2, 2}), Map.entry("build", new int[] {2, 2}),
             Map.entry("movement", new int[] {2, 2}), Map.entry("xp", new int[] {2, 2}),
             Map.entry("pickups", new int[] {2, 2}), Map.entry("advancements", new int[] {3, 3}),
-            Map.entry("villagers", new int[] {3, 3}), Map.entry("performance", new int[] {2, 2}));
+            Map.entry("villagers", new int[] {3, 3}), Map.entry("performance", new int[] {2, 2}),
+            Map.entry("afk", new int[] {3, 3}));
     private static final Pattern ID = Pattern.compile("[a-z0-9-]{1,32}");
     private static final Pattern REGISTRY_ID = Pattern.compile("[a-z0-9_.-]+:[a-z0-9/._-]+");
     private static final Pattern STATISTIC_ID = Pattern.compile("[a-z0-9_.-]+:[a-z0-9_.-]+/[a-z0-9_.-]+:[a-z0-9/._-]+");
@@ -91,7 +92,7 @@ final class LayoutRules {
             types.put(type, new Spec("choices"));
         }
         for (String type : List.of("day", "yLevel", "health", "food", "saturation", "absorption", "xpLevel",
-                "freeSlots", "width", "sessionTime", "spawnDistance", "air", "armor")) {
+                "freeSlots", "width", "sessionTime", "spawnDistance", "air", "armor", "afk")) {
             types.put(type, new Spec("compare"));
         }
         for (String type : List.of("still", "elytra", "inGame", "onFire", "inWater", "inLava", "inRain", "sneaking",

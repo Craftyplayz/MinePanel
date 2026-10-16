@@ -13,12 +13,12 @@ const LAYOUT_COLUMNS = 12;
 const LAYOUT_MAX_Y = 1000;
 const LAYOUT_MAX_H = 60;
 const TILE_IDS = ["player", "inventory", "statistics", "history", "map", "build",
-  "movement", "xp", "pickups", "advancements", "villagers", "performance"];
+  "movement", "xp", "pickups", "advancements", "villagers", "performance", "afk"];
 const TILE_MINIMUMS = {
   player: { w: 2, h: 2 }, inventory: { w: 3, h: 2 }, statistics: { w: 2, h: 3 },
   history: { w: 3, h: 3 }, map: { w: 2, h: 2 }, build: { w: 2, h: 2 },
   movement: { w: 2, h: 2 }, xp: { w: 2, h: 2 }, pickups: { w: 2, h: 2 }, advancements: { w: 3, h: 3 },
-  villagers: { w: 3, h: 3 }, performance: { w: 2, h: 2 }
+  villagers: { w: 3, h: 3 }, performance: { w: 2, h: 2 }, afk: { w: 3, h: 3 }
 };
 const MAX_STATISTIC_SETTINGS = 512;
 const DEFAULT_MAP_URL = "http://127.0.0.1:8080/";
@@ -132,7 +132,8 @@ function defaultLayout() {
     { id: "advancements", enabled: true, x: 8, y: 17, w: 4, h: 8 },
     { id: "villagers", enabled: true, x: 0, y: 25, w: 8, h: 8 },
     { id: "map", enabled: false, x: 0, y: 33, w: 6, h: 6 },
-    { id: "build", enabled: false, x: 6, y: 33, w: 6, h: 4 }
+    { id: "build", enabled: false, x: 6, y: 33, w: 6, h: 4 },
+    { id: "afk", enabled: false, x: 6, y: 37, w: 6, h: 6 }
   ], profiles: [], pinned: [], updates: { intervalMillis: DEFAULT_UPDATE_INTERVAL },
   animation: { ...DEFAULT_ANIMATION }, folders: [], places: [], toggles: [], rules: [] };
 }
@@ -421,6 +422,8 @@ const CONDITION_TYPES = {
   movement: { family: "player", kind: "choices" },
   speed: { family: "player", kind: "speed" },
   still: { family: "player", kind: "none" },
+  // Minutes without moving, turning or moving the mouse cursor.
+  afk: { family: "player", kind: "compare" },
   onFire: { family: "player", kind: "none" },
   inWater: { family: "player", kind: "none" },
   inLava: { family: "player", kind: "none" },
@@ -873,6 +876,8 @@ const RULE_TEMPLATES = [
     when: [{ type: "xpGained", compare: ">=", value: 1, window: 10 }], then: [{ do: "show", panel: "xp" }] },
   { id: "idle-movement", name: "Hide idle movement", note: "Hides Movement after 30 s without moving.",
     when: [{ type: "still", for: 30 }], then: [{ do: "hide", panel: "movement" }] },
+  { id: "afk-screen", name: "AFK screen", note: "Shows the AFK panel nearly full screen after 2 min AFK.",
+    when: [{ type: "afk", compare: ">=", value: 2 }], then: [{ do: "focus", panel: "afk" }] },
   { id: "villagers-trading", name: "Villagers while trading", note: "Set the Villagers panel to Rules only.",
     when: [{ type: "screen", values: ["trading"] },
       { join: "or", type: "villagersNearby", radius: 16, compare: ">=", value: 3 }],

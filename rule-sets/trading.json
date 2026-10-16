@@ -1,0 +1,36 @@
+{
+  "format": "minepanel-rules",
+  "version": 1,
+  "profiles": [
+    {
+      "id": "trading-panel",
+      "name": "Trading Panel",
+      "panels": {
+        "villagers": { "x": 0, "y": 0,  "w": 8, "h": 12, "mode": "rules" },
+        "player":    { "x": 8, "y": 0,  "w": 4, "h": 4 },
+        "xp":        { "x": 8, "y": 4,  "w": 4, "h": 4 },
+        "pickups":   { "x": 8, "y": 8,  "w": 4, "h": 4 },
+        "inventory": { "x": 0, "y": 12, "w": 8, "h": 8 },
+        "history":   { "x": 8, "y": 12, "w": 4, "h": 8 }
+      },
+      "settings": {
+        "inventory": { "showArmor": true },
+        "xp": { "window": 300 }
+      }
+    }
+  ],
+  "rules": [
+    {
+      "id": "trading-hall",
+      "name": "Trading hall",
+      "when": [
+        { "type": "villagersNearby", "radius": 10, "compare": ">=", "value": 5 }
+      ],
+      "then": [
+        { "do": "profile", "profile": "trading-panel" },
+        { "do": "show", "panel": "villagers" }
+      ],
+      "timing": { "delayMs": 3000, "lingerMs": 20000 }
+    }
+  ]
+}

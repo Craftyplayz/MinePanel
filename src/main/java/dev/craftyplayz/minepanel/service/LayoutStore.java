@@ -53,7 +53,7 @@ public final class LayoutStore {
     private static final Pattern ID = Pattern.compile("[a-z0-9-]{1,32}");
     private static final Pattern ITEM_ID = Pattern.compile("[a-z0-9_.-]+:[a-z0-9/._-]+");
     public static final List<String> TILE_IDS = List.of("player", "inventory", "statistics", "history", "map", "build",
-            "movement", "xp", "pickups", "advancements", "villagers", "performance");
+            "movement", "xp", "pickups", "advancements", "villagers", "performance", "afk");
     /** Version 1 condition types; version 2 types are in {@link LayoutRules}. */
     public static final List<String> V1_CONDITION_TYPES = List.of("world", "dimension", "biome", "time", "gameMode",
             "health", "food", "saturation", "effect", "movement", "elytra", "advancement", "combat");

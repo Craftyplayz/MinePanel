@@ -296,6 +296,7 @@ Answered by the maintainer on 2026-10-16.
 | `effect` | `values`; optional `level` and `remaining` (seconds) compares | Level is 1-based. Infinite effects have infinite time remaining |
 | `speed` | `axis` (total, horizontal, vertical); compare | In blocks per second. Vertical is signed (negative while falling) |
 | `still` | — | Total speed below 0.1 b/s |
+| `afk` | compare (minutes) | Minutes since the player last moved more than ¼ block, turned or moved the mouse cursor (tracked by the mod every tick). Unknown with an older mod |
 | `holding` | `item`, `hand` (either, main, off) | |
 | `hasItem` | `item`, compare, optional `enderChest` | Counts the 36 slots, armor and offhand, plus the last seen ender chest if `enderChest` is set |
 | `durability` | `target` (held, armor, tool), compare (percent) | True if any matching item passes. `tool` means any damageable item in the inventory or offhand |

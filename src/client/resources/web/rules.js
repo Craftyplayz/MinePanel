@@ -100,6 +100,15 @@ const namespaced = value => {
   return lower.includes(":") ? lower : `minecraft:${lower.replace(/\s+/g, "_")}`;
 };
 
+/**
+ * Seconds the player has stood still without turning or moving the mouse cursor (the mod tracks this every tick),
+ * or null when the mod doesn't report it.
+ */
+function afkSeconds(player, now) {
+  const since = player?.available ? player.motion?.idleSince : null;
+  return typeof since === "number" ? Math.max(0, (now - since) / 1000) : null;
+}
+
 function timeOfDay(ticks) {
   if (ticks >= 23000 || ticks < 1000) return "dawn";
   if (ticks < 12000) return "day";
@@ -343,6 +352,10 @@ function evaluateCondition(condition, ctx) {
       return compared(player.motion[SPEED_KEYS[condition.axis]], condition);
     case "still":
       return outcome(player.motion.speed < STILL_SPEED, player.motion.speed);
+    case "afk": {
+      const seconds = afkSeconds(player, now);
+      return seconds === null ? UNKNOWN : compared(seconds / 60, condition);
+    }
     case "holding": {
       const { mainhand, offhand } = player.inventory.equipment;
       const hands = condition.hand === "main" ? [mainhand] : condition.hand === "off" ? [offhand] : [mainhand, offhand];

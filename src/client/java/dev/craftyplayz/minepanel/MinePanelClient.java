@@ -207,7 +207,7 @@ public final class MinePanelClient implements ClientModInitializer {
             var feet = client.player.blockPosition();
             portals.observe(millis, dimension, feet.getX(), feet.getY(), feet.getZ(),
                     WorldCollector.inNetherPortal(client.level, client.player));
-            motion.tick(client.player);
+            motion.tick(client, client.player);
             worldData.tick(client, client.level);
             build.tick();
             if (++saveTicks % SAVE_INTERVAL_TICKS == 0) lifecycleExecutor.execute(worldStore::save);

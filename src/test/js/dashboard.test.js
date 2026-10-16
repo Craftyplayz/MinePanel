@@ -49,7 +49,7 @@ function details() {
       weather: "clear", day: 3, time: 6000, gameMode: "survival" },
     motion: { mode: "ground", speed: 4.3, horizontalSpeed: 4.3, verticalSpeed: 0, yaw: 180, pitch: 0,
       icon: item({ itemId: "minecraft:netherite_boots", name: "Netherite Boots", count: 1, maxCount: 1 }),
-      glider: null },
+      glider: null, idleSince: null },
     xp: { level: 5, progress: 0.5, points: 63, gained: { 10: 0, 30: 0, 60: 12, 300: 40, 600: 40, 3600: 90 } },
     portal: { crossing: null, obsidian: [], lit: null },
     pickups: [], advancements: null, villagers: [], enderChest: null, performance: performance(),
@@ -1200,7 +1200,7 @@ test("imported or stored layouts are validated and completed", () => {
   const normalize = value => h.run(`normalizeLayout(${JSON.stringify(value)})`);
   const partial = normalize({ version: 1, tiles: [{ id: "history", enabled: true, x: 0, y: 5, w: 12, h: 2 }] });
   assert.deepEqual(plain(partial.tiles[0]), { id: "history", enabled: true, x: 0, y: 0, w: 12, h: 3 });
-  assert.equal(partial.tiles.length, 12);
+  assert.equal(partial.tiles.length, 13);
   assert.equal(partial.tiles.filter(tile => tile.enabled).length, 1, "missing tiles are added disabled");
   for (const bad of [null, [], { version: 3, tiles: [] }, { version: 1 }, { version: 2 },
     { version: 1, tiles: [{ id: "chat", enabled: true, x: 0, y: 0, w: 1, h: 1 }] },
@@ -1229,7 +1229,8 @@ test("the saved layout is loaded after the session and applied to tile grid plac
   assert.deepEqual(toggles.map(chip => [chip.textContent, chip.attributes["aria-pressed"]]),
     [["Player", "false"], ["Inventory", "true"], ["Statistics", "false"], ["Activity log", "false"],
       ["JourneyMap", "false"], ["Build progress", "false"], ["Movement", "false"], ["Experience", "false"],
-      ["Recent pickups", "false"], ["Advancements", "false"], ["Villager trades", "false"], ["Performance", "false"]]);
+      ["Recent pickups", "false"], ["Advancements", "false"], ["Villager trades", "false"], ["Performance", "false"],
+      ["AFK", "false"]]);
   await h.runTimers(400);
   const saves = requests.filter(request => request.url === "/api/layout" && request.method === "PUT");
   assert.equal(saves.length, 1, "a version 1 layout is saved back converted");
@@ -1708,7 +1709,7 @@ test("rules v2: the documented layout round-trips and missing parts get defaults
   for (const key of ["rules", "folders", "places", "toggles", "animation", "pinned"]) {
     assert.deepEqual(layout[key], docLayout()[key], key);
   }
-  assert.equal(layout.profiles[0].tiles.length, 12);
+  assert.equal(layout.profiles[0].tiles.length, 13);
   assert.equal(layout.profiles[0].settings.xp.window, 60, "profile settings are completed with defaults");
   assert.deepEqual(plain(R.normalizeLayout(layout)), layout, "normalizing is idempotent");
   assert.deepEqual(plain(R.normalizeLayout(plain(R.defaultLayout()))), plain(R.defaultLayout()));
@@ -1954,6 +1955,9 @@ test("rules v2: every condition type reads the snapshot", () => {
     [{ type: "speed", axis: "vertical", compare: "<", value: 0 }, undefined, false],
     [{ type: "still" }, undefined, false],
     [{ type: "still" }, snapshot({ motion: { ...details().motion, speed: 0.05 } }), true],
+    [{ type: "afk", compare: ">=", value: 1 }, undefined, null],
+    [{ type: "afk", compare: ">=", value: 1 }, snapshot({ motion: { ...details().motion, idleSince: now - 90000 } }), true],
+    [{ type: "afk", compare: ">=", value: 2 }, snapshot({ motion: { ...details().motion, idleSince: now - 90000 } }), false],
     [{ type: "holding", item: "minecraft:stone", hand: "main" }, undefined, true],
     [{ type: "holding", item: "minecraft:stone", hand: "off" }, undefined, false],
     [{ type: "hasItem", item: "minecraft:stone", compare: "=", value: 32 }, undefined, true],
@@ -2431,7 +2435,7 @@ test("rules v2: rule sets arrange profiles: Default, existing ones by name and n
   const mining = next.profiles.find(profile => profile.id === "mine");
   assert.equal(mining.settings.pickups.maxRows, 12);
   assert.equal(mining.settings.xp.window, 3600);
-  assert.equal(mining.tiles.length, 12, "Mining keeps its panels");
+  assert.equal(mining.tiles.length, 13, "Mining keeps its panels");
   const flying = next.profiles.find(profile => profile.name === "Flying");
   assert.equal(flying.id, "fly");
   assert.deepEqual(plain(next.profiles.map(profile => profile.id)), ["keep", "mine", "fly"], "others stay unless replacing");
@@ -2551,6 +2555,27 @@ test("movement shows mode icon, 3D speed in blocks/s and km/h, facing and elytra
   assert.equal(h.get("#movement-vertical").textContent, "↓ Falling 8.9 blocks/s");
   assert.equal(h.get("#movement-glider").textContent, "Elytra: 300/432 · about 5 min of flight left");
   assert.equal(slotParts(h.get("#movement-icon").children[0]).icon.src, "/icon/e0-e1.png");
+});
+
+test("the AFK panel times how long the player has been idle and lists non-zero statistics", async () => {
+  const stored = { version: 1, tiles: [{ id: "afk", enabled: true, x: 0, y: 0, w: 6, h: 6 }] };
+  const h = harness(defaultFetch(stored));
+  await h.flush();
+  h.sockets[0].message(initial(snapshot({ statistics: statistics([counter({ id: "minecraft:custom/minecraft:deaths",
+    label: "Deaths", value: 0, session: 0, display: "0", sessionDisplay: "0" }), counter()]) })));
+  assert.equal(h.get("#afk-timer").textContent, "—", "unknown without the mod's idle time");
+  assert.equal(h.get("#afk-status").textContent, "Unavailable");
+  h.sockets[0].message(update({ revision: 5, baseRevision: 4,
+    motion: { ...details().motion, idleSince: Date.now() - 3_725_000 } }));
+  assert.equal(h.get("#afk-timer").textContent, "1:02:05");
+  assert.equal(h.get("#afk-status").textContent, "AFK");
+  const lines = h.get("#afk-crawl").children;
+  assert.ok(lines.length > 0, "a statistic is shown");
+  assert.ok(lines.every(line => line.title === "Jumps: 40"), "only statistics above zero are shown");
+  h.sockets[0].message(update({ revision: 6, baseRevision: 5,
+    motion: { ...details().motion, idleSince: Date.now() - 2_000 } }));
+  assert.equal(h.get("#afk-timer").textContent, "0:02");
+  assert.equal(h.get("#afk-status").textContent, "Active");
 });
 
 test("experience shows XP/h for the chosen window and the time to the next level and next hundred", async () => {
@@ -3297,6 +3322,14 @@ test("rules on the dashboard: toggles are buttons that flip and save, and Notify
   assert.deepEqual(h.get("#rule-toasts").children.map(toast => toast.textContent), ["Away"]);
   await h.runTimers(400);
   assert.equal(savedLayout(requests).toggles[0].on, true);
+  const reset = bar.children[bar.children.length - 1];
+  assert.equal(reset.textContent, "All off");
+  assert.equal(reset.disabled, false, "All off is available while a toggle is on");
+  reset.emit("click");
+  assert.equal(bar.children[0].attributes["aria-pressed"], "false");
+  assert.equal(bar.children[bar.children.length - 1].disabled, true, "and greyed out once every toggle is off");
+  await h.runTimers(400);
+  assert.equal(savedLayout(requests).toggles[0].on, false, "turning them all off is saved");
 });
 
 test("rules editor: it leaves customizing while open, previews a rule, and docks to inspect panels", async () => {

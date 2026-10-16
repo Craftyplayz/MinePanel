@@ -533,6 +533,148 @@ function drawPerformance(graph) {
   setHidden(performanceParts.lowLine, false);
 }
 
+// ---------------------------------------------------------------------------------------------- AFK
+
+// How long the player has stood still without turning or moving the cursor (afkSeconds in rules.js), above a crawl
+// of random non-zero statistics: each line enters at the top of an inset area, slides slowly down and leaves at the
+// bottom. With reduced motion the lines stand still and a fresh set is shown every few seconds instead.
+const afkParts = { tile: $("#tile-afk"), status: $("#afk-status"), timer: $("#afk-timer"), crawl: $("#afk-crawl") };
+/** Pixels per second: slow enough to read every line while it crosses the panel. */
+const AFK_CRAWL_SPEED = 20;
+/** Pixels between one line and the next. */
+const AFK_CRAWL_GAP = 16;
+/** Below this many seconds the badge says Active rather than AFK. */
+const AFK_BADGE_SECONDS = 10;
+const AFK_STATIC_MILLIS = 8000;
+const afkCrawl = { items: [], bag: [], frame: null, drawn: null, shownAt: 0, empty: null };
+
+function formatAfk(seconds) {
+  const value = Math.floor(seconds);
+  const pad = number => String(number).padStart(2, "0");
+  const hours = Math.floor(value / 3600);
+  const minutes = Math.floor(value % 3600 / 60);
+  return hours ? `${hours}:${pad(minutes)}:${pad(value % 60)}` : `${minutes}:${pad(value % 60)}`;
+}
+
+const afkStatistics = player => (player?.available ? player.statistics?.entries ?? [] : [])
+  .filter(entry => entry.value > 0);
+
+function shuffled(values) {
+  const result = [...values];
+  for (let index = result.length - 1; index > 0; index--) {
+    const other = Math.floor(Math.random() * (index + 1));
+    [result[index], result[other]] = [result[other], result[index]];
+  }
+  return result;
+}
+
+/** A random statistic, without repeats until every one has been shown, and never one already on screen. */
+function nextAfkStatistic(entries) {
+  const byId = new Map(entries.map(entry => [entry.id, entry]));
+  const onScreen = new Set(afkCrawl.items.map(item => item.id));
+  for (let pass = 0; pass < 2; pass++) {
+    while (afkCrawl.bag.length) {
+      const entry = byId.get(afkCrawl.bag.pop());
+      if (entry && !onScreen.has(entry.id)) return entry;
+    }
+    afkCrawl.bag = shuffled(byId.keys());
+  }
+  return null;
+}
+
+function addAfkLine(entry, y) {
+  const element = create("div", "afk-crawl-item");
+  const label = create("span", "label");
+  if (entry.category !== "General") label.appendChild(create("span", "stat-category", entry.category));
+  label.appendChild(create("span", "", entry.label));
+  element.appendChild(label);
+  element.appendChild(create("span", "total", entry.display));
+  element.title = `${entry.label}: ${entry.display}`;
+  afkParts.crawl.appendChild(element);
+  const item = { id: entry.id, element, y, height: element.offsetHeight || 24 };
+  afkCrawl.items.push(item);
+  return item;
+}
+
+function placeAfkLine(item) {
+  item.element.style.transform = `translateY(${Math.round(item.y * 10) / 10}px)`;
+}
+
+function clearAfkCrawl(message = null) {
+  afkCrawl.items = [];
+  afkCrawl.shownAt = 0;
+  afkCrawl.empty = message;
+  afkParts.crawl.replaceChildren(...message ? [create("p", "afk-crawl-empty", message)] : []);
+}
+
+/** Moves every line down by {@code elapsed} ms, drops those past the bottom and starts the next above the top. */
+function stepAfkCrawl(entries, elapsed) {
+  const height = afkParts.crawl.clientHeight;
+  for (const item of afkCrawl.items) item.y += elapsed / 1000 * AFK_CRAWL_SPEED;
+  for (const item of afkCrawl.items) if (item.y >= height) item.element.remove?.();
+  afkCrawl.items = afkCrawl.items.filter(item => item.y < height);
+  const last = afkCrawl.items.at(-1);
+  if (!last || last.y >= AFK_CRAWL_GAP) {
+    const entry = nextAfkStatistic(entries);
+    if (entry) {
+      const item = addAfkLine(entry, 0);
+      item.y = (last ? last.y - AFK_CRAWL_GAP : 0) - item.height;
+    }
+  }
+  afkCrawl.items.forEach(placeAfkLine);
+}
+
+/** Reduced motion: fills the area from the top with a fresh set of lines every AFK_STATIC_MILLIS. */
+function showStaticAfkLines(entries, now) {
+  if (now - afkCrawl.shownAt < AFK_STATIC_MILLIS && afkCrawl.items.length) return;
+  clearAfkCrawl();
+  afkCrawl.shownAt = now;
+  const height = afkParts.crawl.clientHeight || 0;
+  let y = 0;
+  for (let entry = nextAfkStatistic(entries); entry; entry = y < height ? nextAfkStatistic(entries) : null) {
+    const item = addAfkLine(entry, y);
+    placeAfkLine(item);
+    y += item.height + AFK_CRAWL_GAP;
+  }
+}
+
+const afkAnimating = () => !afkParts.tile.hidden && !document.hidden && afkParts.crawl.clientHeight > 0
+  && !reducedMotion?.matches && typeof window.requestAnimationFrame === "function";
+
+function animateAfk() {
+  afkCrawl.frame = null;
+  const entries = afkStatistics(currentPlayerState);
+  if (!afkAnimating() || !entries.length) {
+    afkCrawl.drawn = null;
+    return;
+  }
+  const now = Date.now();
+  // A long gap (a hidden tab) resumes where the lines were rather than jumping.
+  stepAfkCrawl(entries, afkCrawl.drawn === null ? 0 : Math.min(100, now - afkCrawl.drawn));
+  afkCrawl.drawn = now;
+  afkCrawl.frame = window.requestAnimationFrame(animateAfk);
+}
+
+function renderAfk(player, now = Date.now()) {
+  const seconds = afkSeconds(player, now);
+  writeText(afkParts.timer, seconds === null ? "—" : formatAfk(seconds));
+  writeText(afkParts.status, seconds === null ? "Unavailable" : seconds >= AFK_BADGE_SECONDS ? "AFK" : "Active");
+  afkParts.status.classList.toggle("muted", seconds === null || seconds < AFK_BADGE_SECONDS);
+  const entries = afkStatistics(player);
+  if (!entries.length) {
+    const message = player?.available ? "No statistics yet." : "Unavailable";
+    if (afkCrawl.empty !== message) clearAfkCrawl(message);
+    return;
+  }
+  if (afkCrawl.empty !== null) clearAfkCrawl();
+  if (afkParts.tile.hidden) return;
+  if (reducedMotion?.matches || typeof window.requestAnimationFrame !== "function") {
+    showStaticAfkLines(entries, now);
+  } else if (afkCrawl.frame === null && afkAnimating()) {
+    afkCrawl.frame = window.requestAnimationFrame(animateAfk);
+  }
+}
+
 // ---------------------------------------------------------------------------------------------- Pickups
 
 const pickupParts = { list: $("#pickups-list"), empty: $("#pickups-empty"), form: $("#pickups-form"),
@@ -1376,7 +1518,7 @@ const rulesError = $("#rules-error");
 const CONDITION_LABELS = { world: "Server / world", dimension: "Dimension", biome: "Biome", time: "Time of day",
   weather: "Weather", day: "Day", gameMode: "Game mode", nearPlace: "Near", yLevel: "Y level", health: "Health",
   food: "Hunger", saturation: "Saturation", absorption: "Absorption", xpLevel: "XP level", effect: "Status effect",
-  movement: "Moving by", speed: "Speed", still: "Standing still", holding: "Holding", hasItem: "Has item",
+  movement: "Moving by", speed: "Speed", still: "Standing still", afk: "AFK for", holding: "Holding", hasItem: "Has item",
   freeSlots: "Free slots", durability: "Durability", elytra: "Wearing elytra", xpGained: "Gained XP",
   pickedUp: "Picked up", statRose: "Statistic rose", minedBlock: "Mined", placedBlock: "Placed",
   killedMob: "Killed", tookDamage: "Took damage (hearts)", advancement: "Advancement earned", died: "Died",
@@ -1393,7 +1535,7 @@ const FAMILY_LABELS = { world: "World", position: "Position", player: "Player", 
   amounts: "Amounts", events: "Events", threats: "Threats", villagers: "Villagers", screens: "Screens",
   features: "Features", meta: "Dashboard" };
 const COMPARE_LABELS = { "<": "<", "<=": "≤", "=": "=", ">=": "≥", ">": ">", "!=": "≠", between: "between" };
-const COMPARE_UNITS = { width: "px", sessionTime: "min", durability: "%", speed: "blocks/s", tookDamage: "hearts",
+const COMPARE_UNITS = { width: "px", sessionTime: "min", afk: "min", durability: "%", speed: "blocks/s", tookDamage: "hearts",
   air: "s", armor: "points", spawnDistance: "blocks" };
 /** Readable names of fixed choices, by RULE_CHOICES key. */
 const CHOICE_LABELS = {
@@ -3098,16 +3240,24 @@ const toastList = $("#rule-toasts");
 const TOAST_MILLIS = 6000;
 const MAX_TOASTS = 4;
 
-/** Named toggles as buttons above the dashboard; clicking one flips it (saved with the layout). */
+/**
+ * Named toggles as buttons above the dashboard; clicking one flips it (saved with the layout). "All off" turns every
+ * toggle off, so the dashboard goes back to what the other rules (or Default) show.
+ */
 function renderToggleBar() {
   setHidden(toggleBar, layout.toggles.length === 0);
-  toggleBar.replaceChildren(...layout.toggles.map(toggle => {
+  const chips = layout.toggles.map(toggle => {
     const chip = button(toggle.name, () => changeLayout({ ...layout, toggles: layout.toggles.map(entry =>
       entry.id === toggle.id ? { ...entry, on: !entry.on } : entry) }), "chip small");
     chip.setAttribute("aria-pressed", String(toggle.on));
     chip.title = `Toggle “${toggle.name}” (used by rule conditions)`;
     return chip;
-  }));
+  });
+  const reset = button("All off", () => changeLayout({ ...layout,
+    toggles: layout.toggles.map(entry => ({ ...entry, on: false })) }), "chip small toggle-reset");
+  reset.disabled = !layout.toggles.some(toggle => toggle.on);
+  reset.title = "Turn every toggle off";
+  toggleBar.replaceChildren(...chips, reset);
 }
 
 /** Notify actions: a short message that fades away. No sound. */
@@ -3135,6 +3285,7 @@ featureHooks.render.push(player => {
   renderMovement(player);
   renderXp(player);
   renderPerformance(player);
+  renderAfk(player);
   renderPickups(player);
   renderBuild(player);
   renderAdvancements(player);
@@ -3149,6 +3300,7 @@ featureHooks.layout.push(() => {
   renderXp(currentPlayerState);
   renderXpSettings();
   renderPerformance(currentPlayerState);
+  renderAfk(currentPlayerState);
   renderPickups(currentPlayerState);
   renderPickupSettings();
   renderBuild(currentPlayerState);
@@ -3161,6 +3313,7 @@ featureHooks.layout.push(() => {
   if (!rulesDialog.hidden && layout !== rulesCommitted && rulesError.hidden) resyncRules();
 });
 featureHooks.tick.push(() => {
+  renderAfk(currentPlayerState);
   renderPickups(currentPlayerState);
   saveKnownIds();
   if (rulesDialog.hidden) return;

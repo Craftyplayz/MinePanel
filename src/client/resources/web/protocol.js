@@ -234,10 +234,12 @@ function validateMotion(motion) {
   requireValid(object(motion) && MOTION_MODES.includes(motion.mode)
     && ["speed", "horizontalSpeed"].every(key => finite(motion[key]) && motion[key] >= 0)
     && finite(motion.verticalSpeed) && finite(motion.yaw) && motion.yaw >= 0 && motion.yaw < 360
-    && finite(motion.pitch) && motion.pitch >= -90 && motion.pitch <= 90);
+    && finite(motion.pitch) && motion.pitch >= -90 && motion.pitch <= 90
+    // When the player last moved, turned or moved the cursor (epoch ms); older mods don't send it.
+    && (motion.idleSince === undefined || motion.idleSince === null || integer(motion.idleSince) && motion.idleSince >= 0));
   return { mode: motion.mode, speed: motion.speed, horizontalSpeed: motion.horizontalSpeed,
     verticalSpeed: motion.verticalSpeed, yaw: motion.yaw, pitch: motion.pitch, icon: filledItem(motion.icon),
-    glider: motion.glider === null ? null : filledItem(motion.glider) };
+    glider: motion.glider === null ? null : filledItem(motion.glider), idleSince: motion.idleSince ?? null };
 }
 
 function validateXp(xp) {
