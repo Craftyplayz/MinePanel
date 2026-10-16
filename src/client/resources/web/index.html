@@ -223,6 +223,7 @@
         </form>
         <div class="advancement-tabs prio-2" id="advancement-tabs"></div>
         <div class="history-filters prio-3">
+          <label>Search <input id="advancement-search" type="search" placeholder="Title or description" maxlength="100"></label>
           <label>Show
             <select id="advancement-filter">
               <option value="closest">Closest to done</option>
@@ -250,11 +251,14 @@
   <div class="windows" id="windows" aria-label="Item windows"></div>
   <div class="advancement-popup" id="advancement-popup" role="status" hidden></div>
   <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+  <div class="rule-toggles" id="rule-toggles" role="group" aria-label="Toggles" hidden></div>
+  <div class="rule-toasts" id="rule-toasts" aria-live="polite"></div>
   <div class="dialog-backdrop" id="rules-dialog" hidden>
     <section class="dialog rules-editor" role="dialog" aria-modal="true" aria-labelledby="rules-dialog-title">
       <header class="dialog-head">
         <h2 id="rules-dialog-title">Rules</h2>
         <span class="rules-error" id="rules-error" role="alert" hidden></span>
+        <button type="button" class="button quiet" id="rules-dock" aria-pressed="false" title="Dock the editor beside the live dashboard to preview rules, inspect panels and place panels on the grid">Side panel</button>
         <button type="button" class="button" id="rules-dialog-close">Done</button>
       </header>
       <div class="rules-body">

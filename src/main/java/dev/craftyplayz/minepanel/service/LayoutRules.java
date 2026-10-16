@@ -4,6 +4,8 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
+import dev.craftyplayz.minepanel.telemetry.SensorNeeds;
+import dev.craftyplayz.minepanel.telemetry.Sensors;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -45,14 +47,21 @@ final class LayoutRules {
     static final List<String> EASINGS = List.of("linear", "ease", "ease-in", "ease-out", "ease-in-out");
     static final List<String> COMPARES = List.of("<", "<=", "=", ">=", ">", "!=", "between");
     static final List<String> ACTIONS = List.of("profile", "show", "hide", "place", "swap", "focus", "set", "notify");
-    static final Map<String, List<String>> CHOICES = Map.of(
-            "time", List.of("dawn", "day", "dusk", "night"),
-            "weather", List.of("clear", "rain", "thunder"),
-            "gameMode", List.of("survival", "creative", "adventure", "spectator"),
-            "movement", List.of("ground", "elytra", "swimming", "riding", "flying", "falling"),
-            "axis", List.of("total", "horizontal", "vertical"),
-            "hand", List.of("either", "main", "off"),
-            "durability", List.of("held", "armor", "tool"));
+    static final int MAX_SENSOR_RADIUS = Sensors.MAX_RADIUS;
+    static final Map<String, List<String>> CHOICES = Map.ofEntries(
+            Map.entry("time", List.of("dawn", "day", "dusk", "night")),
+            Map.entry("weather", List.of("clear", "rain", "thunder")),
+            Map.entry("gameMode", List.of("survival", "creative", "adventure", "spectator")),
+            Map.entry("movement", List.of("ground", "elytra", "swimming", "riding", "flying", "falling")),
+            Map.entry("axis", List.of("total", "horizontal", "vertical")),
+            Map.entry("hand", List.of("either", "main", "off")),
+            Map.entry("durability", List.of("held", "armor", "tool")),
+            Map.entry("moonPhase", List.of("full", "waningGibbous", "thirdQuarter", "waningCrescent", "new",
+                    "waxingCrescent", "firstQuarter", "waxingGibbous")),
+            Map.entry("usingItem", Sensors.USING),
+            Map.entry("screen", Sensors.SCREENS.subList(1, Sensors.SCREENS.size())),
+            Map.entry("lightSource", List.of("combined", "block", "sky")),
+            Map.entry("lookTarget", List.of("block", "entity")));
     /** Minimum width and height of each panel, as TILE_MINIMUMS in layout.js. */
     static final Map<String, int[]> TILE_MINIMUMS = Map.ofEntries(
             Map.entry("player", new int[] {2, 2}), Map.entry("inventory", new int[] {3, 2}),
@@ -78,12 +87,15 @@ final class LayoutRules {
     private static Map<String, Spec> conditionTypes() {
         Map<String, Spec> types = new HashMap<>();
         for (String type : List.of("world", "dimension", "biome")) types.put(type, new Spec("names"));
-        for (String type : List.of("weather", "gameMode", "movement")) types.put(type, new Spec("choices"));
+        for (String type : List.of("weather", "gameMode", "movement", "moonPhase", "usingItem", "screen")) {
+            types.put(type, new Spec("choices"));
+        }
         for (String type : List.of("day", "yLevel", "health", "food", "saturation", "absorption", "xpLevel",
-                "freeSlots", "width", "sessionTime")) {
+                "freeSlots", "width", "sessionTime", "spawnDistance", "air", "armor")) {
             types.put(type, new Spec("compare"));
         }
-        for (String type : List.of("still", "elytra", "inGame")) types.put(type, new Spec("none"));
+        for (String type : List.of("still", "elytra", "inGame", "onFire", "inWater", "inLava", "inRain", "sneaking",
+                "sprinting", "sleeping", "bossBar", "raid")) types.put(type, new Spec("none"));
         types.put("time", new Spec("time"));
         types.put("nearPlace", new Spec("place"));
         types.put("effect", new Spec("effect"));
@@ -105,6 +117,12 @@ final class LayoutRules {
         types.put("toggle", new Spec("toggle"));
         types.put("ruleActive", new Spec("rule"));
         types.put("realTime", new Spec("clock"));
+        types.put("light", new Spec("light"));
+        types.put("lookingAt", new Spec("look", "id", false));
+        types.put("riding", new Spec("riding", "entity", false));
+        types.put("hostilesNearby", new Spec("threat", "entity", false));
+        types.put("mobNearby", new Spec("mob", "entity", true));
+        types.put("playersNearby", new Spec("players"));
         return Map.copyOf(types);
     }
 
@@ -347,6 +365,25 @@ final class LayoutRules {
             case "toggle" -> result.addProperty("toggle", reference(source.get("toggle"), refs.toggles(), "unknown toggle"));
             case "rule" -> result.addProperty("rule", reference(source.get("rule"), refs.rules(), "unknown rule"));
             case "clock" -> clock(source, result);
+            case "light" -> {
+                result.addProperty("source", choice(source, "source", CHOICES.get("lightSource")));
+                compare(source, result, "compare");
+            }
+            case "look" -> {
+                result.addProperty("target", choice(source, "target", CHOICES.get("lookTarget")));
+                subject(source, spec, result);
+                result.addProperty("distance", whole(source.get("distance"), 1, MAX_SENSOR_RADIUS, "invalid distance"));
+            }
+            case "riding" -> subject(source, spec, result);
+            case "threat", "players" -> {
+                result.addProperty("radius", whole(source.get("radius"), 1, MAX_SENSOR_RADIUS, "invalid radius"));
+                subject(source, spec, result);
+                compare(source, result, "compare");
+            }
+            case "mob" -> {
+                subject(source, spec, result);
+                result.addProperty("radius", whole(source.get("radius"), 1, MAX_SENSOR_RADIUS, "invalid radius"));
+            }
             default -> throw new IllegalArgumentException("unknown condition type");
         }
     }
@@ -507,6 +544,46 @@ final class LayoutRules {
             }
         }
         return result;
+    }
+
+    /**
+     * The costlier sensors that enabled rules (in enabled folders) of a normalized layout read, so the mod collects
+     * only those. A version 1 layout reads none.
+     */
+    static SensorNeeds needs(JsonObject layout) {
+        if (layout.get("version").getAsInt() != 2 || !layout.has("rules")) return SensorNeeds.NONE;
+        Set<String> disabled = new HashSet<>();
+        if (layout.has("folders")) {
+            for (JsonElement folder : layout.getAsJsonArray("folders")) {
+                if (!folder.getAsJsonObject().get("enabled").getAsBoolean()) {
+                    disabled.add(folder.getAsJsonObject().get("id").getAsString());
+                }
+            }
+        }
+        boolean light = false;
+        boolean screen = false;
+        int look = 0;
+        int radius = 0;
+        for (JsonElement element : layout.getAsJsonArray("rules")) {
+            JsonObject rule = element.getAsJsonObject();
+            boolean inDisabledFolder = rule.has("folder") && disabled.contains(rule.get("folder").getAsString());
+            if (!rule.get("enabled").getAsBoolean() || inDisabledFolder) {
+                continue;
+            }
+            for (JsonElement row : rule.getAsJsonArray("when")) {
+                JsonObject condition = row.getAsJsonObject();
+                switch (condition.get("type").getAsString()) {
+                    case "light" -> light = true;
+                    case "screen" -> screen = true;
+                    case "lookingAt" -> look = Math.max(look, condition.get("distance").getAsInt());
+                    case "hostilesNearby", "mobNearby", "playersNearby" ->
+                            radius = Math.max(radius, condition.get("radius").getAsInt());
+                    default -> {
+                    }
+                }
+            }
+        }
+        return new SensorNeeds(light, look, radius, screen);
     }
 
     /** "Rule active" conditions must not form a loop. */

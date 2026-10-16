@@ -21,7 +21,12 @@ Layout version 2 (rules v2, see [RULES_V2.md](RULES_V2.md)) is current.
 - **A stored file that fails validation** loads as nothing. It is first copied to `layout.rejected.json`, so a later save can't lose it.
 - **A version 1 file the browser can't convert** stays untouched: the dashboard shows the error and doesn't save until a layout is imported.
 
-Rules v2 phase 1 added no snapshot fields. Its conditions use only data the protocol already carries. New sensors and registry lists (phase 4) will be new snapshot fields.
+Schema version 5 adds two detail fields for rules (phase 4), each replaced whole when it changes:
+
+- **`sensors`**: `moonPhase`, `spawnDistance`, `air`, `maxAir`, `armor`, the flags `onFire`, `inWater`, `inLava`, `inRain`, `sneaking`, `sprinting`, `sleeping`, `bossBar` and `raid`, plus `riding`, `using`, `light`, `look`, `nearby` and `screen`. `light`, `look`, `nearby` (living entities, at most 128, nearest first) and `screen` are null unless an enabled rule reads them. The mod works that out from the saved layout (`LayoutRules.needs`). The entity scan runs at most twice a second, within the largest radius asked for, capped at 64 blocks and at the render distance. Everything is read on the client thread at sampling time. Boss bars are read through a read-only accessor mixin.
+- **`registries`**: items, blocks, entity types, effects, biomes and general statistics as `{ id, name, icon }`, at most 4096 per kind, for the rule editor's pickers. They are listed once per connection (and after a resource reload), so they travel with the initial snapshot and almost never in an update. Their icons are rendered only when the dashboard first requests one.
+
+See [RULES_V2.md](RULES_V2.md#phase-4-2026-10-16) for the conditions that read them.
 
 ## Inventory and equipment protocol
 

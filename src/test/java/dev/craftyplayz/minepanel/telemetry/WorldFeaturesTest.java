@@ -12,6 +12,7 @@ public final class WorldFeaturesTest {
         testWorldLogging();
         testContentsAndDetails();
         testFrameStats();
+        testSensorsAndRegistries();
         System.out.println("MinePanel world feature unit tests passed.");
     }
 
@@ -183,6 +184,58 @@ public final class WorldFeaturesTest {
 
     private static ItemSnapshot item(String id, String name) {
         return new ItemSnapshot(false, id, name, 1, 64, null, null, List.of());
+    }
+
+    private static void testSensorsAndRegistries() {
+        var nearby = new Sensors.Nearby(16, List.of(new Sensors.Entity("minecraft:zombie", true, Sensors.tenths(3.04))));
+        var sensors = new Sensors(4, 120, 280, 300, 12, true, false, false, true, false, false, false, "minecraft:boat",
+                "fishing", false, true, new Sensors.Light(3, 15, 12), new Sensors.Look("none", null, null), nearby, "chest");
+        check(sensors.toJson().equals("{\"moonPhase\":4,\"spawnDistance\":120,\"air\":280,\"maxAir\":300,\"armor\":12,"
+                + "\"onFire\":true,\"inWater\":false,\"inLava\":false,\"inRain\":true,\"sneaking\":false,"
+                + "\"sprinting\":false,\"sleeping\":false,\"riding\":\"minecraft:boat\",\"using\":\"fishing\","
+                + "\"bossBar\":false,\"raid\":true,\"light\":{\"block\":3,\"sky\":15,\"combined\":12},"
+                + "\"look\":{\"kind\":\"none\",\"id\":null,\"distance\":null},\"nearby\":{\"radius\":16,"
+                + "\"entities\":[{\"type\":\"minecraft:zombie\",\"hostile\":true,\"distance\":3.0}]},"
+                + "\"screen\":\"chest\"}"), "sensors serialize every field: " + sensors.toJson());
+        check(Sensors.EMPTY.toJson().contains("\"light\":null,\"look\":null,\"nearby\":null,\"screen\":null"),
+                "costly sensors are null until a rule reads them");
+        invalid(() -> new Sensors(8, null, 300, 300, 0, false, false, false, false, false, false, false, null, null,
+                false, false, null, null, null, null));
+        invalid(() -> new Sensors(0, null, 300, 300, 0, false, false, false, false, false, false, false, null, "napping",
+                false, false, null, null, null, null));
+        invalid(() -> new Sensors(0, null, 300, 300, 0, false, false, false, false, false, false, false, null, null,
+                false, false, null, null, null, "chat"));
+        invalid(() -> new Sensors.Light(16, 0, 0));
+        invalid(() -> new Sensors.Look("block", null, 2.0));
+        invalid(() -> new Sensors.Look("none", "minecraft:stone", null));
+        invalid(() -> new Sensors.Nearby(65, List.of()));
+        invalid(() -> new Sensors.Entity("Zombie", true, 1));
+        invalid(() -> new SensorNeeds(false, 65, 0, false));
+
+        var registries = new Registries(List.of(new Registries.Entry("minecraft:stone", "Stone", "e0-1a")), List.of(),
+                List.of(), List.of(), List.of(), List.of(new Registries.Entry("minecraft:custom/minecraft:jump", "Jumps", null)));
+        check(registries.toJson().equals("{\"items\":[{\"id\":\"minecraft:stone\",\"name\":\"Stone\",\"icon\":\"e0-1a\"}],"
+                + "\"blocks\":[],\"entities\":[],\"effects\":[],\"biomes\":[],\"stats\":[{\"id\":"
+                + "\"minecraft:custom/minecraft:jump\",\"name\":\"Jumps\",\"icon\":null}]}"), "registries serialize: "
+                + registries.toJson());
+        invalid(() -> new Registries.Entry("Stone", "Stone", null));
+        invalid(() -> new Registries.Entry("minecraft:stone", "", null));
+        invalid(() -> new Registries.Entry("minecraft:stone", "Stone", "Bad Icon"));
+
+        var details = PlayerDetails.placeholder();
+        var before = new PlayerSnapshot(1, 1, true, 0L, "minecraft:overworld", 0.0, 0.0, 0.0, 20.0, 20.0, 0.0,
+                InventorySnapshot.empty(), null, GameplayHistory.empty(), 20, 5.0, List.of(), details);
+        var withSensors = new PlayerDetails(details.world(), details.motion(), details.xp(), details.portal(),
+                details.pickups(), null, List.of(), null, details.performance(), details.build(), details.icons(), sensors,
+                registries);
+        var after = new PlayerSnapshot(2, 2, true, 0L, "minecraft:overworld", 0.0, 0.0, 0.0, 20.0, 20.0, 0.0,
+                InventorySnapshot.empty(), null, GameplayHistory.empty(), 20, 5.0, List.of(), withSensors);
+        String delta = after.toDeltaJson(before);
+        check(delta.contains(",\"sensors\":" + sensors.toJson()) && delta.contains(",\"registries\":" + registries.toJson())
+                && !delta.contains("\"motion\""), "sensors and registries are sent whole when they change: " + delta);
+        var resent = new PlayerSnapshot(3, 3, true, 0L, "minecraft:overworld", 0.0, 0.0, 0.0, 20.0, 20.0, 0.0,
+                InventorySnapshot.empty(), null, GameplayHistory.empty(), 20, 5.0, List.of(), withSensors);
+        check(!resent.toDeltaJson(after).contains("\"registries\""), "unchanged registries are not resent");
     }
 
     private static void check(boolean condition, String message) {

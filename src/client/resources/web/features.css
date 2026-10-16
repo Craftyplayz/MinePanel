@@ -81,7 +81,10 @@
 
 /* Advancements */
 .advancement-tabs { flex: none; display: grid; gap: 3px; }
-.advancement-tab { display: grid; grid-template-columns: 1fr 2fr auto auto; gap: 8px; align-items: center; font-size: 11px; color: #c5cfce; }
+.advancement-tab { display: grid; grid-template-columns: 1fr 2fr auto auto; gap: 8px; align-items: center; margin: 0 -4px; padding: 1px 4px; border-radius: 4px; font-size: 11px; color: #c5cfce; cursor: pointer; }
+.advancement-tab:hover { background: #ffffff0d; }
+.advancement-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+.advancement-tab[aria-pressed="true"] { background: #ffffff14; color: var(--accent); }
 .advancement-tab .label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .advancement-tab .progress { height: 5px; border-radius: 3px; background: #1a2329; overflow: hidden; }
 .advancement-tab .progress span { display: block; height: 100%; background: var(--accent); }
@@ -197,11 +200,74 @@
 .rule-row.bad .rule-state { color: var(--danger); }
 .rule-row-tools { display: inline-flex; gap: 2px; margin-left: auto; }
 .rule-add { display: flex; gap: 6px; margin-top: 8px; }
+.rule-block.ok { border-color: #3a4c43; }
+.rule-block.bad { border-color: #4a2f35; }
+.rule-dot.forced { outline: 2px solid #f0b85a; outline-offset: 1px; }
+.rules-nav-name.inline { flex: none; padding: 0; color: var(--accent); }
+.rules-nav-name.inline.block { display: block; margin-top: 6px; }
+/* Folders, templates, share strings, copy and paste */
+.rules-nav-tools { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.rules-nav-item.folder { margin-top: 6px; }
+.rules-nav-item.folder .rules-nav-name { font-weight: 650; }
+.rules-nav-item.in-folder { margin-left: 14px; padding-left: 8px; border-left: 1px solid #2c363c; border-radius: 0 6px 6px 0; }
+.folder-caret { width: 22px; }
+.row-select { flex: none; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.rule-section-tools { display: inline-flex; gap: 4px; margin-left: auto; }
+.share-box { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+.share-box .rule-input { flex: 1 1 260px; font-family: ui-monospace, monospace; }
+.share-input { display: block; width: 100%; box-sizing: border-box; resize: vertical; font-family: ui-monospace, monospace; }
+.rule-row.template { border: 1px solid #1f292f; border-radius: 8px; margin-top: 6px; padding: 8px 10px; }
+.template-text { display: flex; flex-direction: column; gap: 3px; flex: 1 1 260px; min-width: 0; }
+.template-text strong { color: #edf2f5; font-size: 13px; }
+/* Pickers: suggestions under the input, with icons where known; values as removable chips */
+.id-picker { position: relative; display: inline-flex; min-width: 0; }
+.id-picker .rule-input { width: 220px; max-width: 100%; }
+.id-picker-list { position: absolute; z-index: 5; top: calc(100% + 2px); left: 0; display: flex; flex-direction: column; width: max(100%, 280px); max-height: 260px; overflow-y: auto; padding: 4px; border: 1px solid #2c363c; border-radius: 8px; background: #11191f; box-shadow: 0 10px 30px #000a; }
+.id-picker-option { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border: 0; border-radius: 5px; background: none; color: #edf2f5; text-align: left; cursor: pointer; font-size: 12px; }
+.id-picker-option:hover, .id-picker-option:focus-visible { background: #73e0b114; }
+.id-picker-option .icon { width: 20px; height: 20px; image-rendering: pixelated; }
+.id-picker-option .rule-muted { margin-left: auto; font-size: 11px; }
+.rule-values { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
+.value-chip { display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px 2px 9px; border: 1px solid #3a4c43; border-radius: 20px; color: var(--accent); }
+.value-chip-remove { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 13px; line-height: 1; padding: 0 4px; }
+.value-chip-remove:hover { color: var(--danger); }
+/* Docked: a side panel beside the live dashboard, which stays usable */
+.dialog-backdrop.docked { pointer-events: none; place-items: stretch end; padding: 0; background: transparent; }
+.dialog-backdrop.docked .dialog.rules-editor { pointer-events: auto; width: min(460px, 100vw); height: 100vh; border-radius: 0; border-width: 0 0 0 1px; }
+.dialog-backdrop.docked .rules-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 32%) minmax(0, 1fr); }
+.dialog-backdrop.docked .rules-sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
+.rules-docked .grid { margin-right: min(460px, 100vw); }
+.rules-docked .tile { cursor: help; }
+.tile.inspected { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Place on grid: the panel's ghost over the live grid */
+.place-ghost { grid-column: var(--grid-column); grid-row: var(--grid-row); position: relative; z-index: 17; display: flex; flex-direction: column; justify-content: space-between; gap: 6px; min-width: 0; padding: 8px; border: 2px dashed var(--accent); border-radius: 10px; background: #73e0b126; cursor: move; touch-action: none; }
+.place-ghost-label { color: #edf2f5; font-size: 12px; font-weight: 600; }
+.place-ghost-tools { display: flex; gap: 6px; cursor: default; }
+/* What rules do on the dashboard: a focused panel above the grid while the others fade out where they are */
+.grid .tile { transition: opacity var(--fade, 300ms); }
+.grid.has-focus .tile:not(.focused) { opacity: 0; pointer-events: none; }
+.tile.focused { position: fixed; inset: 16px; z-index: 16; box-shadow: 0 20px 60px #000c; }
+.rules-docked .tile.focused { right: calc(min(460px, 100vw) + 16px); }
+.tile-leaving { position: fixed; z-index: 14; margin: 0; pointer-events: none; }
+/* Toggles (buttons above the dashboard) and Notify messages (no sound) */
+.rule-toggles { position: fixed; top: 4px; right: 8px; z-index: 18; display: flex; flex-wrap: wrap; justify-content: end; gap: 4px; max-width: 60vw; }
+.rule-toggles .chip { background: #0e151af2; }
+.rule-toasts { position: fixed; right: 16px; bottom: 16px; z-index: 45; display: flex; flex-direction: column; align-items: end; gap: 6px; pointer-events: none; }
+.rule-toast { max-width: min(360px, calc(100vw - 32px)); padding: 9px 14px; border: 1px solid #3a4c43; border-radius: 10px; background: #12201af2; color: #edf2f5; font-size: 13px; box-shadow: 0 10px 30px #000a; animation: toast-in .25s ease-out; transition: opacity .4s; }
+.rule-toast.leaving { opacity: 0; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
+@media (prefers-reduced-motion: reduce) {
+  .rule-toast { animation: none; }
+}
 @media (max-width: 720px) {
   .dialog.rules-editor { width: 100%; height: calc(100vh - 16px); }
   .rules-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 35%) minmax(0, 1fr); }
   .rules-sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
   .rules-main { padding: 12px; }
+  .dialog-backdrop.docked { place-items: end stretch; }
+  .dialog-backdrop.docked .dialog.rules-editor { width: 100%; height: 55vh; border-width: 1px 0 0; }
+  .rules-docked .grid { margin-right: 0; padding-bottom: 56vh; }
+  .rules-docked .tile.focused { right: 16px; bottom: calc(55vh + 16px); }
 }
 
 /* Build progress */

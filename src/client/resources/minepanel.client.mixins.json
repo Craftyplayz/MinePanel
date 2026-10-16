@@ -6,6 +6,7 @@
     "AdvancementEventsMixin",
     "BlockChangeMixin",
     "BlockPlaceMixin",
+    "BossOverlayAccessor",
     "CombatEventsMixin",
     "FrameTimingMixin",
     "ClientAdvancementsAccessor",

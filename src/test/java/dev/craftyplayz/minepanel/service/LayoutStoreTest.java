@@ -30,7 +30,33 @@ public final class LayoutStoreTest {
         testNormalizedOutput();
         testVersion1IsReadAndBackedUp();
         testInvalidStoredLayoutIsKept();
+        testSensorNeeds();
         System.out.println("LayoutStoreTest passed");
+    }
+
+    /** The mod collects the costlier sensors only for enabled rules in enabled folders that read them. */
+    private static void testSensorNeeds() throws Exception {
+        String layout = "{\"version\":2,\"tiles\":[],\"folders\":[{\"id\":\"off\",\"name\":\"Off\",\"enabled\":false,"
+                + "\"collapsed\":false}],\"rules\":["
+                + "{\"id\":\"a\",\"name\":\"A\",\"enabled\":true,\"when\":[{\"type\":\"hostilesNearby\",\"radius\":16,"
+                + "\"compare\":\">=\",\"value\":1},{\"type\":\"lookingAt\",\"join\":\"or\",\"target\":\"block\",\"distance\":5},"
+                + "{\"type\":\"mobNearby\",\"entity\":\"minecraft:warden\",\"radius\":40}]},"
+                + "{\"id\":\"b\",\"name\":\"B\",\"enabled\":false,\"when\":[{\"type\":\"light\",\"compare\":\"<\",\"value\":8},"
+                + "{\"type\":\"playersNearby\",\"radius\":64,\"compare\":\">=\",\"value\":1}]},"
+                + "{\"id\":\"c\",\"name\":\"C\",\"enabled\":true,\"folder\":\"off\",\"when\":[{\"type\":\"screen\","
+                + "\"values\":[\"chest\"]}]},"
+                + "{\"id\":\"d\",\"name\":\"D\",\"enabled\":true,\"when\":[{\"type\":\"screen\",\"values\":[\"trading\"]}]}]}";
+        var needs = LayoutRules.needs(JsonParser.parseString(LayoutStore.normalize(layout)).getAsJsonObject());
+        check(needs.equals(new dev.craftyplayz.minepanel.telemetry.SensorNeeds(false, 5, 40, true)),
+                "only enabled rules in enabled folders count, with the largest distance and radius: " + needs);
+        Path file = Files.createTempDirectory("minepanel-layout-needs").resolve("layout.json");
+        LayoutStore store = new LayoutStore(file);
+        check(store.sensorNeeds().equals(dev.craftyplayz.minepanel.telemetry.SensorNeeds.NONE), "nothing before a layout");
+        store.save(layout);
+        check(store.sensorNeeds().equals(needs), "a save updates what the mod collects");
+        check(new LayoutStore(file).load() != null, "and so does a load");
+        check(LayoutRules.needs(JsonParser.parseString(LayoutStore.normalize(V1)).getAsJsonObject())
+                .equals(dev.craftyplayz.minepanel.telemetry.SensorNeeds.NONE), "version 1 rules read no sensors");
     }
 
     private static void testSharedCases() throws Exception {

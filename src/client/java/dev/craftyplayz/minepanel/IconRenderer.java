@@ -28,6 +28,7 @@ import java.util.ArrayDeque;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -47,6 +48,9 @@ final class IconRenderer implements IconSource {
     private static final long WAIT_MILLIS = 3_000;
 
     private final Map<String, CompletableFuture<byte[]>> icons = new ConcurrentHashMap<>();
+    // Registry entries the pickers list: rendered only when the dashboard first asks for one (any thread).
+    private final Map<String, ItemStack> deferred = new ConcurrentHashMap<>();
+    private final ConcurrentLinkedQueue<String> wanted = new ConcurrentLinkedQueue<>();
     private final ArrayDeque<Pending> pending = new ArrayDeque<>();
     private final Map<String, byte[]> effectIcons = new ConcurrentHashMap<>();
     private final PoseStack poseStack = new PoseStack();
@@ -85,18 +89,35 @@ final class IconRenderer implements IconSource {
         pending.addLast(new Pending(key, copy, future));
     }
 
+    /**
+     * Client thread: a key for an icon that is rendered only if the dashboard asks for it (registry lists hold
+     * thousands of items, most of which are never shown).
+     */
+    String deferredKey(ItemStack stack) {
+        String key = keyFor(stack);
+        if (!icons.containsKey(key)) deferred.putIfAbsent(key, stack.copyWithCount(1));
+        return key;
+    }
+
     /** Resource packs changed: every icon must be rendered again under new keys. */
     void reset() {
         epoch++;
         icons.values().forEach(future -> future.complete(null));
         icons.clear();
         pending.clear();
+        deferred.clear();
+        wanted.clear();
         effectIcons.clear();
     }
 
     @Override
     public byte[] icon(String key) throws InterruptedException {
         CompletableFuture<byte[]> future = icons.get(key);
+        if (future == null && deferred.containsKey(key)) {
+            // Rendered on the client thread; this thread waits for it like for any pending icon.
+            future = icons.computeIfAbsent(key, ignored -> new CompletableFuture<>());
+            wanted.add(key);
+        }
         if (future == null) return null;
         try {
             return future.get(WAIT_MILLIS, TimeUnit.MILLISECONDS);
@@ -128,6 +149,14 @@ final class IconRenderer implements IconSource {
 
     /** Render thread, between frames. */
     void renderPending(Minecraft minecraft) {
+        for (String key; (key = wanted.poll()) != null; ) {
+            ItemStack stack = deferred.remove(key);
+            CompletableFuture<byte[]> future = icons.get(key);
+            if (stack == null || future == null || future.isDone()) continue;
+            ItemStack copy = stack.copy();
+            copy.set(DataComponents.ENCHANTMENT_GLINT_OVERRIDE, false);
+            pending.addLast(new Pending(key, copy, future));
+        }
         if (pending.isEmpty()) return;
         ensureTargets();
         GpuDevice device = RenderSystem.getDevice();

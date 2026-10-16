@@ -212,6 +212,65 @@ function portalCondition(condition, player, ctx) {
     && !ctx.returnTrip(crossing.id) && age <= condition.minutes * 60, age);
 }
 
+/** Entities the mod saw within {@code radius} that pass {@code accept}: their count and the nearest distance. */
+function nearbyCount(sensors, radius, accept) {
+  if (!sensors.nearby) return null;
+  const found = sensors.nearby.entities.filter(entity => entity.distance <= radius && accept(entity));
+  return { count: found.length, nearest: found[0]?.distance ?? null };
+}
+
+/**
+ * Conditions on the mod's rule sensors (docs/RULES_V2.md, phase 4). Light, look target, nearby entities and the
+ * screen are only sent while an enabled rule reads them, so they are unknown until the mod has picked that up.
+ */
+function sensorCondition(condition, sensors) {
+  const values = condition.values ?? [];
+  switch (condition.type) {
+    case "moonPhase": {
+      const phase = RULE_CHOICES.moonPhase[sensors.moonPhase];
+      return outcome(values.includes(phase), phase);
+    }
+    case "light":
+      return sensors.light ? compared(sensors.light[condition.source], condition) : UNKNOWN;
+    case "spawnDistance":
+      return compared(sensors.spawnDistance, condition);
+    case "lookingAt": {
+      const look = sensors.look;
+      if (!look) return UNKNOWN;
+      return outcome(look.kind === condition.target && look.distance <= condition.distance
+        && (!condition.id || look.id === condition.id), look.id ?? "nothing");
+    }
+    case "air":
+      // Seconds of air left (the game counts ticks).
+      return compared(Math.max(0, sensors.air) / 20, condition);
+    case "armor":
+      return compared(sensors.armor, condition);
+    case "riding":
+      return outcome(sensors.riding !== null && (!condition.entity || sensors.riding === condition.entity),
+        sensors.riding);
+    case "usingItem":
+      return outcome(values.includes(sensors.using), sensors.using);
+    case "hostilesNearby": {
+      const found = nearbyCount(sensors, condition.radius, entity => entity.hostile
+        && (!condition.entity || entity.type === condition.entity));
+      return found ? compared(found.count, condition) : UNKNOWN;
+    }
+    case "mobNearby": {
+      const found = nearbyCount(sensors, condition.radius, entity => entity.type === condition.entity);
+      return found ? outcome(found.count > 0, found.nearest) : UNKNOWN;
+    }
+    case "playersNearby": {
+      const found = nearbyCount(sensors, condition.radius, entity => entity.type === "minecraft:player");
+      return found ? compared(found.count, condition) : UNKNOWN;
+    }
+    case "screen":
+      return sensors.screen === null ? UNKNOWN : outcome(values.includes(sensors.screen), sensors.screen);
+    default:
+      // The yes/no states: onFire, inWater, inLava, inRain, sneaking, sprinting, sleeping, bossBar, raid.
+      return outcome(sensors[condition.type] === true, sensors[condition.type] === true);
+  }
+}
+
 /** The counter an "amount within W s" condition reads (see createCounters), or null when it needs none. */
 function counterKey(condition) {
   switch (condition.type) {
@@ -343,6 +402,28 @@ function evaluateCondition(condition, ctx) {
     }
     case "portalLinking":
       return portalCondition(condition, player, ctx);
+    case "moonPhase":
+    case "light":
+    case "spawnDistance":
+    case "lookingAt":
+    case "air":
+    case "armor":
+    case "onFire":
+    case "inWater":
+    case "inLava":
+    case "inRain":
+    case "sneaking":
+    case "sprinting":
+    case "sleeping":
+    case "riding":
+    case "usingItem":
+    case "hostilesNearby":
+    case "mobNearby":
+    case "playersNearby":
+    case "bossBar":
+    case "raid":
+    case "screen":
+      return player.sensors ? sensorCondition(condition, player.sensors) : UNKNOWN;
     case "toggle":
       return outcome(ctx.toggles.get(condition.toggle) === true);
     case "ruleActive":
@@ -618,8 +699,9 @@ function actionClaims(action) {
  * What the dashboard shows. Active rules claim through Then and enabled inactive rules through Else; per property
  * (profile, a panel's visibility or rectangle, focus, a setting) the claim of the highest rule in the list wins and
  * the others are kept as overridden for the inspector. The winning profile (else Default) is the base layout:
- * its tiles shown (rules-only ones hidden), then visibility and setting claims applied. Rectangles and focus are
- * reported for the layout solver. {@code evaluation} is the result of the engine's evaluate, or null for none.
+ * its tiles shown (rules-only ones hidden), then visibility and setting claims applied. Rectangles, focus, Hide
+ * fill overrides and animation overrides (per panel, from the rule whose claim shows, hides, moves or focuses it)
+ * are reported for solveLayout. {@code evaluation} is the result of the engine's evaluate, or null for none.
  */
 function effectiveView(layout, evaluation) {
   const claims = [];
@@ -640,11 +722,24 @@ function effectiveView(layout, evaluation) {
   const visible = new Set(profile.tiles.filter(tile => tile.enabled && !tile.rulesOnly).map(tile => tile.id));
   let settings = profile.settings;
   const rects = {};
+  const fills = {};
+  const animations = {};
+  const ruleById = new Map(layout.rules.map(rule => [rule.id, rule]));
   for (const [property, claim] of winners) {
     const [kind, target] = property.split(":");
+    const rule = ruleById.get(claim.rule);
+    const panel = kind === "focus" ? claim.value : target;
+    if (rule.animation && kind !== "setting" && kind !== "profile" && !animations[panel]) {
+      animations[panel] = rule.animation;
+    }
     if (kind === "visible") {
-      if (!claim.value) visible.delete(target);
-      else if (profile.tiles.find(tile => tile.id === target)?.enabled) visible.add(target);
+      if (!claim.value) {
+        visible.delete(target);
+        const fill = rule[claim.list][claim.index].fill;
+        if (fill) fills[target] = fill;
+      } else if (profile.tiles.find(tile => tile.id === target)?.enabled) {
+        visible.add(target);
+      }
     } else if (kind === "setting") {
       const [panel, key] = target.split(".");
       settings = mergeSettings(settings, { [panel]: { [key]: claim.value } });
@@ -652,6 +747,6 @@ function effectiveView(layout, evaluation) {
       rects[target] = claim.value;
     }
   }
-  return { profileId: profile.id, profile, visible, settings, rects, focus: winners.get("focus")?.value ?? null,
-    claims, rules: layout.rules.filter(rule => evaluation?.states.get(rule.id)?.active).map(rule => rule.id) };
+  return { profileId: profile.id, profile, visible, settings, rects, fills, animations,
+    focus: winners.get("focus")?.value ?? null, claims, rules: layout.rules.filter(rule => evaluation?.states.get(rule.id)?.active).map(rule => rule.id) };
 }

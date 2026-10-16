@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
 import dev.craftyplayz.minepanel.telemetry.FrameStats;
+import dev.craftyplayz.minepanel.telemetry.SensorNeeds;
 import dev.craftyplayz.minepanel.telemetry.StatisticsSnapshot;
 
 import java.io.IOException;
@@ -65,6 +66,7 @@ public final class LayoutStore {
     public static final int DEFAULT_UPDATE_INTERVAL = 250;
     private final Path file;
     private volatile int updateIntervalMillis = DEFAULT_UPDATE_INTERVAL;
+    private volatile SensorNeeds sensorNeeds = SensorNeeds.NONE;
 
     public LayoutStore(Path file) {
         this.file = file;
@@ -73,6 +75,11 @@ public final class LayoutStore {
     /** The update interval from the last layout loaded or saved; read by the game thread every tick. */
     public int updateIntervalMillis() {
         return updateIntervalMillis;
+    }
+
+    /** The costlier rule sensors that enabled rules of the last layout loaded or saved read; read every sample. */
+    public SensorNeeds sensorNeeds() {
+        return sensorNeeds;
     }
 
     /**
@@ -85,6 +92,7 @@ public final class LayoutStore {
             if (Files.size(file) > MAX_BYTES) throw new IllegalArgumentException("layout too large");
             String normalized = normalize(Files.readString(file, StandardCharsets.UTF_8));
             updateIntervalMillis = updateInterval(normalized);
+            sensorNeeds = LayoutRules.needs(JsonParser.parseString(normalized).getAsJsonObject());
             return normalized;
         } catch (IOException | RuntimeException invalid) {
             keepRejected(invalid);
@@ -106,6 +114,7 @@ public final class LayoutStore {
             Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
         }
         updateIntervalMillis = updateInterval(normalized);
+        sensorNeeds = LayoutRules.needs(JsonParser.parseString(normalized).getAsJsonObject());
     }
 
     /** The file beside the layout named {@code layout.<suffix>.json}. */

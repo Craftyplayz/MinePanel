@@ -372,14 +372,25 @@ const MAX_PLACE_RADIUS = 100000;
 const MAX_VILLAGER_RADIUS = 256;
 const MAX_PORTAL_MINUTES = 120;
 const MAX_NOTIFY_TEXT = 128;
+/** Entity scans and the look target reach at most this far (and entity scans no further than the render distance). */
+const MAX_SENSOR_RADIUS = 64;
 /** Fixed choices of the conditions and actions that pick from a list. */
 const RULE_CHOICES = {
   time: ["dawn", "day", "dusk", "night"], weather: ["clear", "rain", "thunder"],
   gameMode: ["survival", "creative", "adventure", "spectator"],
   movement: ["ground", "elytra", "swimming", "riding", "flying", "falling"],
-  axis: ["total", "horizontal", "vertical"], hand: ["either", "main", "off"], durability: ["held", "armor", "tool"]
+  axis: ["total", "horizontal", "vertical"], hand: ["either", "main", "off"], durability: ["held", "armor", "tool"],
+  // Minecraft's moon phase order (index 0 = full moon).
+  moonPhase: ["full", "waningGibbous", "thirdQuarter", "waningCrescent", "new", "waxingCrescent", "firstQuarter",
+    "waxingGibbous"],
+  usingItem: ["eating", "drinking", "blocking", "bow", "crossbow", "trident", "spear", "spyglass", "horn", "brush",
+    "bundle", "fishing"],
+  screen: ["inventory", "chest", "enderChest", "furnace", "crafting", "anvil", "enchanting", "brewing", "trading",
+    "smithing", "grindstone", "stonecutter", "loom", "cartography", "beacon", "other"],
+  lightSource: ["combined", "block", "sky"], lookTarget: ["block", "entity"]
 };
-const RULE_FAMILIES = ["world", "position", "player", "inventory", "amounts", "events", "villagers", "features", "meta"];
+const RULE_FAMILIES = ["world", "position", "player", "inventory", "amounts", "events", "threats", "villagers", "screens",
+  "features", "meta"];
 /**
  * Condition types: the family the editor lists them under and the shape of their parameters (see
  * conditionParams). "Meta" conditions don't need the player to be in a world; all others are unknown (never true,
@@ -393,17 +404,32 @@ const CONDITION_TYPES = {
   weather: { family: "world", kind: "choices" },
   day: { family: "world", kind: "compare" },
   gameMode: { family: "world", kind: "choices" },
+  moonPhase: { family: "world", kind: "choices" },
   nearPlace: { family: "position", kind: "place" },
   yLevel: { family: "position", kind: "compare" },
+  light: { family: "position", kind: "light" },
+  spawnDistance: { family: "position", kind: "compare" },
+  lookingAt: { family: "position", kind: "look", subject: "id" },
   health: { family: "player", kind: "compare" },
   food: { family: "player", kind: "compare" },
   saturation: { family: "player", kind: "compare" },
   absorption: { family: "player", kind: "compare" },
+  air: { family: "player", kind: "compare" },
+  armor: { family: "player", kind: "compare" },
   xpLevel: { family: "player", kind: "compare" },
   effect: { family: "player", kind: "effect" },
   movement: { family: "player", kind: "choices" },
   speed: { family: "player", kind: "speed" },
   still: { family: "player", kind: "none" },
+  onFire: { family: "player", kind: "none" },
+  inWater: { family: "player", kind: "none" },
+  inLava: { family: "player", kind: "none" },
+  inRain: { family: "player", kind: "none" },
+  sneaking: { family: "player", kind: "none" },
+  sprinting: { family: "player", kind: "none" },
+  sleeping: { family: "player", kind: "none" },
+  riding: { family: "player", kind: "riding", subject: "entity" },
+  usingItem: { family: "player", kind: "choices" },
   holding: { family: "inventory", kind: "holding" },
   hasItem: { family: "inventory", kind: "hasItem" },
   freeSlots: { family: "inventory", kind: "compare" },
@@ -421,7 +447,13 @@ const CONDITION_TYPES = {
   changedDimension: { family: "events", kind: "event" },
   joinedWorld: { family: "events", kind: "event" },
   inCombat: { family: "events", kind: "event" },
+  hostilesNearby: { family: "threats", kind: "threat", subject: "entity" },
+  mobNearby: { family: "threats", kind: "mob", subject: "entity", required: true },
+  playersNearby: { family: "threats", kind: "players" },
+  bossBar: { family: "threats", kind: "none" },
+  raid: { family: "threats", kind: "none" },
   villagersNearby: { family: "villagers", kind: "villagers" },
+  screen: { family: "screens", kind: "choices" },
   portalLinking: { family: "features", kind: "portal" },
   toggle: { family: "meta", kind: "toggle", meta: true },
   ruleActive: { family: "meta", kind: "rule", meta: true },
@@ -525,6 +557,21 @@ function conditionParams(value, spec, refs) {
     case "rule":
       ensure(refs.rules.has(value.rule), "unknown rule");
       return { rule: value.rule };
+    case "light":
+      return { source: optionalChoice(value.source, RULE_CHOICES.lightSource, "source"), ...normalizeCompare(value) };
+    case "look":
+      ensure(wholeIn(value.distance, 1, MAX_SENSOR_RADIUS), "invalid distance");
+      return { target: optionalChoice(value.target, RULE_CHOICES.lookTarget, "target"), ...subject(value, spec),
+        distance: value.distance };
+    case "riding":
+      return subject(value, spec);
+    case "threat":
+    case "players":
+      ensure(wholeIn(value.radius, 1, MAX_SENSOR_RADIUS), "invalid radius");
+      return { radius: value.radius, ...subject(value, spec), ...normalizeCompare(value) };
+    case "mob":
+      ensure(wholeIn(value.radius, 1, MAX_SENSOR_RADIUS), "invalid radius");
+      return { ...subject(value, spec), radius: value.radius };
     case "clock": {
       ensure(validClock(value.from) && validClock(value.to), "invalid time");
       const result = { from: value.from, to: value.to };
@@ -736,6 +783,270 @@ function ruleBlocks(when) {
     blocks.at(-1).push(index);
   });
   return blocks;
+}
+
+// ----------------------------------------------------------------------------------------- Folders and order
+
+// A rule's place in the list is its priority. Folders only group what the editor shows: the editor keeps a folder's
+// rules next to each other (moving, adding and filing rules keep them so) and draws the folder where they are.
+
+/**
+ * The rule list as the editor draws it, in list (priority) order: each run of rules in the same folder is one
+ * folder entry, and every rule without a folder is an entry of its own. Folders without rules come last. A folder
+ * whose rules aren't next to each other (an imported or hand-edited layout) shows once per run, so the drawing
+ * never hides the real order.
+ */
+function ruleSegments(rules, folders = []) {
+  const segments = [];
+  for (const rule of rules) {
+    const last = segments.at(-1);
+    if (rule.folder && last?.folder === rule.folder) last.rules.push(rule);
+    else segments.push({ folder: rule.folder ?? null, rules: [rule] });
+  }
+  const used = new Set(rules.map(rule => rule.folder));
+  for (const folder of folders) if (!used.has(folder.id)) segments.push({ folder: folder.id, rules: [] });
+  return segments;
+}
+
+/**
+ * Moves a rule one place up (-1) or down (1). Inside a folder it only swaps with the folder's own rules; a rule
+ * without a folder moves past the whole neighbouring entry (a rule, or a folder's run). Returns a new list.
+ */
+function moveRuleInList(rules, id, by) {
+  const index = rules.findIndex(rule => rule.id === id);
+  if (index < 0) return rules;
+  if (rules[index].folder) {
+    const target = index + by;
+    if (rules[target]?.folder !== rules[index].folder) return rules;
+    const result = [...rules];
+    [result[index], result[target]] = [result[target], result[index]];
+    return result;
+  }
+  const segments = ruleSegments(rules);
+  return moveSegment(rules, segments.findIndex(segment => segment.rules[0] === rules[index]), by);
+}
+
+/** Moves one entry of ruleSegments (a lone rule or a folder's run) past its neighbour. Returns a new list. */
+function moveSegment(rules, segmentIndex, by) {
+  const segments = ruleSegments(rules);
+  const target = segmentIndex + by;
+  if (!segments[segmentIndex] || !segments[target]) return rules;
+  [segments[segmentIndex], segments[target]] = [segments[target], segments[segmentIndex]];
+  return segments.flatMap(segment => segment.rules);
+}
+
+/**
+ * Files a rule in a folder (or takes it out with null), keeping folders together: it joins the end of the folder's
+ * rules, or stays where it is if the folder has none yet; taken out, it goes just after the folder's run. Sets
+ * {@code rule.folder} and returns the reordered list (the same rule objects).
+ */
+function fileRule(rules, rule, folder) {
+  const index = rules.indexOf(rule);
+  const old = rule.folder;
+  rule.folder = folder;
+  const rest = rules.filter(other => other !== rule);
+  let at = index;
+  if (folder) {
+    const last = rest.findLastIndex(other => other.folder === folder);
+    if (last >= 0) at = last + 1;
+  } else if (old) {
+    while (at < rest.length && rest[at].folder === old) at++;
+  }
+  rest.splice(at, 0, rule);
+  return rest;
+}
+
+/** Where a new rule in {@code folder} goes: after the folder's last rule, else (or without a folder) at the end. */
+function newRuleIndex(rules, folder) {
+  const last = folder ? rules.findLastIndex(rule => rule.folder === folder) : -1;
+  return last >= 0 ? last + 1 : rules.length;
+}
+
+// ------------------------------------------------------------------------------------------------ Templates
+
+/**
+ * "Add from template" (docs/RULES_V2.md). Show only reveals a panel that is hidden or rules-only in the profile in
+ * use, so {@code note} says which panel to set to Rules only.
+ */
+const RULE_TEMPLATES = [
+  { id: "xp-gain", name: "XP while gaining", note: "Set the XP panel to Rules only.",
+    when: [{ type: "xpGained", compare: ">=", value: 1, window: 10 }], then: [{ do: "show", panel: "xp" }] },
+  { id: "idle-movement", name: "Hide idle movement", note: "Hides Movement after 30 s without moving.",
+    when: [{ type: "still", for: 30 }], then: [{ do: "hide", panel: "movement" }] },
+  { id: "villagers-trading", name: "Villagers while trading", note: "Set the Villagers panel to Rules only.",
+    when: [{ type: "screen", values: ["trading"] },
+      { join: "or", type: "villagersNearby", radius: 16, compare: ">=", value: 3 }],
+    then: [{ do: "show", panel: "villagers" }] },
+  { id: "portal-guidance", name: "Portal guidance", note: "Set the Player panel to Rules only to see it only then.",
+    when: [{ type: "portalLinking", minutes: 10 }],
+    then: [{ do: "show", panel: "player" }, { do: "notify", text: "Portal target set", cooldown: 0 }] },
+  { id: "elytra-map", name: "Elytra map", note: "Shows the map nearly full screen while gliding.",
+    when: [{ type: "movement", values: ["elytra"], for: 3 }], then: [{ do: "focus", panel: "map" }] },
+  { id: "tool-breaking", name: "Tool about to break", note: "A message at most once a minute.",
+    when: [{ type: "durability", target: "held", compare: "<", value: 10 }],
+    then: [{ do: "notify", text: "Your tool is about to break", cooldown: 60 }] },
+  { id: "combat", name: "Combat", note: "Set the History panel to Rules only.",
+    when: [{ type: "hostilesNearby", radius: 16, compare: ">=", value: 3 }],
+    then: [{ do: "show", panel: "history" }, { do: "hide", panel: "pickups" }] },
+  { id: "looting", name: "Pickups while looting", note: "Set the Pickups panel to Rules only.",
+    when: [{ type: "pickedUp", compare: ">=", value: 1, window: 15 }], then: [{ do: "show", panel: "pickups" }] },
+  { id: "phone-layout", name: "Phone layout", note: "Switches to your first profile; pick another under Then.",
+    when: [{ type: "width", compare: "<", value: 700 }], then: [{ do: "profile", profile: null }] }
+];
+
+/** A new rule from a template, with an id not used yet. "Switch profile" picks the first profile (else Default). */
+function ruleFromTemplate(template, layout) {
+  const used = new Set(layout.rules.map(rule => rule.id));
+  const then = structuredCopy(template.then).map(action => action.do === "profile"
+    ? { ...action, profile: layout.profiles[0]?.id ?? "default" } : action);
+  return { id: uniqueId(template.id, used), name: template.name, enabled: true, folder: null,
+    when: structuredCopy(template.when), then, else: [], timing: { ...DEFAULT_TIMING }, animation: null };
+}
+
+// -------------------------------------------------------------------------------------------- Share strings
+
+// A rule or folder as text to paste into another dashboard: "minepanel-rules:1:" and base64url JSON with the rules,
+// the rules their "Rule active" conditions read, and the places, toggles and profile names they use. Importing never
+// overwrites anything: rules, a folder and new places and toggles are added with fresh ids.
+
+const SHARE_PREFIX = "minepanel-rules:1:";
+const SHARE_VERSION = 1;
+const MAX_SHARE_LENGTH = 512 * 1024;
+const BASE64URL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+function base64url(text) {
+  const bytes = unescape(encodeURIComponent(text));
+  let result = "";
+  for (let index = 0; index < bytes.length; index += 3) {
+    const chunk = bytes.charCodeAt(index) << 16 | (bytes.charCodeAt(index + 1) || 0) << 8 | (bytes.charCodeAt(index + 2) || 0);
+    const length = Math.min(3, bytes.length - index) + 1;
+    for (let part = 0; part < length; part++) result += BASE64URL[chunk >> 18 - part * 6 & 63];
+  }
+  return result;
+}
+
+function fromBase64url(text) {
+  ensure(/^[A-Za-z0-9_-]*$/.test(text) && text.length % 4 !== 1, "Not a MinePanel share string");
+  let bytes = "";
+  for (let index = 0; index < text.length; index += 4) {
+    const part = text.slice(index, index + 4);
+    const chunk = [...part.padEnd(4, "A")].reduce((value, char) => value << 6 | BASE64URL.indexOf(char), 0);
+    bytes += String.fromCharCode(chunk >> 16 & 255, chunk >> 8 & 255, chunk & 255).slice(0, part.length - 1);
+  }
+  try {
+    return decodeURIComponent(escape(bytes));
+  } catch {
+    throw new Error("Not a MinePanel share string");
+  }
+}
+
+/** The ids of the rules and everything they read, in list order. */
+function shareClosure(layout, ids) {
+  const byId = new Map(layout.rules.map(rule => [rule.id, rule]));
+  const wanted = new Set();
+  const visit = id => {
+    if (wanted.has(id) || !byId.has(id)) return;
+    wanted.add(id);
+    ruleDependencies(byId.get(id)).forEach(visit);
+  };
+  ids.forEach(visit);
+  return layout.rules.filter(rule => wanted.has(rule.id));
+}
+
+/** A share string for some rules (by id), or for a folder's rules with the folder itself. */
+function shareRules(layout, ids, folderId = null) {
+  const folder = folderId ? layout.folders.find(entry => entry.id === folderId) : null;
+  const rules = shareClosure(layout, folder ? layout.rules.filter(rule => rule.folder === folder.id).map(rule => rule.id) : ids);
+  const conditions = rules.flatMap(rule => rule.when);
+  const places = new Set(conditions.map(condition => condition.place).filter(Boolean));
+  const toggles = new Set(conditions.filter(condition => condition.type === "toggle").map(condition => condition.toggle));
+  const profiles = new Set(rules.flatMap(rule => [...rule.then, ...rule.else])
+    .filter(action => action.do === "profile" && action.profile !== "default").map(action => action.profile));
+  const data = { version: SHARE_VERSION,
+    folder: folder ? { name: folder.name, enabled: folder.enabled } : null,
+    rules: rules.map(rule => ({ ...structuredCopy(rule), folder: folder && rule.folder === folder.id ? "shared" : null })),
+    places: layout.places.filter(place => places.has(place.id)),
+    toggles: layout.toggles.filter(toggle => toggles.has(toggle.id)),
+    profiles: layout.profiles.filter(profile => profiles.has(profile.id)).map(profile => ({ id: profile.id, name: profile.name })) };
+  return SHARE_PREFIX + base64url(JSON.stringify(data));
+}
+
+const slug = (text, fallback) => text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 24)
+  || fallback;
+
+/**
+ * Adds the rules of a share string to a layout. Places that match an existing one exactly, and toggles with the
+ * same name, are reused; "Switch profile" goes to the profile with the same name, and is dropped if there is none.
+ * Conditions that refer to something the string doesn't carry are left out too. Returns { layout (validated),
+ * rules: the new rule ids, folder: the new folder's id or null, dropped: how many conditions and actions were left
+ * out }; throws an Error saying what's wrong, naming the rule if one is invalid.
+ */
+function importShare(layout, text) {
+  const trimmed = typeof text === "string" ? text.trim() : "";
+  ensure(trimmed.startsWith(SHARE_PREFIX) && trimmed.length <= MAX_SHARE_LENGTH, "Not a MinePanel share string");
+  let data;
+  try {
+    data = JSON.parse(fromBase64url(trimmed.slice(SHARE_PREFIX.length)));
+  } catch (error) {
+    throw new Error("Not a MinePanel share string");
+  }
+  ensure(isObject(data) && data.version === SHARE_VERSION, "This share string is from a newer MinePanel");
+  ensure(Array.isArray(data.rules) && data.rules.length > 0 && data.rules.every(isObject)
+    && ["places", "toggles", "profiles"].every(key => Array.isArray(data[key]) && data[key].every(isObject))
+    && (data.folder === null || isObject(data.folder)), "Invalid share string");
+  const places = [...layout.places];
+  const placeIds = new Map();
+  const usedPlaces = idSet(places);
+  for (const place of data.places) {
+    const same = places.find(entry => ["name", "world", "dimension", "x", "y", "z"].every(key => entry[key] === place[key]));
+    const id = same?.id ?? uniqueId(slug(String(place.name ?? ""), "place"), usedPlaces);
+    if (!same) places.push({ ...place, id });
+    placeIds.set(place.id, id);
+  }
+  const toggles = [...layout.toggles];
+  const toggleIds = new Map();
+  const usedToggles = idSet(toggles);
+  for (const toggle of data.toggles) {
+    const same = toggles.find(entry => entry.name === toggle.name);
+    const id = same?.id ?? uniqueId(slug(String(toggle.name ?? ""), "toggle"), usedToggles);
+    if (!same) toggles.push({ ...toggle, id });
+    toggleIds.set(toggle.id, id);
+  }
+  const profileIds = new Map(data.profiles.map(profile => [profile.id,
+    layout.profiles.find(entry => entry.name === profile.name)?.id]));
+  profileIds.set("default", "default");
+  const folders = [...layout.folders];
+  let folderId = null;
+  if (data.folder) {
+    folderId = uniqueId(slug(String(data.folder.name ?? ""), "folder"), idSet(folders));
+    folders.push({ id: folderId, name: data.folder.name, enabled: data.folder.enabled, collapsed: false });
+  }
+  const usedRules = idSet(layout.rules);
+  const ruleIds = new Map(data.rules.map(rule => [rule.id, uniqueId(slug(String(rule.id ?? ""), "rule"), usedRules)]));
+  let dropped = 0;
+  const actions = list => (Array.isArray(list) ? list : []).filter(action => {
+    if (action?.do !== "profile") return true;
+    const kept = profileIds.get(action.profile) !== undefined;
+    if (!kept) dropped++;
+    return kept;
+  }).map(action => action.do === "profile" ? { ...action, profile: profileIds.get(action.profile) } : action);
+  const rules = data.rules.map(rule => ({ ...rule, id: ruleIds.get(rule.id),
+    folder: folderId && rule.folder ? folderId : null,
+    // A reference the share string doesn't carry must not land on an unrelated place, toggle or rule here.
+    when: (Array.isArray(rule.when) ? rule.when : []).flatMap(condition => {
+      if (!isObject(condition)) return [condition];
+      const [key, ids] = condition.place !== undefined ? ["place", placeIds]
+        : condition.type === "toggle" ? ["toggle", toggleIds] : condition.type === "ruleActive" ? ["rule", ruleIds] : [];
+      if (!key) return [condition];
+      if (!ids.has(condition[key])) {
+        dropped++;
+        return [];
+      }
+      return [{ ...condition, [key]: ids.get(condition[key]) }];
+    }),
+    then: actions(rule.then), else: actions(rule.else) }));
+  const next = normalizeLayout({ ...layout, places, toggles, folders, rules: [...layout.rules, ...rules] });
+  return { layout: next, rules: rules.map(rule => rule.id), folder: folderId, dropped };
 }
 
 // ------------------------------------------------------------------------------------------------ Migration
@@ -960,6 +1271,187 @@ function setTileEnabled(layout, id, enabled) {
   const tiles = layout.tiles.map(tile => tile.id !== id ? tile
     : { ...tile, enabled, y: enabled ? bottom : tile.y });
   return { ...layout, tiles: settle(tiles, null) };
+}
+
+// ------------------------------------------------------------------------------------------- Layout solver
+
+/** After a panel's visibility, rectangle, fill or focus changes, rules can't change it again for this long. */
+const PANEL_DWELL_MILLIS = 1000;
+
+const rectOf = value => ({ x: value.x, y: value.y, w: value.w, h: value.h });
+const area = rect => rect.w * rect.h;
+const tileOrder = (a, b) => a.y - b.y || a.x - b.x || TILE_IDS.indexOf(a.id) - TILE_IDS.indexOf(b.id);
+
+/**
+ * Where each visible panel goes once the rules are applied (docs/RULES_V2.md, "Resolving the effective layout").
+ * {@code tiles} are the base profile's tiles; {@code view} comes from effectiveView ({ visible, rects, fills }).
+ * Returns { id: {x, y, w, h} } for the visible panels. The same inputs always give the same layout.
+ * 1. Panels start at their base rectangles. Place claims give a panel a rectangle and Swap claims trade two base
+ *    rectangles; those panels are pinned. A moved panel's old spot is a gap unless its new one overlaps it.
+ * 2. Each gap (a hidden panel's spot, top to bottom) is filled by neighbours growing into it: (a) one neighbour
+ *    whose edge matches the gap exactly (above, below, left, right), else (b) several neighbours on one side whose
+ *    edges together cover it exactly, else (c) the panels below slide up when the grid settles. A Hide fill
+ *    override replaces this: "empty" keeps the gap, a panel takes it (it grows over the gap when that makes a
+ *    rectangle, otherwise it moves into the gap and is pinned there).
+ * 3. Panels overlapping a pinned panel shrink away from it, keeping the largest part that is at least their minimum
+ *    size. If no part is big enough they are pushed down. A pinned panel overlapping a higher pinned one is unpinned.
+ * 4. The grid settles: pinned panels (and kept-empty gaps) stay, the rest move up to the highest free row in their
+ *    columns, as when laying out a profile.
+ */
+function solveLayout(tiles, view) {
+  const base = new Map(tiles.filter(tile => tile.enabled).map(tile => [tile.id, rectOf(tile)]));
+  const rects = new Map([...base].filter(([id]) => view.visible.has(id)).map(([id, rect]) => [id, { ...rect }]));
+  const pinned = [];
+  const gaps = [...base].filter(([id]) => !rects.has(id)).map(([id, rect]) => ({ id, ...rect }));
+  for (const [id, claim] of Object.entries(view.rects ?? {})) {
+    const target = claim.swap === undefined ? claim : base.get(claim.swap);
+    if (!rects.has(id) || !target) continue;
+    const rect = rectOf(resize({ id, ...target }));
+    if (claim.swap === undefined && !overlaps(rect, base.get(id))) gaps.push({ id, ...base.get(id), moved: true });
+    rects.set(id, rect);
+    pinned.push(id);
+  }
+  const kept = [];
+  // Growing only has to avoid unpinned panels and kept gaps: overlaps with pinned panels are resolved in step 3.
+  const free = (rect, except) => [...rects].every(([id, other]) => except.includes(id) || pinned.includes(id)
+    || !overlaps(rect, other)) && kept.every(other => !overlaps(rect, other));
+  const movable = () => [...rects.keys()].filter(id => !pinned.includes(id))
+    .sort((a, b) => TILE_IDS.indexOf(a) - TILE_IDS.indexOf(b));
+  for (const gap of gaps.sort(tileOrder)) {
+    const fill = gap.moved ? undefined : view.fills?.[gap.id];
+    if (fill === "empty") {
+      kept.push(rectOf(gap));
+    } else if (fill && rects.has(fill) && !pinned.includes(fill)) {
+      const left = fillGap(rects, pinned, fill, gap, free);
+      if (left) growInto(rects, movable(), left, free);
+    } else {
+      growInto(rects, movable(), gap, free);
+    }
+  }
+  const fixed = [];
+  for (const id of pinned) {
+    if (!fixed.some(other => overlaps(rects.get(id), rects.get(other)))) fixed.push(id);
+  }
+  for (const id of fixed) shrinkAway(rects, fixed, id);
+  const placed = [...fixed.map(id => rects.get(id)), ...kept];
+  const rest = [...rects].filter(([id]) => !fixed.includes(id)).map(([id, rect]) => ({ id, ...rect })).sort(tileOrder);
+  for (const tile of rest) {
+    let y = 0;
+    while (placed.some(other => overlaps({ ...tile, y }, other))) y++;
+    rects.set(tile.id, { ...rectOf(tile), y });
+    placed.push(rects.get(tile.id));
+  }
+  return Object.fromEntries([...rects].sort(([a], [b]) => TILE_IDS.indexOf(a) - TILE_IDS.indexOf(b)));
+}
+
+/**
+ * A Hide fill override: the fill panel grows over the gap if that makes a rectangle, otherwise moves into it and
+ * is pinned there. Returns the spot a moved panel left, which neighbours then grow into, or null.
+ */
+function fillGap(rects, pinned, id, gap, free) {
+  const rect = rects.get(id);
+  const union = { x: Math.min(rect.x, gap.x), y: Math.min(rect.y, gap.y) };
+  union.w = Math.max(rect.x + rect.w, gap.x + gap.w) - union.x;
+  union.h = Math.max(rect.y + rect.h, gap.y + gap.h) - union.y;
+  if (area(union) === area(rect) + area(gap) && union.h <= LAYOUT_MAX_H && free(union, [id])) {
+    rects.set(id, union);
+    return null;
+  }
+  rects.set(id, rectOf(resize({ id, ...rectOf(gap) })));
+  pinned.push(id);
+  return overlaps(rect, rects.get(id)) ? null : { id, ...rect };
+}
+
+/** Auto-grow: one neighbour with exactly the gap's edge, else several on one side that together cover it exactly. */
+function growInto(rects, movable, gap, free) {
+  const sides = [
+    { touches: r => r.y + r.h === gap.y, within: r => r.x >= gap.x && r.x + r.w <= gap.x + gap.w, span: r => r.w,
+      size: gap.w, grow: r => ({ ...r, h: r.h + gap.h }) },
+    { touches: r => r.y === gap.y + gap.h, within: r => r.x >= gap.x && r.x + r.w <= gap.x + gap.w, span: r => r.w,
+      size: gap.w, grow: r => ({ ...r, y: gap.y, h: r.h + gap.h }) },
+    { touches: r => r.x + r.w === gap.x, within: r => r.y >= gap.y && r.y + r.h <= gap.y + gap.h, span: r => r.h,
+      size: gap.h, grow: r => ({ ...r, w: r.w + gap.w }) },
+    { touches: r => r.x === gap.x + gap.w, within: r => r.y >= gap.y && r.y + r.h <= gap.y + gap.h, span: r => r.h,
+      size: gap.h, grow: r => ({ ...r, x: gap.x, w: r.w + gap.w }) }
+  ];
+  const fits = (id, rect) => rect.h <= LAYOUT_MAX_H && free(rect, [id]);
+  for (const side of sides) {
+    for (const id of movable) {
+      const rect = rects.get(id);
+      if (side.touches(rect) && side.within(rect) && side.span(rect) === side.size && fits(id, side.grow(rect))) {
+        rects.set(id, side.grow(rect));
+        return;
+      }
+    }
+  }
+  for (const side of sides) {
+    const members = movable.filter(id => side.touches(rects.get(id)) && side.within(rects.get(id)));
+    if (members.length < 2 || members.reduce((sum, id) => sum + side.span(rects.get(id)), 0) !== side.size) continue;
+    if (!members.every(id => fits(id, side.grow(rects.get(id))))) continue;
+    for (const id of members) rects.set(id, side.grow(rects.get(id)));
+    return;
+  }
+}
+
+/** Panels overlapping the pinned panel {@code id} keep their largest part beside it that is still big enough. */
+function shrinkAway(rects, fixed, id) {
+  const pin = rects.get(id);
+  for (const [other, rect] of rects) {
+    if (fixed.includes(other) || !overlaps(rect, pin)) continue;
+    const minimum = TILE_MINIMUMS[other];
+    const parts = [
+      { ...rect, w: pin.x - rect.x },
+      { ...rect, x: pin.x + pin.w, w: rect.x + rect.w - pin.x - pin.w },
+      { ...rect, h: pin.y - rect.y },
+      { ...rect, y: pin.y + pin.h, h: rect.y + rect.h - pin.y - pin.h }
+    ].filter(part => part.w >= minimum.w && part.h >= minimum.h
+      && fixed.every(pinnedId => !overlaps(part, rects.get(pinnedId))));
+    const best = parts.reduce((winner, part) => !winner || area(part) > area(winner) ? part : winner, null);
+    if (best) rects.set(other, best);
+  }
+}
+
+/**
+ * Minimum dwell per panel: after a panel's visibility, rectangle claim or fill changes (or focus moves), another
+ * change to it waits until {@code millis} have passed. If the target goes back to what is shown in the meantime,
+ * nothing happens. Together with linger, a value hovering at a threshold can't make a panel blink.
+ * {@code apply(view, now)} returns the view with visible, rects, fills and focus held as needed.
+ */
+function createPanelDwell(millis = PANEL_DWELL_MILLIS) {
+  let shown = null;
+  const changedAt = new Map();
+  const panelKey = (value, id) => JSON.stringify([value.visible.has(id), value.rects[id] ?? null,
+    value.fills[id] ?? null]);
+  return {
+    apply(view, now) {
+      const target = { visible: view.visible, rects: view.rects ?? {}, fills: view.fills ?? {},
+        focus: view.focus ?? null };
+      if (!shown) shown = target;
+      const ready = key => now - (changedAt.get(key) ?? -Infinity) >= millis;
+      const pick = id => {
+        if (panelKey(shown, id) === panelKey(target, id)) return target;
+        if (!ready(id)) return shown;
+        changedAt.set(id, now);
+        return target;
+      };
+      const sources = new Map(TILE_IDS.map(id => [id, pick(id)]));
+      const next = { visible: new Set(TILE_IDS.filter(id => sources.get(id).visible.has(id))), rects: {}, fills: {} };
+      // Rectangle claims keep their priority order (target's first), which the solver relies on.
+      for (const id of [...Object.keys(target.rects), ...Object.keys(shown.rects)]) {
+        const rect = sources.get(id).rects[id];
+        if (rect && !next.rects[id]) next.rects[id] = rect;
+      }
+      for (const id of TILE_IDS) if (sources.get(id).fills[id]) next.fills[id] = sources.get(id).fills[id];
+      next.focus = shown.focus === target.focus || !ready("focus") ? shown.focus : target.focus;
+      if (next.focus !== shown.focus) changedAt.set("focus", now);
+      shown = next;
+      return { ...view, ...next };
+    },
+    reset() {
+      shown = null;
+      changedAt.clear();
+    }
+  };
 }
 
 function withSettings(layout, tileId, changes) {

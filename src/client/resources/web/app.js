@@ -60,8 +60,11 @@ const TILE_LABELS = { player: "Player", inventory: "Inventory", statistics: "Sta
 const CATEGORY_LABELS = { lifecycle: "Session", death: "Death", dimension: "Dimension", kill: "Kill",
   mine: "Mined", place: "Placed", container: "Opened", inventory: "Inventory", drop: "Dropped",
   damage: "Damage", heal: "Healed", advancement: "Advancement", biome: "Biome", weather: "Weather", time: "Day" };
-/** Feature code (features.js) registers here to render with each update, after layout changes, and every second. */
-const featureHooks = { render: [], layout: [], tick: [] };
+/**
+ * Feature code (features.js) registers here to render with each update, after layout changes, every second, and
+ * for the Notify actions that fire when rules are evaluated.
+ */
+const featureHooks = { render: [], layout: [], tick: [], notify: [] };
 const EQUIPMENT_SLOTS = [["head", "Head"], ["chest", "Chest"], ["legs", "Legs"], ["feet", "Feet"], ["offhand", "Offhand"]];
 const ROW_HEIGHT = 40;
 const GRID_GAP = 10;
@@ -663,7 +666,10 @@ let editingProfile = "default";
 let saveTimer;
 let drag;
 const ruleEngine = createRuleEngine();
+const panelDwell = createPanelDwell();
 let ruleEvaluation = null;
+// Force on/off previews from the rules editor ({ ruleId: "on" | "off" }); only in this browser, while it is open.
+let rulePreview = {};
 let view = effectiveView(layout, null);
 let viewKey;
 // Set when the stored layout could not be read or converted: it stays untouched on disk, so nothing is saved.
@@ -716,13 +722,18 @@ function wallClock(now) {
   return { minutes: date.getHours() * 60 + date.getMinutes(), weekday: date.getDay() };
 }
 
-/** Evaluates the rules now and works out what the dashboard shows. */
+/** Evaluates the rules now and works out what the dashboard shows, holding panels that changed too recently. */
 function evaluateView(player, now) {
-  ruleEvaluation = ruleEngine.evaluate(layout, { player, width: window.innerWidth, clock: wallClock(now) }, now);
-  return effectiveView(layout, ruleEvaluation);
+  ruleEvaluation = ruleEngine.evaluate(layout, { player, width: window.innerWidth, clock: wallClock(now) }, now,
+    rulePreview);
+  if (ruleEvaluation.notifications.length) {
+    for (const hook of featureHooks.notify) hook(ruleEvaluation.notifications);
+  }
+  return panelDwell.apply(effectiveView(layout, ruleEvaluation), now);
 }
 
-const viewKeyOf = value => JSON.stringify([value.profileId, [...value.visible].sort(), value.settings]);
+const viewKeyOf = value => JSON.stringify([value.profileId, [...value.visible].sort(), value.settings,
+  value.rects, value.fills, value.focus]);
 
 /** Re-evaluates the rules; re-applies the layout only when what should be shown has changed. */
 function updateView(player = currentPlayerState, now = Date.now()) {
@@ -733,17 +744,30 @@ function updateView(player = currentPlayerState, now = Date.now()) {
   applyLayout();
 }
 
+/**
+ * Shows the layout. While customizing, that is the edited profile as it is; otherwise the rules' view: the solved
+ * rectangles (solveLayout), with a focused panel drawn above the grid while the others fade out where they are.
+ * Changes animate (FLIP) unless customizing.
+ */
 function applyLayout() {
   const profile = getProfile(layout, shownProfileId());
-  const order = [...profile.tiles].sort((a, b) => a.y - b.y || a.x - b.x);
+  const solved = editing ? null : solveLayout(profile.tiles, view);
+  const focus = editing ? null : view.focus;
+  const rectFor = tile => solved?.[tile.id] ?? tile;
+  const order = [...profile.tiles].sort((a, b) => rectFor(a).y - rectFor(b).y || rectFor(a).x - rectFor(b).x);
+  const before = editing || drag ? null : measureTiles();
+  grid.classList.toggle("has-focus", focus !== null);
+  grid.style.setProperty("--fade", `${layout.animation.durationMs}ms`);
   for (const tile of profile.tiles) {
     const element = tileElements[tile.id];
-    setHidden(element, editing ? !tile.enabled : !view.visible.has(tile.id));
+    const rect = rectFor(tile);
+    setHidden(element, editing ? !tile.enabled : !(tile.id in solved) && focus !== tile.id);
+    element.classList.toggle("focused", focus === tile.id);
     if (tile.rulesOnly) element.classList.add("rules-only");
     else element.classList.remove("rules-only");
-    element.style.setProperty("--grid-column", `${tile.x + 1} / span ${tile.w}`);
-    element.style.setProperty("--grid-row", `${tile.y + 1} / span ${tile.h}`);
-    element.style.setProperty("--grid-row-span", `span ${tile.h}`);
+    element.style.setProperty("--grid-column", `${rect.x + 1} / span ${rect.w}`);
+    element.style.setProperty("--grid-row", `${rect.y + 1} / span ${rect.h}`);
+    element.style.setProperty("--grid-row-span", `span ${rect.h}`);
     element.style.setProperty("--order", String(order.indexOf(tile)));
     tileToggles[tile.id].setAttribute("aria-pressed", String(tile.enabled));
     writeText(modeToggles[tile.id], tile.rulesOnly ? "Rules only" : "Always");
@@ -755,6 +779,73 @@ function applyLayout() {
   renderStatistics(displayedStatistics);
   updateMap();
   for (const hook of featureHooks.layout) hook();
+  if (before) animateTiles(before);
+}
+
+// ------------------------------------------------------------------------------------------------ Animation
+
+const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+
+/**
+ * Where each shown tile is on screen now, including any running animation, so an interrupted transition starts
+ * from where the tile is rather than from its old target. Running animations stop once measured.
+ */
+function measureTiles() {
+  if (typeof tileElements.player.animate !== "function") return null;
+  const rects = new Map();
+  for (const id of TILE_IDS) {
+    const element = tileElements[id];
+    if (!element.hidden) rects.set(id, element.getBoundingClientRect());
+    for (const animation of element.getAnimations?.() ?? []) animation.cancel();
+  }
+  return rects;
+}
+
+/**
+ * FLIP: each tile starts where it was and animates to where it is now. Tiles that appear fade in; tiles that go
+ * fade out from where they were (as a copy, since the tile itself is already hidden). With reduced motion tiles
+ * only cross-fade. Timing is the rule's animation override for that panel, else the layout's.
+ */
+function animateTiles(before) {
+  for (const id of TILE_IDS) {
+    const element = tileElements[id];
+    const { durationMs, easing } = view.animations?.[id] ?? layout.animation;
+    if (durationMs <= 0) continue;
+    const timing = { duration: durationMs, easing };
+    const first = before.get(id);
+    const last = element.hidden ? null : element.getBoundingClientRect();
+    if (first && !last) {
+      fadeOutCopy(element, first, timing);
+    } else if (!first && last) {
+      element.animate([{ opacity: 0 }, { opacity: 1 }], timing);
+    } else if (first && last && (first.left !== last.left || first.top !== last.top
+      || first.width !== last.width || first.height !== last.height)) {
+      if (reducedMotion?.matches) {
+        element.animate([{ opacity: 0.2 }, { opacity: 1 }], timing);
+      } else {
+        const from = `translate(${first.left - last.left}px, ${first.top - last.top}px) `
+          + `scale(${first.width / Math.max(1, last.width)}, ${first.height / Math.max(1, last.height)})`;
+        element.animate([{ transformOrigin: "0 0", transform: from }, { transformOrigin: "0 0", transform: "none" }],
+          timing);
+      }
+    }
+  }
+}
+
+function fadeOutCopy(element, rect, timing) {
+  const copy = element.cloneNode(true);
+  copy.removeAttribute("id");
+  for (const child of copy.querySelectorAll("[id]")) child.removeAttribute("id");
+  for (const frame of copy.querySelectorAll("iframe")) frame.remove();
+  copy.hidden = false;
+  copy.classList.remove("focused");
+  copy.classList.add("tile-leaving");
+  copy.setAttribute("aria-hidden", "true");
+  Object.assign(copy.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`,
+    height: `${rect.height}px` });
+  document.body.appendChild(copy);
+  const remove = () => copy.remove();
+  copy.animate([{ opacity: 1 }, { opacity: 0 }], timing).finished.then(remove, remove);
 }
 
 // ------------------------------------------------------------------------------------------------- Map
@@ -837,6 +928,8 @@ function changeLayout(next) {
 /** Applies a new or reloaded layout: profiles or rules may have changed, so re-evaluate them. */
 function refreshLayout() {
   if (!layout.profiles.some(profile => profile.id === editingProfile)) editingProfile = "default";
+  // Dwell only paces changes made by rules; an edited or loaded layout shows at once.
+  panelDwell.reset();
   view = evaluateView(currentPlayerState, Date.now());
   viewKey = viewKeyOf(view);
   applyLayout();

@@ -8,16 +8,18 @@ import java.util.Objects;
 /**
  * Everything beyond the core vitals and inventory: the world around the player, movement, experience, the last
  * portal trip, recent pickups, advancements, known villagers, the last-seen ender chest, the client frame rate and
- * Litematica build progress, and the icons the inventory tile shows beside the slots. Each part is sent as a top-level snapshot field and replaced whole when it changes.
+ * Litematica build progress, the icons the inventory tile shows beside the slots, the rule sensors and the game's
+ * registries (for the rule editor's pickers). Each part is sent as a top-level snapshot field and replaced whole when it changes.
  * {@code advancements} is null until the server has sent them; {@code enderChest} is null until the player opens
  * their ender chest in this world.
  */
 public record PlayerDetails(WorldInfo world, Motion motion, XpTracker.Experience xp, PortalTracker.State portal,
                             List<PickupTracker.Pickup> pickups, AdvancementsSnapshot advancements,
                             List<VillagerSnapshot> villagers, EnderChest enderChest,
-                            FrameStats.Performance performance, BuildProgress build, Icons icons) {
+                            FrameStats.Performance performance, BuildProgress build, Icons icons,
+                            Sensors sensors, Registries registries) {
     public static final List<String> FIELDS = List.of("world", "motion", "xp", "portal", "pickups", "advancements",
-            "villagers", "enderChest", "performance", "build", "icons");
+            "villagers", "enderChest", "performance", "build", "icons", "sensors", "registries");
 
     /** The 27 slots of the player's ender chest, as of {@code seenAt}. */
     public record EnderChest(long seenAt, List<ItemSnapshot> slots) {
@@ -54,6 +56,15 @@ public record PlayerDetails(WorldInfo world, Motion motion, XpTracker.Experience
         }
     }
 
+    /** Details without sensors or registries, for code paths (and tests) that don't read them. */
+    public PlayerDetails(WorldInfo world, Motion motion, XpTracker.Experience xp, PortalTracker.State portal,
+                         List<PickupTracker.Pickup> pickups, AdvancementsSnapshot advancements,
+                         List<VillagerSnapshot> villagers, EnderChest enderChest, FrameStats.Performance performance,
+                         BuildProgress build, Icons icons) {
+        this(world, motion, xp, portal, pickups, advancements, villagers, enderChest, performance, build, icons,
+                Sensors.EMPTY, Registries.EMPTY);
+    }
+
     public PlayerDetails {
         Objects.requireNonNull(world, "world");
         Objects.requireNonNull(motion, "motion");
@@ -62,6 +73,8 @@ public record PlayerDetails(WorldInfo world, Motion motion, XpTracker.Experience
         Objects.requireNonNull(performance, "performance");
         Objects.requireNonNull(build, "build");
         Objects.requireNonNull(icons, "icons");
+        Objects.requireNonNull(sensors, "sensors");
+        Objects.requireNonNull(registries, "registries");
         pickups = List.copyOf(pickups);
         villagers = List.copyOf(villagers);
         if (pickups.size() > PickupTracker.MAX_PICKUPS || villagers.size() > VillagerSnapshot.MAX_VILLAGERS) {
@@ -97,6 +110,8 @@ public record PlayerDetails(WorldInfo world, Motion motion, XpTracker.Experience
             case "performance" -> details.performance.toJson();
             case "build" -> details.build.toJson();
             case "icons" -> details.icons.toJson();
+            case "sensors" -> details.sensors.toJson();
+            case "registries" -> details.registries.toJson();
             default -> throw new IllegalArgumentException(field);
         };
     }
@@ -115,6 +130,8 @@ public record PlayerDetails(WorldInfo world, Motion motion, XpTracker.Experience
             case "performance" -> details.performance;
             case "build" -> details.build;
             case "icons" -> details.icons;
+            case "sensors" -> details.sensors;
+            case "registries" -> details.registries;
             default -> throw new IllegalArgumentException(field);
         };
     }

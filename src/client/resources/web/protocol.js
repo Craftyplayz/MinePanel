@@ -6,7 +6,7 @@ const equipmentKeys = ["head", "chest", "legs", "feet", "offhand", "mainhand"];
 const historyCategories = ["lifecycle", "death", "dimension", "kill", "mine", "place",
   "container", "inventory", "drop", "damage", "heal", "advancement", "biome", "weather", "time"];
 const MAX_HISTORY_EVENTS = 500;
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 const has = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -212,7 +212,7 @@ function applyHistory(previous, patch) {
 // ------------------------------------------------------------------------------- World, motion and other details
 
 const DETAIL_FIELDS = ["world", "motion", "xp", "portal", "pickups", "advancements", "villagers", "enderChest",
-  "performance", "build", "icons"];
+  "performance", "build", "icons", "sensors", "registries"];
 const WEATHER = ["clear", "rain", "thunder"];
 const GAME_MODES = ["survival", "creative", "adventure", "spectator"];
 const MOTION_MODES = ["ground", "elytra", "swimming", "riding", "flying", "falling"];
@@ -384,6 +384,66 @@ function validateIcons(icons) {
   return { head: icons.head === null ? null : filledItem(icons.head), enderChest: filledItem(icons.enderChest) };
 }
 
+const SENSOR_FLAGS = ["onFire", "inWater", "inLava", "inRain", "sneaking", "sprinting", "sleeping", "bossBar", "raid"];
+const SENSOR_USING = ["eating", "drinking", "blocking", "bow", "crossbow", "trident", "spear", "spyglass", "horn",
+  "brush", "bundle", "fishing"];
+const SENSOR_SCREENS = ["none", "inventory", "chest", "enderChest", "furnace", "crafting", "anvil", "enchanting",
+  "brewing", "trading", "smithing", "grindstone", "stonecutter", "loom", "cartography", "beacon", "other"];
+const MAX_SENSOR_REACH = 64;
+const MAX_NEARBY = 128;
+const sensorDistance = value => finite(value) && value >= 0 && value <= MAX_SENSOR_REACH + 1;
+
+/**
+ * Rule sensors; mirrors Sensors on the Java side. Light, look, nearby and screen are null unless an enabled rule
+ * reads them.
+ */
+function validateSensors(sensors) {
+  requireValid(object(sensors) && whole(sensors.moonPhase) && sensors.moonPhase >= 0 && sensors.moonPhase <= 7
+    && (sensors.spawnDistance === null || integer(sensors.spawnDistance))
+    && whole(sensors.air) && sensors.air >= -20 && integer(sensors.maxAir)
+    && sensors.air <= Math.max(sensors.maxAir, 300) && integer(sensors.armor) && sensors.armor <= 1000
+    && SENSOR_FLAGS.every(key => typeof sensors[key] === "boolean")
+    && (sensors.riding === null || validIdentifier(sensors.riding))
+    && (sensors.using === null || SENSOR_USING.includes(sensors.using))
+    && (sensors.screen === null || SENSOR_SCREENS.includes(sensors.screen)));
+  const { light, look, nearby } = sensors;
+  if (light !== null) {
+    requireValid(object(light) && ["block", "sky", "combined"].every(key => integer(light[key]) && light[key] <= 15));
+  }
+  if (look !== null) {
+    const none = look?.kind === "none";
+    requireValid(object(look) && ["none", "block", "entity"].includes(look.kind)
+      && (none ? look.id === null && look.distance === null : validIdentifier(look.id) && sensorDistance(look.distance)));
+  }
+  if (nearby !== null) {
+    requireValid(object(nearby) && integer(nearby.radius) && nearby.radius <= MAX_SENSOR_REACH
+      && Array.isArray(nearby.entities) && nearby.entities.length <= MAX_NEARBY
+      && nearby.entities.every(entity => object(entity) && validIdentifier(entity.type)
+        && typeof entity.hostile === "boolean" && sensorDistance(entity.distance)));
+  }
+  return { ...Object.fromEntries(["moonPhase", "spawnDistance", "air", "maxAir", "armor", ...SENSOR_FLAGS, "riding",
+    "using", "screen"].map(key => [key, sensors[key]])),
+  light: light === null ? null : { block: light.block, sky: light.sky, combined: light.combined },
+  look: look === null ? null : { kind: look.kind, id: look.id, distance: look.distance },
+  nearby: nearby === null ? null : { radius: nearby.radius, entities: nearby.entities.map(entity =>
+    ({ type: entity.type, hostile: entity.hostile, distance: entity.distance })) } };
+}
+
+const REGISTRY_KINDS = ["items", "blocks", "entities", "effects", "biomes", "stats"];
+const MAX_REGISTRY_ENTRIES = 4096;
+// Statistic ids have a second namespace after the slash.
+const validRegistryEntryId = value => validText(value) && /^[a-z0-9_.-]+:[a-z0-9/._:-]+$/.test(value);
+
+/** The game's registries for the rule editor's pickers; mirrors Registries on the Java side. */
+function validateRegistries(registries) {
+  requireValid(object(registries) && REGISTRY_KINDS.every(kind => Array.isArray(registries[kind])
+    && registries[kind].length <= MAX_REGISTRY_ENTRIES));
+  return Object.fromEntries(REGISTRY_KINDS.map(kind => [kind, registries[kind].map(entry => {
+    requireValid(object(entry) && validRegistryEntryId(entry.id) && validText(entry.name) && validIcon(entry.icon));
+    return { id: entry.id, name: entry.name, icon: entry.icon };
+  })]));
+}
+
 /** Validates the detail fields: required while in a world (advancements and ender chest may be null), else null. */
 function validateDetails(state) {
   requireValid(DETAIL_FIELDS.every(key => has(state, key)));
@@ -393,7 +453,8 @@ function validateDetails(state) {
   }
   const validators = { world: validateWorld, motion: validateMotion, xp: validateXp, portal: validatePortal,
     pickups: validatePickups, advancements: validateAdvancements, villagers: validateVillagers,
-    enderChest: validateEnderChest, performance: validatePerformance, build: validateBuild, icons: validateIcons };
+    enderChest: validateEnderChest, performance: validatePerformance, build: validateBuild, icons: validateIcons,
+    sensors: validateSensors, registries: validateRegistries };
   return Object.fromEntries(DETAIL_FIELDS.map(key => {
     const value = state[key];
     // Deltas carry over unchanged fields from the previous state, which were validated when they arrived.

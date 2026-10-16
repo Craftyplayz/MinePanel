@@ -617,6 +617,7 @@ function renderBuild(player) {
 
 const advancementParts = { status: $("#advancements-status"), tabs: $("#advancement-tabs"),
   list: $("#advancement-list"), empty: $("#advancements-empty"), filter: $("#advancement-filter"),
+  search: $("#advancement-search"),
   form: $("#advancements-form"), seconds: $("#advancements-popup-seconds"), hiddenTabs: $("#advancements-hidden-tabs"),
   popup: $("#advancement-popup") };
 const MAX_ADVANCEMENT_ROWS = 150;
@@ -624,6 +625,8 @@ let advancementKey;
 let advancementNodes = new Map();
 let lastAdvancementEventId;
 let advancementPopupTimer;
+/** The tab (category) the list is narrowed to, or null for all of them. */
+let selectedAdvancementTab = null;
 
 stopDrag($("#advancements-settings"));
 $("#advancements-settings").addEventListener("click", () => {
@@ -638,6 +641,12 @@ advancementParts.filter.addEventListener("change", () => {
   advancementKey = undefined;
   renderAdvancements(currentPlayerState);
 });
+advancementParts.search.addEventListener("input", () => renderAdvancements(currentPlayerState));
+
+function selectAdvancementTab(id) {
+  selectedAdvancementTab = id;
+  renderAdvancements(currentPlayerState);
+}
 
 function renderAdvancementSettings() {
   const settings = displaySettings().advancements;
@@ -678,11 +687,28 @@ function renderAdvancements(player) {
   const done = advancements.entries.filter(entry => entry.done).length;
   writeText(advancementParts.status, `${done} / ${advancements.entries.length}`);
   const filter = advancementParts.filter.value || "closest";
-  const key = JSON.stringify([filter, displaySettings().advancements.pinned, advancements]);
+  if (selectedAdvancementTab !== null && !advancements.tabs.some(tab => tab.id === selectedAdvancementTab)) {
+    selectedAdvancementTab = null;
+  }
+  const search = advancementParts.search.value.trim().toLowerCase();
+  const key = JSON.stringify([filter, selectedAdvancementTab, search, displaySettings().advancements.pinned, advancements]);
   if (key === advancementKey) return;
   advancementKey = key;
-  const tabRow = tab => {
+  const tabRow = (tab, id) => {
     const row = create("div", "advancement-tab");
+    const selected = id === selectedAdvancementTab;
+    row.tabIndex = 0;
+    row.setAttribute("role", "button");
+    row.setAttribute("aria-pressed", String(selected));
+    row.title = selected || id === null ? "Show all advancements" : `Show only ${tab.title} advancements`;
+    // Clicking the selected tab again goes back to showing every tab.
+    const select = () => selectAdvancementTab(selected ? null : id);
+    row.addEventListener("click", select);
+    row.addEventListener("keydown", event => {
+      if (event.target !== row || (event.key !== "Enter" && event.key !== " ")) return;
+      event.preventDefault();
+      select();
+    });
     row.appendChild(create("span", "label", tab.title));
     const bar = create("span", "progress");
     const fill = create("span");
@@ -693,32 +719,39 @@ function renderAdvancements(player) {
     return row;
   };
   const total = tabRow({ title: "All", done: advancements.tabs.reduce((sum, tab) => sum + tab.done, 0),
-    total: advancements.tabs.reduce((sum, tab) => sum + tab.total, 0) });
+    total: advancements.tabs.reduce((sum, tab) => sum + tab.total, 0) }, null);
   total.classList.add("advancement-total");
   advancementParts.tabs.replaceChildren(...(advancements.tabs.length ? [total] : []), ...advancements.tabs.map(tab => {
-    const row = tabRow(tab);
+    const row = tabRow(tab, tab.id);
     const hide = create("button", "icon-button advancement-tab-hide", "×");
     hide.type = "button";
     hide.setAttribute("aria-label", `Hide the ${tab.title} tab`);
     hide.title = `Hide the ${tab.title} tab`;
-    hide.addEventListener("click", () => changeSettings("advancements",
-      { hiddenTabs: [...displaySettings().advancements.hiddenTabs, tab.id] }));
+    hide.addEventListener("click", event => {
+      event.stopPropagation();
+      changeSettings("advancements", { hiddenTabs: [...displaySettings().advancements.hiddenTabs, tab.id] });
+    });
     row.appendChild(hide);
     return row;
   }));
   const fraction = entry => entry.criteriaTotal ? entry.criteriaDone / entry.criteriaTotal : 0;
+  // Hidden advancements not made yet only match on what the list shows for them, so searching doesn't spoil them.
+  const matches = entry => !search || (entry.hidden && !entry.done ? "???"
+    : `${entry.title}\n${entry.description ?? ""}`).toLowerCase().includes(search);
+  const inTab = advancements.entries.filter(entry => selectedAdvancementTab === null || entry.tab === selectedAdvancementTab);
+  const shown = inTab.filter(matches);
   let entries;
   if (filter === "done") {
-    entries = advancements.entries.filter(entry => entry.done);
+    entries = shown.filter(entry => entry.done);
   } else if (filter === "remaining") {
-    entries = advancements.entries.filter(entry => !entry.done);
+    entries = shown.filter(entry => !entry.done);
   } else {
-    entries = advancements.entries.filter(entry => !entry.done)
+    entries = shown.filter(entry => !entry.done)
       .sort((a, b) => fraction(b) - fraction(a) || b.criteriaDone - a.criteriaDone || a.title.localeCompare(b.title));
   }
-  // Pinned advancements stay at the top whatever the filter, in the order they were pinned.
+  // Pinned advancements stay at the top whatever the filter, in the order they were pinned (still narrowed by tab and search).
   const pinned = displaySettings().advancements.pinned;
-  const byId = new Map(advancements.entries.map(entry => [entry.id, entry]));
+  const byId = new Map(shown.map(entry => [entry.id, entry]));
   entries = [...pinned.map(id => byId.get(id)).filter(Boolean), ...entries.filter(entry => !pinned.includes(entry.id))];
   const retained = new Map();
   const rows = entries.slice(0, MAX_ADVANCEMENT_ROWS).map(entry => {
@@ -766,7 +799,9 @@ function renderAdvancements(player) {
   advancementNodes = retained;
   advancementParts.list.replaceChildren(...rows);
   writeText(advancementParts.empty, rows.length ? (entries.length > rows.length
-    ? `Showing ${rows.length} of ${entries.length}.` : "") : filter === "done" ? "None done yet." : "All done!");
+    ? `Showing ${rows.length} of ${entries.length}.` : "")
+    : search && inTab.length ? "No advancements match the search."
+      : filter === "done" ? "None done yet." : "All done!");
 }
 
 /** Pops up newly made advancements (not ones already in the log when the dashboard connected). */
@@ -1078,11 +1113,31 @@ const CONDITION_LABELS = { world: "Server / world", dimension: "Dimension", biom
   changedDimension: "Changed dimension", joinedWorld: "Joined the world", inCombat: "In combat",
   villagersNearby: "Known villagers nearby", portalLinking: "Linking a portal", toggle: "Toggle on",
   ruleActive: "Rule active", width: "Dashboard width", realTime: "Real-world time",
-  sessionTime: "Session time", inGame: "In a world" };
+  sessionTime: "Session time", inGame: "In a world", moonPhase: "Moon phase", light: "Light level",
+  spawnDistance: "Distance from spawn", lookingAt: "Looking at", air: "Air", armor: "Armor points", onFire: "On fire",
+  inWater: "In water", inLava: "In lava", inRain: "In rain", sneaking: "Sneaking", sprinting: "Sprinting",
+  sleeping: "Sleeping", riding: "Riding", usingItem: "Using an item", hostilesNearby: "Hostile mobs nearby",
+  mobNearby: "Mob nearby", playersNearby: "Players nearby", bossBar: "Boss bar visible", raid: "Raid active",
+  screen: "Screen open" };
 const FAMILY_LABELS = { world: "World", position: "Position", player: "Player", inventory: "Inventory",
-  amounts: "Amounts", events: "Events", villagers: "Villagers", features: "Features", meta: "Dashboard" };
+  amounts: "Amounts", events: "Events", threats: "Threats", villagers: "Villagers", screens: "Screens",
+  features: "Features", meta: "Dashboard" };
 const COMPARE_LABELS = { "<": "<", "<=": "≤", "=": "=", ">=": "≥", ">": ">", "!=": "≠", between: "between" };
-const COMPARE_UNITS = { width: "px", sessionTime: "min", durability: "%", speed: "blocks/s", tookDamage: "hearts" };
+const COMPARE_UNITS = { width: "px", sessionTime: "min", durability: "%", speed: "blocks/s", tookDamage: "hearts",
+  air: "s", armor: "points", spawnDistance: "blocks" };
+/** Readable names of fixed choices, by RULE_CHOICES key. */
+const CHOICE_LABELS = {
+  moonPhase: { full: "Full moon", waningGibbous: "Waning gibbous", thirdQuarter: "Third quarter",
+    waningCrescent: "Waning crescent", new: "New moon", waxingCrescent: "Waxing crescent", firstQuarter: "First quarter",
+    waxingGibbous: "Waxing gibbous" },
+  usingItem: { eating: "eating", drinking: "drinking", blocking: "blocking", bow: "drawing a bow",
+    crossbow: "loading a crossbow", trident: "throwing a trident", spear: "using a spear", spyglass: "spyglass",
+    horn: "goat horn", brush: "brushing", bundle: "bundle", fishing: "fishing" },
+  screen: { inventory: "own inventory", chest: "chest-like", enderChest: "ender chest", furnace: "furnace-like",
+    crafting: "crafting", anvil: "anvil", enchanting: "enchanting", brewing: "brewing", trading: "villager trading",
+    smithing: "smithing", grindstone: "grindstone", stonecutter: "stonecutter", loom: "loom",
+    cartography: "cartography", beacon: "beacon", other: "any other screen" }
+};
 const ACTION_LABELS = { profile: "Switch profile", show: "Show panel", hide: "Hide panel", place: "Place panel",
   swap: "Swap panels", focus: "Focus panel", set: "Set panel setting", notify: "Notify" };
 const NAME_HINTS = { world: "world or server names", dimension: "e.g. nether, minecraft:the_end",
@@ -1092,11 +1147,17 @@ const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 let rulesDraft = null;
 let rulesCommitted = null;
 let rulesSelection = null;
-let liveRefs = { rules: new Map(), conditions: [], log: null };
+let liveRefs = { rules: new Map(), conditions: [], blocks: [], log: null };
+// Docked: the editor is a side panel and the dashboard beside it is live (preview, inspector, Place on grid).
+let rulesDocked = false;
+// Customizing is left while the editor is open, so the dashboard shows what the rules do; it resumes on close.
+let customizingBeforeRules = false;
+let placing = null;
+const rulesDock = $("#rules-dock");
 
 /** The editable parts of the layout, copied so edits can be half-finished without touching the live layout. */
 const draftOf = value => structuredCopy({ rules: value.rules, places: value.places, toggles: value.toggles,
-  folders: value.folders });
+  folders: value.folders, animation: value.animation });
 
 /** Validates the draft and saves it; returns whether it was valid. */
 function commitRules() {
@@ -1117,9 +1178,22 @@ function commitRules() {
 function editRules(change, redraw = true) {
   change(rulesDraft);
   commitRules();
-  if (redraw) renderRulesEditor();
-  else renderRuleList();
+  if (redraw) {
+    // Rows may have moved, so a selection of them no longer means the same rows.
+    selectedRows = new Set();
+    renderRulesEditor();
+  } else {
+    renderRuleList();
+  }
 }
+
+// Copy and paste of When rows and of actions: rows are ticked, copied here, and pasted into any rule (this browser
+// tab only). Share strings are shown under the rule or folder they were made for.
+let selectedRows = new Set();
+let rowClipboard = null;
+let shareText = null;
+let shownSelection = null;
+let importMessage = null;
 
 const selectedRule = () => rulesSelection?.kind === "rule"
   ? rulesDraft.rules.find(rule => rule.id === rulesSelection.id) : null;
@@ -1250,9 +1324,168 @@ function compareControls(key, target, onShape, unit) {
   return row;
 }
 
+// ---------------------------------------------------------------------------------------------- Pickers
+
+// Suggestions as you type, with names and icons where known: the game's registries (items, blocks, entity types,
+// effects, biomes, general statistics), which the mod sends once per connection and are kept in memory, plus ids
+// the dashboard has seen (also advancements, dimensions and worlds), which are kept in this browser so the editor
+// still suggests them outside a world.
+
+const PICKER_KINDS = ["item", "block", "entity", "effect", "stat", "advancement", "biome", "dimension", "world"];
+const REGISTRY_PICKERS = { item: "items", block: "blocks", entity: "entities", effect: "effects", biome: "biomes",
+  stat: "stats" };
+const registryIds = Object.fromEntries(Object.keys(REGISTRY_PICKERS).map(kind => [kind, new Map()]));
+const PICKER_LIMIT = 2000;
+const PICKER_STORAGE = "minepanel.knownIds";
+const knownIds = Object.fromEntries(PICKER_KINDS.map(kind => [kind, new Map()]));
+let knownIdsDirty = false;
+try {
+  const saved = JSON.parse(window.localStorage?.getItem(PICKER_STORAGE) ?? "null");
+  for (const kind of PICKER_KINDS) {
+    for (const [id, entry] of Array.isArray(saved?.[kind]) ? saved[kind].slice(0, PICKER_LIMIT) : []) {
+      if (typeof id === "string" && id.length <= 256) {
+        knownIds[kind].set(id, { name: typeof entry?.name === "string" ? entry.name : null,
+          icon: typeof entry?.icon === "string" && /^[a-z0-9-]{1,64}$/.test(entry.icon) ? entry.icon : null });
+      }
+    }
+  }
+} catch {
+  // Suggestions start empty.
+}
+for (const [id, name] of [["minecraft:overworld", "Overworld"], ["minecraft:the_nether", "The Nether"],
+  ["minecraft:the_end", "The End"]]) {
+  if (!knownIds.dimension.has(id)) knownIds.dimension.set(id, { name, icon: null });
+}
+
+function learnId(kind, id, name = null, icon = null) {
+  if (typeof id !== "string" || !id) return;
+  const map = knownIds[kind];
+  const old = map.get(id);
+  if (old ? old.name === (name ?? old.name) && old.icon === (icon ?? old.icon) : map.size >= PICKER_LIMIT) return;
+  map.set(id, { name: name ?? old?.name ?? null, icon: icon ?? old?.icon ?? null });
+  knownIdsDirty = true;
+}
+
+// The parts of the state last learned from; updates replace a part only when it changed.
+const learnedFrom = {};
+
+function learnIds(player) {
+  if (!player?.available) return;
+  const changed = name => {
+    if (learnedFrom[name] === player[name]) return false;
+    learnedFrom[name] = player[name];
+    return true;
+  };
+  const inventoryChanged = changed("inventory");
+  if (changed("pickups") || inventoryChanged) {
+    const items = [...player.inventory?.slots ?? [], ...Object.values(player.inventory?.equipment ?? {}),
+      ...(player.pickups ?? []).map(pickup => pickup.item)];
+    for (const item of items) if (item && !item.empty) learnId("item", item.itemId, item.name, item.icon);
+  }
+  if (changed("effects")) for (const effect of player.effects ?? []) learnId("effect", effect.id, effect.name);
+  if (changed("statistics")) for (const entry of player.statistics?.entries ?? []) learnId("stat", entry.id, entry.label);
+  if (changed("advancements")) {
+    for (const entry of player.advancements?.entries ?? []) learnId("advancement", entry.id, entry.title, entry.icon);
+  }
+  learnId("biome", player.world?.biome);
+  learnId("dimension", player.dimension);
+  learnId("world", player.world?.name);
+  // Kept after leaving the world, so rules can still be edited with suggestions.
+  if (changed("registries") && player.registries) {
+    for (const [kind, list] of Object.entries(REGISTRY_PICKERS)) {
+      registryIds[kind] = new Map(player.registries[list].map(entry => [entry.id, { name: entry.name, icon: entry.icon }]));
+    }
+  }
+}
+
+/** What the picker knows about an id: from the registries, else from what the dashboard has seen. */
+const knownId = (kind, id) => registryIds[kind]?.get(id) ?? knownIds[kind]?.get(id);
+
+/** The suggestions of one kind: registry entries (sorted by name), then seen ids the registries don't have. */
+function pickerEntries(kind) {
+  const registry = registryIds[kind] ?? new Map();
+  return [...registry, ...[...knownIds[kind] ?? []].filter(([id]) => !registry.has(id))];
+}
+
+function saveKnownIds() {
+  if (!knownIdsDirty) return;
+  knownIdsDirty = false;
+  try {
+    window.localStorage?.setItem(PICKER_STORAGE, JSON.stringify(Object.fromEntries(PICKER_KINDS.map(kind =>
+      [kind, [...knownIds[kind]]]))));
+  } catch {
+    // Not kept; suggestions are relearned next time.
+  }
+}
+
+/** A text input suggesting known ids of one kind (with icons where known) as you type. */
+function idPicker(key, value, onChange, kind, { placeholder = "", maxLength = 256 } = {}) {
+  const wrap = create("span", "id-picker");
+  const input = textInput(key, value, onChange, { placeholder, maxLength });
+  const list = create("div", "id-picker-list");
+  setHidden(list, true);
+  const show = () => {
+    const query = input.value.trim().toLowerCase();
+    const matches = pickerEntries(kind).filter(([id, entry]) => !query || id.includes(query)
+      || entry.name?.toLowerCase().includes(query)).slice(0, 40);
+    list.replaceChildren(...matches.map(([id, entry]) => {
+      const option = create("button", "id-picker-option");
+      option.type = "button";
+      if (entry.icon) {
+        const icon = create("img", "icon");
+        icon.alt = "";
+        icon.src = iconUrl(entry.icon);
+        option.appendChild(icon);
+      }
+      option.appendChild(create("span", "", entry.name ?? id));
+      if (entry.name) option.appendChild(create("span", "rule-muted", id));
+      // Keep focus in the input so choosing doesn't count as leaving it first.
+      option.addEventListener("pointerdown", event => event.preventDefault());
+      option.addEventListener("click", () => {
+        input.value = id;
+        setHidden(list, true);
+        onChange(id);
+      });
+      return option;
+    }));
+    setHidden(list, matches.length === 0);
+  };
+  input.addEventListener("focus", show);
+  input.addEventListener("input", show);
+  input.addEventListener("blur", () => setHidden(list, true));
+  input.addEventListener("keydown", event => { if (event.key === "Escape") setHidden(list, true); });
+  wrap.appendChild(input);
+  wrap.appendChild(list);
+  return wrap;
+}
+
+/** A list of values as removable chips, plus a picker to add more (several at once, separated by commas). */
+function valueList(key, values, onChange, kind, placeholder) {
+  const box = create("span", "rule-values");
+  values.forEach((value, index) => {
+    const chip = create("span", "value-chip", knownId(kind, value)?.name ?? value);
+    chip.title = value;
+    const remove = keyed(button("×", () => onChange(values.filter((_, other) => other !== index)), "value-chip-remove"),
+      `${key}.remove.${index}`);
+    remove.title = `Remove ${value}`;
+    remove.setAttribute("aria-label", `Remove ${value}`);
+    chip.appendChild(remove);
+    box.appendChild(chip);
+  });
+  box.appendChild(idPicker(`${key}.add`, "", text => {
+    const added = splitList(text).filter(value => !values.includes(value));
+    if (added.length) onChange([...values, ...added]);
+  }, kind, { placeholder: values.length ? "add…" : placeholder, maxLength: 4000 }));
+  return box;
+}
+
 // ------------------------------------------------------------------------------------------- Conditions
 
 const player = () => currentPlayerState?.available ? currentPlayerState : null;
+
+/** A new compare row's comparison, where ">= 1" doesn't fit. */
+const COMPARE_DEFAULTS = { width: { compare: ">=", value: 700 }, air: { compare: "<", value: 5 },
+  armor: { compare: ">=", value: 10 }, spawnDistance: { compare: "<", value: 100 } };
 
 /** Fresh parameters for a condition type, keeping the row's join, "not" and timing modifier. */
 function conditionWithType(previous, type) {
@@ -1273,7 +1506,17 @@ function conditionWithType(previous, type) {
     case "time":
       return { ...condition, values: ["night"] };
     case "compare":
-      return { ...condition, compare: ">=", value: type === "width" ? 700 : 1 };
+      return { ...condition, ...(COMPARE_DEFAULTS[type] ?? { compare: ">=", value: 1 }) };
+    case "light":
+      return { ...condition, source: "combined", compare: "<", value: 8 };
+    case "look":
+      return { ...condition, target: "block", distance: 5 };
+    case "threat":
+      return { ...condition, radius: 16, compare: ">=", value: 3 };
+    case "players":
+      return { ...condition, radius: 32, compare: ">=", value: 1 };
+    case "mob":
+      return { ...condition, entity: "minecraft:creeper", radius: 16 };
     case "speed":
       return { ...condition, axis: "total", compare: ">=", value: 5 };
     case "place":
@@ -1314,6 +1557,23 @@ function currentName(type) {
   return { world: now.world.name, dimension: now.dimension, biome: now.world.biome }[type] ?? null;
 }
 
+const SUBJECT_PICKERS = { item: "item", block: "block", stat: "stat", advancement: "advancement", entity: "entity" };
+
+/** "+ held": the item in the main hand. */
+function heldButton(condition, box) {
+  const held = player()?.inventory?.equipment.mainhand;
+  if (!held || held.empty || held.itemId === condition.item) return;
+  box.appendChild(button(`+ held (${held.name})`, () => editRules(() => { condition.item = held.itemId; })));
+}
+
+/** A picker for an optional id (a type filter); left empty, it means any. */
+function optionalSubject(condition, key, name, kind, placeholder) {
+  return field(name === "id" ? "" : name, idPicker(`${key}.${name}`, condition[name], value => editRules(() => {
+    if (value.trim()) condition[name] = value.trim();
+    else delete condition[name];
+  }, false), kind, { placeholder }));
+}
+
 /** The parameter controls of one condition. */
 function conditionControls(condition, key) {
   const spec = CONDITION_TYPES[condition.type];
@@ -1322,9 +1582,8 @@ function conditionControls(condition, key) {
   const compare = () => compareControls(key, condition, true, COMPARE_UNITS[condition.type]);
   switch (spec.kind) {
     case "names": {
-      box.appendChild(field("", textInput(`${key}.values`, condition.values.join(", "),
-        value => editRules(() => { condition.values = splitList(value); }, false),
-        { placeholder: `${NAME_HINTS[condition.type]}, separated by commas`, maxLength: 4000 }), "rule-field grow"));
+      box.appendChild(valueList(`${key}.values`, condition.values, set("values", true), condition.type,
+        NAME_HINTS[condition.type]));
       const current = currentName(condition.type);
       if (current) {
         box.appendChild(button(`+ ${current}`, () => editRules(() => {
@@ -1334,7 +1593,8 @@ function conditionControls(condition, key) {
       break;
     }
     case "choices":
-      box.appendChild(choiceChips(`${key}.values`, RULE_CHOICES[condition.type], condition.values, set("values", true)));
+      box.appendChild(choiceChips(`${key}.values`, RULE_CHOICES[condition.type], condition.values, set("values", true),
+        CHOICE_LABELS[condition.type]));
       break;
     case "time": {
       const ticks = condition.ticks !== undefined;
@@ -1362,9 +1622,7 @@ function conditionControls(condition, key) {
       box.appendChild(compare());
       break;
     case "effect": {
-      box.appendChild(field("", textInput(`${key}.values`, condition.values.join(", "),
-        value => editRules(() => { condition.values = splitList(value); }, false),
-        { placeholder: `${NAME_HINTS.effect}, separated by commas`, maxLength: 4000 }), "rule-field grow"));
+      box.appendChild(valueList(`${key}.values`, condition.values, set("values", true), "effect", NAME_HINTS.effect));
       for (const [name, text] of [["level", "Level"], ["remaining", "Seconds left"]]) {
         box.appendChild(checkInput(`${key}.${name}.on`, text, condition[name] !== undefined, on => editRules(() => {
           if (on) condition[name] = { compare: ">=", value: 1 };
@@ -1383,14 +1641,16 @@ function conditionControls(condition, key) {
       placeControls(condition, key, box);
       break;
     case "holding":
-      box.appendChild(field("item", textInput(`${key}.item`, condition.item, set("item"),
-        { placeholder: "minecraft:diamond_pickaxe", maxLength: 256 })));
+      box.appendChild(field("item", idPicker(`${key}.item`, condition.item, set("item"), "item",
+        { placeholder: "minecraft:diamond_pickaxe" })));
+      heldButton(condition, box);
       box.appendChild(field("hand", selectInput(`${key}.hand`, RULE_CHOICES.hand.map(hand => [hand, hand]),
         condition.hand, set("hand"))));
       break;
     case "hasItem":
-      box.appendChild(field("item", textInput(`${key}.item`, condition.item, set("item"),
-        { placeholder: "minecraft:torch", maxLength: 256 })));
+      box.appendChild(field("item", idPicker(`${key}.item`, condition.item, set("item"), "item",
+        { placeholder: "minecraft:torch" })));
+      heldButton(condition, box);
       box.appendChild(compare());
       box.appendChild(checkInput(`${key}.ender`, "incl. ender chest", condition.enderChest, value => editRules(() => {
         if (value) condition.enderChest = true;
@@ -1404,10 +1664,10 @@ function conditionControls(condition, key) {
       break;
     case "amount":
       if (spec.subject) {
-        box.appendChild(field(spec.subject, textInput(`${key}.subject`, condition[spec.subject], value => editRules(() => {
+        box.appendChild(field(spec.subject, idPicker(`${key}.subject`, condition[spec.subject], value => editRules(() => {
           if (value.trim() || spec.required) condition[spec.subject] = value.trim();
           else delete condition[spec.subject];
-        }, false), { placeholder: spec.required ? "minecraft:custom/minecraft:jump" : "any", maxLength: 256 })));
+        }, false), SUBJECT_PICKERS[spec.subject], { placeholder: spec.required ? "minecraft:custom/minecraft:jump" : "any" })));
       }
       box.appendChild(compare());
       box.appendChild(field("in the last", numberInput(`${key}.window`, condition.window, set("window"),
@@ -1416,16 +1676,50 @@ function conditionControls(condition, key) {
       break;
     case "event":
       if (spec.subject) {
-        box.appendChild(field(spec.subject, textInput(`${key}.subject`, condition[spec.subject], value => editRules(() => {
+        box.appendChild(field(spec.subject, idPicker(`${key}.subject`, condition[spec.subject], value => editRules(() => {
           if (value.trim()) condition[spec.subject] = value.trim();
           else delete condition[spec.subject];
-        }, false), { placeholder: "any", maxLength: 256 })));
+        }, false), SUBJECT_PICKERS[spec.subject], { placeholder: "any" })));
       }
       break;
     case "villagers":
       box.appendChild(compare());
       box.appendChild(field("within", numberInput(`${key}.radius`, condition.radius, set("radius"),
         { min: 1, max: 256 })));
+      box.appendChild(create("span", "rule-muted", "blocks"));
+      break;
+    case "light":
+      box.appendChild(selectInput(`${key}.source`, RULE_CHOICES.lightSource.map(source => [source, `${source} light`]),
+        condition.source, set("source")));
+      box.appendChild(compare());
+      break;
+    case "look":
+      box.appendChild(selectInput(`${key}.target`, [["block", "a block"], ["entity", "an entity"]], condition.target,
+        value => editRules(() => {
+          condition.target = value;
+          delete condition.id;
+        })));
+      box.appendChild(optionalSubject(condition, key, "id", condition.target, "any"));
+      box.appendChild(field("within", numberInput(`${key}.distance`, condition.distance, set("distance"),
+        { min: 1, max: MAX_SENSOR_RADIUS })));
+      box.appendChild(create("span", "rule-muted", "blocks"));
+      break;
+    case "riding":
+      box.appendChild(optionalSubject(condition, key, "entity", "entity", "anything"));
+      break;
+    case "threat":
+    case "players":
+      box.appendChild(compare());
+      box.appendChild(field("within", numberInput(`${key}.radius`, condition.radius, set("radius"),
+        { min: 1, max: MAX_SENSOR_RADIUS })));
+      box.appendChild(create("span", "rule-muted", "blocks"));
+      if (spec.kind === "threat") box.appendChild(optionalSubject(condition, key, "entity", "entity", "any hostile mob"));
+      break;
+    case "mob":
+      box.appendChild(field("entity", idPicker(`${key}.entity`, condition.entity, set("entity"), "entity",
+        { placeholder: "minecraft:creeper" })));
+      box.appendChild(field("within", numberInput(`${key}.radius`, condition.radius, set("radius"),
+        { min: 1, max: MAX_SENSOR_RADIUS })));
       box.appendChild(create("span", "rule-muted", "blocks"));
       break;
     case "portal":
@@ -1552,6 +1846,7 @@ function whenSection(rule) {
   head.appendChild(create("h3", "", "When"));
   head.appendChild(create("span", "rule-muted",
     "Each row joins the one above with AND or OR. OR starts a new block; the rule matches when any block is all green."));
+  head.appendChild(copyPasteTools(rule, "when"));
   section.appendChild(head);
   if (!rule.when.length) section.appendChild(create("p", "empty-note", "No conditions yet: this rule is never active."));
   let block;
@@ -1559,6 +1854,7 @@ function whenSection(rule) {
     if (index === 0 || condition.join === "or") {
       if (index > 0) section.appendChild(create("div", "rule-or-divider", "OR"));
       block = create("div", "rule-block");
+      liveRefs.blocks.push(block);
       section.appendChild(block);
     }
     const key = `when.${index}`;
@@ -1569,6 +1865,7 @@ function whenSection(rule) {
       : selectInput(`${key}.join`, [["and", "AND"], ["or", "OR"]], condition.join ?? "and",
         value => editRules(() => { condition.join = value; }));
     if (index > 0) join.classList.add("rule-join");
+    row.appendChild(rowSelect(key));
     row.appendChild(join);
     row.appendChild(checkInput(`${key}.not`, "not", condition.not, value => editRules(() => {
       if (value) condition.not = true;
@@ -1593,6 +1890,66 @@ function whenSection(rule) {
   }
   section.appendChild(add);
   return section;
+}
+
+/** A tick box that selects a row for copying. */
+function rowSelect(key) {
+  const input = keyed(create("input", "row-select"), `${key}.select`);
+  input.type = "checkbox";
+  input.checked = selectedRows.has(key);
+  input.title = "Select to copy";
+  input.setAttribute("aria-label", "Select to copy");
+  input.addEventListener("change", () => {
+    if (input.checked) selectedRows.add(key);
+    else selectedRows.delete(key);
+    renderRulesEditor();
+  });
+  return input;
+}
+
+/**
+ * Copy (the ticked rows of this list) and Paste (rows copied from any rule; conditions into When, actions into Then
+ * or Else). A "Rule active" condition on the rule itself is left out, as it can't depend on itself.
+ */
+function copyPasteTools(rule, list) {
+  const tools = create("span", "rule-section-tools");
+  const kind = list === "when" ? "conditions" : "actions";
+  const picked = rule[list].filter((_, index) => selectedRows.has(`${list}.${index}`));
+  const copy = keyed(button(picked.length ? `Copy ${picked.length}` : "Copy", () => {
+    rowClipboard = { kind, rows: structuredCopy(picked) };
+    selectedRows = new Set();
+    renderRulesEditor();
+  }), `${list}.copy`);
+  copy.disabled = picked.length === 0;
+  copy.title = picked.length ? "Copy the ticked rows" : "Tick rows to copy them";
+  tools.appendChild(copy);
+  if (rowClipboard?.kind === kind) {
+    const rows = rowClipboard.rows.filter(row => !(row.type === "ruleActive" && row.rule === rule.id));
+    const limit = list === "when" ? MAX_CONDITIONS : MAX_ACTIONS;
+    const paste = keyed(button(`Paste ${rows.length}`, () => editRules(() => {
+      rule[list].push(...structuredCopy(rows));
+    })), `${list}.paste`);
+    paste.disabled = rows.length === 0 || rule[list].length + rows.length > limit;
+    paste.title = rows.length && paste.disabled ? `At most ${limit} here` : "Add the copied rows at the end";
+    tools.appendChild(paste);
+  }
+  return tools;
+}
+
+/** A share string, ready to copy. */
+function shareBox(text, what) {
+  const box = create("div", "share-box");
+  const input = keyed(create("input", "rule-input"), "share.text");
+  input.readOnly = true;
+  input.value = text;
+  input.addEventListener("focus", () => input.select?.());
+  box.appendChild(input);
+  box.appendChild(button("Copy", () => {
+    input.select?.();
+    window.navigator?.clipboard?.writeText(text)?.catch?.(() => {});
+  }, "button small"));
+  box.appendChild(create("span", "rule-muted", `Share string for ${what}. Paste it under Import on any MinePanel dashboard.`));
+  return box;
 }
 
 /** Move up / down and delete for one row of a list. */
@@ -1697,6 +2054,7 @@ function actionParams(action, key) {
         box.appendChild(field(label, numberInput(`${key}.${name}`, action[name] + offset,
           value => editRules(() => { action[name] = value - offset; }, false), { min: 1 })));
       }
+      box.appendChild(keyed(button("Set on grid", () => startPlacing(action), "button small"), `${key}.grid`));
       break;
     case "swap":
       box.appendChild(panel(value => editRules(() => {
@@ -1730,11 +2088,13 @@ function actionSection(rule, list, title, note) {
   const head = create("div", "rule-section-head");
   head.appendChild(create("h3", "", title));
   head.appendChild(create("span", "rule-muted", note));
+  head.appendChild(copyPasteTools(rule, list));
   section.appendChild(head);
   if (!rule[list].length) section.appendChild(create("p", "empty-note", "No actions."));
   rule[list].forEach((action, index) => {
     const key = `${list}.${index}`;
     const row = create("div", "rule-row");
+    row.appendChild(rowSelect(key));
     row.appendChild(selectInput(`${key}.do`, ACTION_TYPES.map(type => [type, ACTION_LABELS[type]]), action.do,
       value => editRules(() => { rule[list][index] = actionWithType(value, action); })));
     row.appendChild(actionParams(action, key));
@@ -1759,12 +2119,28 @@ function ruleDetail(rule) {
   head.appendChild(checkInput("rule.enabled", "Enabled", rule.enabled, value => editRules(() => {
     rule.enabled = value;
   }, false)));
+  const preview = field("Preview", selectInput("rule.preview", [["auto", "Auto"], ["on", "Force on"],
+    ["off", "Force off"]], rulePreview[rule.id] ?? "auto", value => setPreview(rule.id, value)));
+  preview.title = "Only in this browser, until the editor closes. Use Side panel to watch the dashboard.";
+  head.appendChild(preview);
+  if (rulesDraft.folders.length) {
+    head.appendChild(field("Folder", selectInput("rule.folder", [["", "None"],
+      ...rulesDraft.folders.map(folder => [folder.id, folder.name])], rule.folder ?? "",
+    value => editRules(() => { rulesDraft.rules = fileRule(rulesDraft.rules, rule, value || null); }))));
+  }
   const index = rulesDraft.rules.indexOf(rule);
   head.appendChild(button("Duplicate", () => editRules(() => {
     const copy = { ...structuredCopy(rule), id: newRuleId(`${rule.name} copy`), name: `${rule.name} (copy)`.slice(0, 64) };
     rulesDraft.rules.splice(index + 1, 0, copy);
     rulesSelection = { kind: "rule", id: copy.id };
   })));
+  const share = keyed(button("Share", () => {
+    shareText = shareRules(layout, [rule.id]);
+    renderRulesEditor();
+  }), "rule.share");
+  // Shared from the saved layout, which has the rule once its edits are valid.
+  share.disabled = !layout.rules.some(saved => saved.id === rule.id);
+  head.appendChild(share);
   head.appendChild(button("Delete", () => editRules(() => {
     rulesDraft.rules.splice(index, 1);
     for (const other of rulesDraft.rules) {
@@ -1774,6 +2150,11 @@ function ruleDetail(rule) {
     rulesSelection = next ? { kind: "rule", id: next.id } : null;
   }), "button quiet small danger"));
   box.appendChild(head);
+  if (shareText) box.appendChild(shareBox(shareText, "this rule (and any rule it reads)"));
+  const folder = rule.folder && rulesDraft.folders.find(entry => entry.id === rule.folder);
+  if (folder && !folder.enabled) {
+    box.appendChild(create("p", "rule-muted", `Its folder “${folder.name}” is turned off, so this rule is off too.`));
+  }
   box.appendChild(whenSection(rule));
   box.appendChild(actionSection(rule, "then", "Then", "Applies while the rule is active."));
   box.appendChild(actionSection(rule, "else", "Else", "Applies while the rule is enabled but not active."));
@@ -1791,7 +2172,204 @@ function ruleDetail(rule) {
     row.appendChild(create("span", "rule-muted", "s"));
   }
   timing.appendChild(row);
+  const animation = create("div", "rule-row");
+  animation.appendChild(checkInput("rule.animation", "Own animation", rule.animation !== null, value => editRules(() => {
+    rule.animation = value ? { ...rulesDraft.animation } : null;
+  })));
+  if (rule.animation) animationControls("rule.animation", rule.animation, animation);
+  else animation.appendChild(create("span", "rule-muted", "Panels this rule moves, shows or hides use the global animation (Settings)."));
+  timing.appendChild(animation);
   box.appendChild(timing);
+  return box;
+}
+
+/** Duration and easing of an animation (the global one or a rule's override). */
+function animationControls(key, animation, row) {
+  row.appendChild(field("Duration", numberInput(`${key}.duration`, animation.durationMs / 1000,
+    value => editRules(() => { animation.durationMs = Math.round(value * 1000); }, false),
+    { min: 0, max: MAX_ANIMATION_MILLIS / 1000, step: 0.05 })));
+  row.appendChild(create("span", "rule-muted", "s"));
+  row.appendChild(field("Easing", selectInput(`${key}.easing`, EASINGS.map(easing => [easing, easing]),
+    animation.easing, value => editRules(() => { animation.easing = value; }, false))));
+}
+
+function setPreview(id, value) {
+  const next = { ...rulePreview };
+  if (value === "on" || value === "off") next[id] = value;
+  else delete next[id];
+  rulePreview = next;
+  updateView();
+  updateRulesLive();
+}
+
+function settingsDetail() {
+  const box = create("div", "rule-detail");
+  const head = create("div", "rule-section-head");
+  head.appendChild(create("h3", "", "Animation"));
+  head.appendChild(create("span", "rule-muted",
+    "How panels move, grow, shrink, fade and focus when rules change the layout. A rule can override it under Timing. With reduced motion turned on in your system, panels only cross-fade."));
+  box.appendChild(head);
+  const row = create("div", "rule-row");
+  animationControls("animation", rulesDraft.animation, row);
+  box.appendChild(row);
+  const dwell = create("p", "rule-muted",
+    `After a rule changes a panel, rules can't change that panel again for ${PANEL_DWELL_MILLIS / 1000} s, so nothing blinks.`);
+  box.appendChild(dwell);
+  return box;
+}
+
+function describeAction(action) {
+  const panel = TILE_LABELS[action.panel];
+  switch (action.do) {
+    case "profile":
+      return `Switch to ${action.profile === "default" ? "Default" : layout.profiles.find(profile =>
+        profile.id === action.profile)?.name ?? action.profile}`;
+    case "hide":
+      return `Hide ${panel}${action.fill === "empty" ? " (leave empty)" : action.fill ? ` (${TILE_LABELS[action.fill]} fills)` : ""}`;
+    case "place":
+      return `Place ${panel} at column ${action.x + 1}, row ${action.y + 1}, ${action.w} × ${action.h}`;
+    case "swap":
+      return `Swap ${panel} and ${TILE_LABELS[action.with]}`;
+    case "set":
+      return `Set ${panel} ${action.setting} to ${JSON.stringify(action.value)}`;
+    case "notify":
+      return `Notify “${action.text}”`;
+    default:
+      return `${ACTION_LABELS[action.do].replace("panel", "")}${panel}`.replace("  ", " ");
+  }
+}
+
+/** Every rule claiming a panel now, what it claims and which claim won. */
+function inspectorDetail(panel) {
+  const box = create("div", "rule-detail");
+  const head = create("div", "rule-section-head");
+  head.appendChild(create("h3", "", `Inspector: ${TILE_LABELS[panel]}`));
+  head.appendChild(create("span", "rule-muted", "Click any panel on the dashboard to inspect it."));
+  box.appendChild(head);
+  const tile = view.profile.tiles.find(entry => entry.id === panel);
+  const mode = { off: "off", on: "shown", rules: "rules only" }[tileMode(tile)];
+  box.appendChild(create("p", "", `In the ${view.profile.name} profile it is ${mode}. Now it is `
+    + `${view.focus === panel ? "focused" : view.visible.has(panel) ? "shown" : "hidden"}.`));
+  const claims = view.claims.filter(claim => claim.property === `visible:${panel}` || claim.property === `rect:${panel}`
+    || claim.property.startsWith(`setting:${panel}.`) || claim.property === "focus" && claim.value === panel);
+  if (!claims.length) box.appendChild(create("p", "empty-note", "No rule changes this panel right now."));
+  for (const claim of claims) {
+    const rule = layout.rules.find(entry => entry.id === claim.rule);
+    const row = create("div", claim.won ? "rule-row ok" : "rule-row bad");
+    row.appendChild(button(rule.name, () => {
+      rulesSelection = { kind: "rule", id: rule.id };
+      renderRulesEditor();
+    }, "rules-nav-name inline"));
+    row.appendChild(create("span", "rule-muted", claim.list === "then" ? "Then" : "Else"));
+    row.appendChild(create("span", "", describeAction(rule[claim.list][claim.index])));
+    row.appendChild(create("span", claim.won ? "badge" : "badge muted", claim.won ? "Wins" : "Overridden"));
+    box.appendChild(row);
+  }
+  return box;
+}
+
+function folderDetail(folder) {
+  const box = create("div", "rule-detail");
+  const head = create("div", "rule-detail-head");
+  head.appendChild(field("Folder", textInput("folder.name", folder.name, value => editRules(() => {
+    folder.name = value.trim().slice(0, 64);
+  }, false)), "rule-field grow"));
+  head.appendChild(checkInput("folder.enabled", "Enabled", folder.enabled, value => editRules(() => {
+    folder.enabled = value;
+  }, false)));
+  const add = button("+ New rule here", () => addRule(blankRule(), folder.id), "button small");
+  add.disabled = rulesDraft.rules.length >= MAX_RULES;
+  head.appendChild(add);
+  const rules = rulesDraft.rules.filter(rule => rule.folder === folder.id);
+  const share = keyed(button("Share", () => {
+    shareText = shareRules(layout, [], folder.id);
+    renderRulesEditor();
+  }), "folder.share");
+  share.disabled = !layout.rules.some(rule => rule.folder === folder.id);
+  head.appendChild(share);
+  head.appendChild(button("Delete folder", () => editRules(() => {
+    for (const rule of rulesDraft.rules) if (rule.folder === folder.id) rule.folder = null;
+    rulesDraft.folders = rulesDraft.folders.filter(entry => entry !== folder);
+    rulesSelection = null;
+  }), "button quiet small danger"));
+  box.appendChild(head);
+  if (shareText) box.appendChild(shareBox(shareText, "this folder and its rules"));
+  box.appendChild(create("p", "rule-muted", rules.length
+    ? "Turning the folder off turns all its rules off. Deleting it keeps its rules, outside any folder. Its rules keep their place in the priority order."
+    : "No rules in it yet. Add one here, or choose this folder under a rule's Folder."));
+  for (const rule of rules) {
+    box.appendChild(button(rule.name, () => {
+      rulesSelection = { kind: "rule", id: rule.id };
+      renderRulesEditor();
+    }, "rules-nav-name inline block"));
+  }
+  return box;
+}
+
+/** "Add from template": each template adds an ordinary rule to change as you like. */
+function templatesDetail() {
+  const box = create("div", "rule-detail");
+  const head = create("div", "rule-section-head");
+  head.appendChild(create("h3", "", "Add from template"));
+  head.appendChild(create("span", "rule-muted", "Each adds a new rule at the end of the list, to change as you like."));
+  box.appendChild(head);
+  const draftLayout = { rules: rulesDraft.rules, profiles: layout.profiles };
+  for (const template of RULE_TEMPLATES) {
+    const preview = ruleFromTemplate(template, draftLayout);
+    const row = create("div", "rule-row template");
+    const text = create("div", "template-text");
+    text.appendChild(create("strong", "", template.name));
+    const when = preview.when.map((condition, index) => `${index === 0 ? "" : condition.join === "or" ? " or " : " and "}`
+      + `${CONDITION_LABELS[condition.type]}${condition.for ? ` for ${condition.for} s` : ""}`).join("");
+    text.appendChild(create("span", "rule-muted", `When ${when}: ${preview.then.map(describeAction).join(", ")}.`));
+    text.appendChild(create("span", "rule-muted", template.note));
+    row.appendChild(text);
+    const add = keyed(button("Add", () => addRule(ruleFromTemplate(template, draftLayout)), "button small"),
+      `template.${template.id}`);
+    add.disabled = rulesDraft.rules.length >= MAX_RULES;
+    row.appendChild(add);
+    box.appendChild(row);
+  }
+  return box;
+}
+
+/** Import: a share string's rules are added (never replacing anything), then listed to open. */
+function importDetail() {
+  const box = create("div", "rule-detail");
+  const head = create("div", "rule-section-head");
+  head.appendChild(create("h3", "", "Import"));
+  head.appendChild(create("span", "rule-muted",
+    "Paste a share string (Share on a rule or folder). Its rules are added at the end; nothing is replaced."));
+  box.appendChild(head);
+  const text = keyed(create("textarea", "rule-input share-input"), "import.text");
+  text.rows = 4;
+  text.placeholder = "minepanel-rules:1:…";
+  box.appendChild(text);
+  const add = create("div", "rule-add");
+  add.appendChild(button("Import", () => {
+    try {
+      const result = importShare({ ...layout, ...rulesDraft }, text.value);
+      rulesDraft = draftOf(result.layout);
+      commitRules();
+      const names = result.rules.map(id => rulesDraft.rules.find(rule => rule.id === id).name);
+      importMessage = { ok: true, rules: result.rules, text: `Added ${names.length === 1 ? "1 rule" : `${names.length} rules`}`
+        + `${result.folder ? " in a new folder" : ""}.${result.dropped ? ` ${result.dropped} condition(s) or action(s) were left out: they use places, toggles, rules or profiles this dashboard doesn't have.` : ""}` };
+    } catch (error) {
+      importMessage = { ok: false, rules: [], text: error.message };
+    }
+    renderRulesEditor();
+  }, "button small"));
+  box.appendChild(add);
+  if (importMessage) {
+    box.appendChild(create("p", importMessage.ok ? "" : "rules-error", importMessage.text));
+    for (const id of importMessage.rules) {
+      const rule = rulesDraft.rules.find(entry => entry.id === id);
+      if (rule) box.appendChild(button(rule.name, () => {
+        rulesSelection = { kind: "rule", id };
+        renderRulesEditor();
+      }, "rules-nav-name inline block"));
+    }
+  }
   return box;
 }
 
@@ -1873,54 +2451,120 @@ function togglesDetail() {
   return box;
 }
 
-/** The left column: rules in priority order, then places, toggles and recent activity. */
+/** Adds a rule (into {@code folder}, after its rules) and selects it. */
+function addRule(rule, folder = null) {
+  editRules(() => {
+    rule.folder = folder;
+    rulesDraft.rules.splice(newRuleIndex(rulesDraft.rules, folder), 0, rule);
+    rulesSelection = { kind: "rule", id: rule.id };
+  });
+}
+
+function blankRule() {
+  return { id: newRuleId(`rule-${rulesDraft.rules.length + 1}`), name: `Rule ${rulesDraft.rules.length + 1}`,
+    enabled: true, folder: null, when: [], then: [], else: [], timing: { ...DEFAULT_TIMING }, animation: null };
+}
+
+/** Up / down buttons that are disabled when the move would change nothing. */
+function moveButtons(item, move, what) {
+  for (const [text, by, title] of [["↑", -1, `Higher priority${what}`], ["↓", 1, `Lower priority${what}`]]) {
+    const moved = move(by);
+    const control = button(text, () => editRules(() => { rulesDraft.rules = move(by); }), "button quiet tiny");
+    control.title = title;
+    control.disabled = moved === rulesDraft.rules;
+    item.appendChild(control);
+  }
+}
+
+function ruleNavItem(rule, inFolder) {
+  const selected = rulesSelection?.kind === "rule" && rulesSelection.id === rule.id;
+  const item = create("div", `rules-nav-item${selected ? " selected" : ""}${inFolder ? " in-folder" : ""}`);
+  const dot = create("span", "rule-dot");
+  liveRefs.rules.set(rule.id, dot);
+  const name = keyed(button(rule.name || "(unnamed)", () => {
+    rulesSelection = { kind: "rule", id: rule.id };
+    renderRulesEditor();
+  }, "rules-nav-name"), `nav.${rule.id}`);
+  if (!rule.enabled) name.classList.add("disabled");
+  item.appendChild(dot);
+  item.appendChild(name);
+  moveButtons(item, by => moveRuleInList(rulesDraft.rules, rule.id, by), inFolder ? " (within the folder)" : "");
+  return item;
+}
+
+function folderNavItem(folder, segmentIndex, empty) {
+  const selected = rulesSelection?.kind === "folder" && rulesSelection.id === folder.id;
+  const item = create("div", `rules-nav-item folder${selected ? " selected" : ""}`);
+  const caret = keyed(button(folder.collapsed ? "▸" : "▾", () => editRules(() => { folder.collapsed = !folder.collapsed; }),
+    "button quiet tiny folder-caret"), `nav.folder.${folder.id}.${segmentIndex}.caret`);
+  caret.title = folder.collapsed ? "Show its rules" : "Hide its rules";
+  caret.setAttribute("aria-expanded", String(!folder.collapsed));
+  const name = keyed(button(folder.name, () => {
+    rulesSelection = { kind: "folder", id: folder.id };
+    renderRulesEditor();
+  }, "rules-nav-name"), `nav.folder.${folder.id}.${segmentIndex}`);
+  if (!folder.enabled) name.classList.add("disabled");
+  const enabled = keyed(create("input"), `nav.folder.${folder.id}.${segmentIndex}.enabled`);
+  enabled.type = "checkbox";
+  enabled.checked = folder.enabled;
+  enabled.title = "Turn every rule in this folder on or off";
+  enabled.addEventListener("change", () => editRules(() => { folder.enabled = enabled.checked; }));
+  item.appendChild(caret);
+  item.appendChild(enabled);
+  item.appendChild(name);
+  if (!empty) moveButtons(item, by => moveSegment(rulesDraft.rules, segmentIndex, by), " (the whole folder)");
+  return item;
+}
+
+/** The left column: rules in priority order (grouped in folders), then places, toggles and recent activity. */
 function renderRuleList() {
   liveRefs.rules = new Map();
   const list = create("div", "rules-nav");
   const head = create("div", "rules-nav-head");
   head.appendChild(create("span", "rule-label", "Rules"));
-  const add = button("+ New rule", () => editRules(() => {
-    const id = newRuleId(`rule-${rulesDraft.rules.length + 1}`);
-    rulesDraft.rules.push({ id, name: `Rule ${rulesDraft.rules.length + 1}`, enabled: true, folder: null, when: [],
-      then: [], else: [], timing: { ...DEFAULT_TIMING }, animation: null });
-    rulesSelection = { kind: "rule", id };
-  }), "button small");
+  const add = button("+ New rule", () => addRule(blankRule()), "button small");
   add.disabled = rulesDraft.rules.length >= MAX_RULES;
   head.appendChild(add);
   list.appendChild(head);
-  list.appendChild(create("p", "rule-muted", "Higher rules win when two change the same thing."));
-  if (!rulesDraft.rules.length) list.appendChild(create("p", "empty-note", "No rules yet."));
-  rulesDraft.rules.forEach((rule, index) => {
-    const selected = rulesSelection?.kind === "rule" && rulesSelection.id === rule.id;
-    const item = create("div", selected ? "rules-nav-item selected" : "rules-nav-item");
-    const dot = create("span", "rule-dot");
-    liveRefs.rules.set(rule.id, dot);
-    const name = keyed(button(rule.name || "(unnamed)", () => {
-      rulesSelection = { kind: "rule", id: rule.id };
+  const more = create("div", "rules-nav-tools");
+  const addFolder = button("+ Folder", () => editRules(() => {
+    const number = rulesDraft.folders.length + 1;
+    const id = uniqueId(`folder-${number}`, new Set(rulesDraft.folders.map(folder => folder.id)));
+    rulesDraft.folders.push({ id, name: `Folder ${number}`, enabled: true, collapsed: false });
+    rulesSelection = { kind: "folder", id };
+  }), "button quiet small");
+  addFolder.disabled = rulesDraft.folders.length >= MAX_FOLDERS;
+  more.appendChild(addFolder);
+  for (const [kind, label] of [["templates", "From template"], ["import", "Import"]]) {
+    more.appendChild(keyed(button(label, () => {
+      rulesSelection = { kind };
       renderRulesEditor();
-    }, "rules-nav-name"), `nav.${rule.id}`);
-    if (!rule.enabled) name.classList.add("disabled");
-    const up = button("↑", () => editRules(() => moveItem(rulesDraft.rules, index, -1)), "button quiet tiny");
-    up.title = "Higher priority";
-    up.disabled = index === 0;
-    const down = button("↓", () => editRules(() => moveItem(rulesDraft.rules, index, 1)), "button quiet tiny");
-    down.title = "Lower priority";
-    down.disabled = index === rulesDraft.rules.length - 1;
-    item.appendChild(dot);
-    item.appendChild(name);
-    item.appendChild(up);
-    item.appendChild(down);
-    list.appendChild(item);
+    }, rulesSelection?.kind === kind ? "button small" : "button quiet small"), `nav.${kind}`));
+  }
+  list.appendChild(more);
+  list.appendChild(create("p", "rule-muted", "Higher rules win when two change the same thing."));
+  if (!rulesDraft.rules.length && !rulesDraft.folders.length) list.appendChild(create("p", "empty-note", "No rules yet."));
+  ruleSegments(rulesDraft.rules, rulesDraft.folders).forEach((segment, index) => {
+    const folder = segment.folder && rulesDraft.folders.find(entry => entry.id === segment.folder);
+    if (!folder) {
+      list.appendChild(ruleNavItem(segment.rules[0], false));
+      return;
+    }
+    list.appendChild(folderNavItem(folder, index, segment.rules.length === 0));
+    if (!folder.collapsed) segment.rules.forEach(rule => list.appendChild(ruleNavItem(rule, true)));
   });
-  for (const [kind, label, count] of [["places", "Places", rulesDraft.places.length],
-    ["toggles", "Toggles", rulesDraft.toggles.length]]) {
+  for (const [kind, label] of [["places", `Places (${rulesDraft.places.length})`],
+    ["toggles", `Toggles (${rulesDraft.toggles.length})`], ["settings", "Settings"]]) {
     const item = create("div", rulesSelection?.kind === kind ? "rules-nav-item selected section" : "rules-nav-item section");
-    item.appendChild(keyed(button(`${label} (${count})`, () => {
+    item.appendChild(keyed(button(label, () => {
       rulesSelection = { kind };
       renderRulesEditor();
     }, "rules-nav-name"), `nav.${kind}`));
     list.appendChild(item);
   }
+  list.appendChild(create("p", "rule-muted", rulesDocked
+    ? "Click a panel on the dashboard to see which rules change it."
+    : "Use Side panel to watch the dashboard while you preview rules or inspect panels."));
   list.appendChild(create("span", "rule-label log", "Recent activity"));
   liveRefs.log = create("div", "rules-log");
   list.appendChild(liveRefs.log);
@@ -1934,12 +2578,27 @@ function renderRulesEditor() {
   const focused = document.activeElement?.dataset?.key;
   focusKeys = new Map();
   liveRefs.conditions = [];
+  liveRefs.blocks = [];
   if (rulesSelection?.kind === "rule" && !selectedRule()) rulesSelection = null;
+  const folder = rulesSelection?.kind === "folder" ? rulesDraft.folders.find(entry => entry.id === rulesSelection.id) : null;
+  if (rulesSelection?.kind === "folder" && !folder) rulesSelection = null;
   if (!rulesSelection && rulesDraft.rules.length) rulesSelection = { kind: "rule", id: rulesDraft.rules[0].id };
   const rule = selectedRule();
-  rulesDetail.replaceChildren(rule ? ruleDetail(rule) : rulesSelection?.kind === "places" ? placesDetail()
-    : rulesSelection?.kind === "toggles" ? togglesDetail()
-      : create("p", "empty-note", "Add a rule with “+ New rule”."));
+  const kind = rulesSelection?.kind;
+  // Selected rows and a shown share string belong to what was selected when they were made.
+  const shown = `${kind}:${rulesSelection?.id ?? ""}`;
+  if (shown !== shownSelection) {
+    shownSelection = shown;
+    selectedRows = new Set();
+    shareText = null;
+    importMessage = null;
+  }
+  rulesDetail.replaceChildren(rule ? ruleDetail(rule) : folder ? folderDetail(folder) : kind === "places" ? placesDetail()
+    : kind === "toggles" ? togglesDetail() : kind === "settings" ? settingsDetail()
+      : kind === "templates" ? templatesDetail() : kind === "import" ? importDetail()
+        : kind === "inspect" ? inspectorDetail(rulesSelection.panel)
+          : create("p", "empty-note", "Add a rule with “+ New rule”."));
+  for (const id of TILE_IDS) tileElements[id].classList.toggle("inspected", kind === "inspect" && rulesSelection.panel === id);
   renderRuleList();
   if (focused) focusKeys.get(focused)?.focus?.();
 }
@@ -1961,10 +2620,16 @@ function updateRulesLive() {
   if (rulesDialog.hidden) return;
   for (const [id, dot] of liveRefs.rules) {
     const state = ruleEvaluation?.states.get(id);
-    dot.className = state?.active ? "rule-dot active" : state?.enabled === false ? "rule-dot off" : "rule-dot";
-    dot.title = state?.active ? "Active now" : state?.enabled === false ? "Disabled" : "Not active";
+    dot.className = `rule-dot${state?.active ? " active" : state?.enabled === false ? " off" : ""}${state?.forced ? " forced" : ""}`;
+    dot.title = `${state?.active ? "Active now" : state?.enabled === false ? "Disabled" : "Not active"}`
+      + `${state?.forced ? ` (forced ${state.forced} in this browser)` : ""}`;
   }
   const state = rulesSelection?.kind === "rule" ? ruleEvaluation?.states.get(rulesSelection.id) : null;
+  liveRefs.blocks.forEach((block, index) => {
+    const ok = state?.blocks[index];
+    block.classList.toggle("ok", ok === true);
+    block.classList.toggle("bad", ok === false);
+  });
   for (const { index, row, state: label } of liveRefs.conditions) {
     const result = state?.conditions[index];
     row.classList.toggle("ok", result?.ok === true);
@@ -1979,19 +2644,172 @@ function updateRulesLive() {
   }
 }
 
+/** Starts the editor over from the current layout. */
+function resyncRules() {
+  stopPlacing();
+  rulesDraft = draftOf(layout);
+  rulesCommitted = layout;
+  setHidden(rulesError, true);
+  renderRulesEditor();
+}
+
 function setRulesDialog(open) {
+  if (open === !rulesDialog.hidden) return;
   if (open) {
-    rulesDraft = draftOf(layout);
-    rulesCommitted = layout;
-    setHidden(rulesError, true);
+    // The dashboard shows what the rules do while the editor is open; customizing resumes when it closes.
+    customizingBeforeRules = editing;
+    if (editing) setEditing(false);
+    setHidden(rulesDialog, false);
+    resyncRules();
+    return;
   }
-  setHidden(rulesDialog, !open);
-  if (open) renderRulesEditor();
+  stopPlacing();
+  setRulesDocked(false);
+  setHidden(rulesDialog, true);
+  for (const id of TILE_IDS) tileElements[id].classList.remove("inspected");
+  if (rulesSelection?.kind === "inspect") rulesSelection = null;
+  saveKnownIds();
+  const previewing = Object.keys(rulePreview).length > 0;
+  rulePreview = {};
+  if (customizingBeforeRules) setEditing(true);
+  else if (previewing) updateView();
+}
+
+function setRulesDocked(docked) {
+  rulesDocked = docked;
+  rulesDialog.classList.toggle("docked", docked);
+  document.documentElement.classList.toggle("rules-docked", docked);
+  writeText(rulesDock, docked ? "Full screen" : "Side panel");
+  rulesDock.setAttribute("aria-pressed", String(docked));
+  if (!docked) stopPlacing();
+  if (!rulesDialog.hidden) renderRuleList();
 }
 
 $("#rules-open").addEventListener("click", () => setRulesDialog(true));
 $("#rules-dialog-close").addEventListener("click", () => setRulesDialog(false));
-rulesDialog.addEventListener("keydown", event => { if (event.key === "Escape") setRulesDialog(false); });
+rulesDock.addEventListener("click", () => setRulesDocked(!rulesDocked));
+rulesDialog.addEventListener("keydown", event => {
+  if (event.key !== "Escape") return;
+  if (placing) stopPlacing();
+  else setRulesDialog(false);
+});
+
+// While docked, clicking a panel inspects it instead of using it.
+grid.addEventListener("click", event => {
+  if (rulesDialog.hidden || !rulesDocked || placing) return;
+  const tile = event.target.closest?.(".tile");
+  if (!tile?.dataset.tile) return;
+  event.preventDefault();
+  event.stopPropagation();
+  rulesSelection = { kind: "inspect", panel: tile.dataset.tile };
+  renderRulesEditor();
+}, true);
+
+// ------------------------------------------------------------------------------------------- Place on grid
+
+/**
+ * "Set on grid" for a Place action: docks the editor and shows the panel's ghost over the live dashboard, to drag
+ * (move) and resize by its corner, then Set or Cancel.
+ */
+function startPlacing(action) {
+  stopPlacing();
+  setRulesDocked(true);
+  const ghost = create("div", "place-ghost");
+  const rect = { x: action.x, y: action.y, w: action.w, h: action.h };
+  const label = create("span", "place-ghost-label");
+  const tools = create("span", "place-ghost-tools");
+  tools.appendChild(button("Set", () => {
+    const { x, y, w, h } = placing.rect;
+    editRules(() => Object.assign(action, { x, y, w, h }));
+    stopPlacing();
+  }, "button small"));
+  tools.appendChild(button("Cancel", stopPlacing, "button quiet small"));
+  const handle = create("span", "resize-handle");
+  ghost.appendChild(label);
+  ghost.appendChild(tools);
+  ghost.appendChild(handle);
+  const draw = () => {
+    ghost.style.setProperty("--grid-column", `${rect.x + 1} / span ${rect.w}`);
+    ghost.style.setProperty("--grid-row", `${rect.y + 1} / span ${rect.h}`);
+    writeText(label, `${TILE_LABELS[action.panel]} · column ${rect.x + 1}, row ${rect.y + 1}, ${rect.w} × ${rect.h}`);
+  };
+  let dragging = null;
+  const start = (event, mode) => {
+    if (event.button !== 0 || event.target.closest?.(".place-ghost-tools")) return;
+    const box = ghost.getBoundingClientRect();
+    dragging = { mode, metrics: gridMetrics(), offsetX: event.clientX - box.left, offsetY: event.clientY - box.top };
+    ghost.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+    event.stopPropagation();
+  };
+  ghost.addEventListener("pointerdown", event => start(event, "move"));
+  handle.addEventListener("pointerdown", event => start(event, "resize"));
+  ghost.addEventListener("pointermove", event => {
+    if (!dragging) return;
+    const { metrics } = dragging;
+    const minimum = TILE_MINIMUMS[action.panel];
+    if (dragging.mode === "move") {
+      rect.x = clamp(Math.round((event.clientX - metrics.left - dragging.offsetX) / metrics.columnStride), 0,
+        LAYOUT_COLUMNS - rect.w);
+      rect.y = clamp(Math.round((event.clientY - metrics.top - dragging.offsetY) / metrics.rowStride), 0, LAYOUT_MAX_Y);
+    } else {
+      rect.w = clamp(Math.round((event.clientX - metrics.left - rect.x * metrics.columnStride + GRID_GAP)
+        / metrics.columnStride), minimum.w, LAYOUT_COLUMNS - rect.x);
+      rect.h = clamp(Math.round((event.clientY - metrics.top - rect.y * metrics.rowStride + GRID_GAP)
+        / metrics.rowStride), minimum.h, LAYOUT_MAX_H);
+    }
+    draw();
+  });
+  const end = () => { dragging = null; };
+  ghost.addEventListener("pointerup", end);
+  ghost.addEventListener("pointercancel", end);
+  draw();
+  grid.appendChild(ghost);
+  placing = { ghost, rect, action };
+}
+
+function stopPlacing() {
+  if (!placing) return;
+  placing.ghost.remove?.();
+  placing = null;
+}
+
+// ------------------------------------------------------------------------------------ Toggles and notifications
+
+const toggleBar = $("#rule-toggles");
+const toastList = $("#rule-toasts");
+const TOAST_MILLIS = 6000;
+const MAX_TOASTS = 4;
+
+/** Named toggles as buttons above the dashboard; clicking one flips it (saved with the layout). */
+function renderToggleBar() {
+  setHidden(toggleBar, layout.toggles.length === 0);
+  toggleBar.replaceChildren(...layout.toggles.map(toggle => {
+    const chip = button(toggle.name, () => changeLayout({ ...layout, toggles: layout.toggles.map(entry =>
+      entry.id === toggle.id ? { ...entry, on: !entry.on } : entry) }), "chip small");
+    chip.setAttribute("aria-pressed", String(toggle.on));
+    chip.title = `Toggle “${toggle.name}” (used by rule conditions)`;
+    return chip;
+  }));
+}
+
+/** Notify actions: a short message that fades away. No sound. */
+function showRuleToasts(notifications) {
+  for (const notification of notifications) {
+    const toast = create("div", "rule-toast", notification.text);
+    toast.setAttribute("role", "status");
+    toastList.appendChild(toast);
+    while (toastList.children.length > MAX_TOASTS) {
+      const oldest = toastList.children[0];
+      if (oldest.remove) oldest.remove();
+      else toastList.children.splice(0, 1);
+    }
+    window.setTimeout(() => {
+      toast.classList.add("leaving");
+      window.setTimeout(() => toast.remove?.(), 400);
+    }, TOAST_MILLIS);
+  }
+}
 
 // ------------------------------------------------------------------------------------------------- Wiring
 
@@ -2006,7 +2824,9 @@ featureHooks.render.push(player => {
   checkAdvancementPopup(player);
   renderVillagers(player);
   renderWindows(player);
+  learnIds(player);
 });
+featureHooks.notify.push(showRuleToasts);
 featureHooks.layout.push(() => {
   renderMovement(currentPlayerState);
   renderXp(currentPlayerState);
@@ -2018,16 +2838,20 @@ featureHooks.layout.push(() => {
   renderAdvancements(currentPlayerState);
   renderAdvancementSettings();
   syncPinnedWindows();
-  // The layout changed from elsewhere (loaded, imported, reset): start the open editor over from it, unless it
-  // holds an edit that isn't valid yet.
-  if (!rulesDialog.hidden && layout !== rulesCommitted && rulesError.hidden) setRulesDialog(true);
+  renderToggleBar();
+  // The layout changed from elsewhere (loaded, imported, reset, a toggle flipped): start the open editor over
+  // from it, unless it holds an edit that isn't valid yet.
+  if (!rulesDialog.hidden && layout !== rulesCommitted && rulesError.hidden) resyncRules();
 });
 featureHooks.tick.push(() => {
   renderPickups(currentPlayerState);
+  saveKnownIds();
   if (rulesDialog.hidden) return;
-  // Rules are paused while customizing, but the editor still shows them live.
+  // Customizing pauses the rules (it can be started while the editor is docked), but the editor stays live.
   if (editing) evaluateView(currentPlayerState, Date.now());
   updateRulesLive();
+  // The inspector has no inputs, so it can simply be redrawn with the latest claims.
+  if (rulesSelection?.kind === "inspect") rulesDetail.replaceChildren(inspectorDetail(rulesSelection.panel));
 });
 
 // Panels that only appear on demand start hidden (the markup says so too).
