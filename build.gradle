@@ -20,17 +20,36 @@ loom {
     }
 }
 
+repositories {
+    // Litematica and MaLiLib (LGPL-3.0): compile-time only, never bundled.
+    exclusiveContent {
+        forRepository {
+            maven { url = 'https://masa.dy.fi/maven/sakura-ryoko' }
+        }
+        filter {
+            includeGroup 'fi.dy.masa.litematica'
+            includeGroup 'fi.dy.masa.malilib'
+        }
+    }
+}
+
 dependencies {
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
     implementation "net.fabricmc:fabric-loader:${project.loader_version}"
     implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+    compileOnly("fi.dy.masa.litematica:litematica-fabric-${project.minecraft_version}:${project.litematica_version}") {
+        transitive = false
+    }
+    compileOnly("fi.dy.masa.malilib:malilib-fabric-${project.minecraft_version}:${project.malilib_version}") {
+        transitive = false
+    }
 }
 
 processResources {
-    def modVersion = project.version.toString()
-    inputs.property 'version', modVersion
+    def expansions = [version: project.version.toString(), litematica_version: project.litematica_version]
+    inputs.properties expansions
     filesMatching('fabric.mod.json') {
-        expand version: modVersion
+        expand expansions
     }
 }
 
@@ -72,8 +91,23 @@ tasks.named('test') {
     failOnNoDiscoveredTests = false
 }
 
+// Litematica is optional: only its adapter package may import it, so absence can never break class loading elsewhere.
+def litematicaIsolation = tasks.register('litematicaIsolation') {
+    def sources = fileTree('src') { include '**/*.java' }
+    inputs.files(sources)
+    doLast {
+        def offenders = sources.files.findAll { file ->
+            !file.path.replace(File.separator, '/').contains('/dev/craftyplayz/minepanel/litematica/')
+                    && file.text =~ /(?m)^import\s+(static\s+)?fi\.dy\.masa\./
+        }
+        if (!offenders.isEmpty()) {
+            throw new GradleException("Only dev.craftyplayz.minepanel.litematica may import Litematica: ${offenders*.name}")
+        }
+    }
+}
+
 tasks.named('check') {
-    dependsOn serviceTest, frontendSyntax, frontendTest
+    dependsOn serviceTest, frontendSyntax, frontendTest, litematicaIsolation
 }
 
 tasks.register('releaseBuild') {
@@ -82,6 +116,7 @@ tasks.register('releaseBuild') {
     dependsOn tasks.build
     def jarFile = tasks.named('jar').flatMap { it.archiveFile }
     def releaseDir = layout.buildDirectory.dir('release')
+    def litematicaRange = ">=${project.litematica_version}"
     doLast {
         def artifact = jarFile.get().asFile
         if (!artifact.isFile()) {
@@ -92,10 +127,22 @@ tasks.register('releaseBuild') {
             ['fabric.mod.json', 'minepanel.client.mixins.json', 'web/index.html', 'web/app.js', 'web/styles.css',
              'web/protocol.js', 'web/layout.js',
              'dev/craftyplayz/minepanel/MinePanelClient.class',
-             'dev/craftyplayz/minepanel/mixin/StatisticsSyncMixin.class'].each { entry ->
+             'dev/craftyplayz/minepanel/mixin/StatisticsSyncMixin.class',
+             'dev/craftyplayz/minepanel/mixin/BlockChangeMixin.class',
+             'dev/craftyplayz/minepanel/build/BuildTracker.class',
+             'dev/craftyplayz/minepanel/litematica/LitematicaBuildSource.class'].each { entry ->
                 if (jar.getEntry(entry) == null) {
                     throw new GradleException("Release JAR is missing ${entry}")
                 }
+            }
+            // Litematica and MaLiLib are LGPL-3.0 optional dependencies: compiled against, never shipped.
+            def bundled = jar.entries().toList().findAll { it.name.startsWith('fi/dy/masa/') || it.name.contains('litematica-fabric') || it.name.contains('malilib-fabric') }
+            if (!bundled.isEmpty()) {
+                throw new GradleException("Release JAR bundles Litematica/MaLiLib: ${bundled*.name.take(5)}")
+            }
+            def metadata = new groovy.json.JsonSlurper().parse(jar.getInputStream(jar.getEntry('fabric.mod.json')))
+            if (metadata.suggests?.litematica != litematicaRange) {
+                throw new GradleException("fabric.mod.json must suggest litematica ${litematicaRange}")
             }
         } finally {
             jar.close()

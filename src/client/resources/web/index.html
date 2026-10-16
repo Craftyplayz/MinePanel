@@ -132,8 +132,18 @@
       </div>
     </article>
     <article class="tile" id="tile-build" data-tile="build" aria-labelledby="build-title">
-      <header class="tile-head" id="head-build"><h2 id="build-title">Build progress</h2><span class="badge muted">Unavailable</span></header>
-      <div class="tile-body placeholder"><p>Litematica support requires a compatible 26.1.2 release.</p></div>
+      <header class="tile-head" id="head-build"><h2 id="build-title">Build progress</h2><span class="badge muted" id="build-status">Unavailable</span></header>
+      <div class="tile-body column">
+        <p class="build-name" id="build-name" hidden></p>
+        <div class="build-progress" id="build-progress" hidden><strong id="build-count">—</strong>
+          <div class="build-bar" id="build-bar" role="progressbar" aria-labelledby="build-title" aria-valuemin="0" aria-valuemax="100"><span id="build-fill"></span></div></div>
+        <p class="build-notes prio-2" id="build-notes"></p>
+        <p class="empty-note" id="build-message">Join a world to see build progress.</p>
+        <div class="build-materials prio-2" id="build-materials" hidden>
+          <div class="material-row material-head" aria-hidden="true"><span></span><span>Item</span><span>Left</span><span>Have</span><span>Still need</span></div>
+          <div class="material-list scroll" id="build-material-list" aria-label="Materials for the placement"></div>
+        </div>
+      </div>
     </article>
     <article class="tile" id="tile-movement" data-tile="movement" aria-labelledby="movement-title">
       <header class="tile-head" id="head-movement"><h2 id="movement-title">Movement</h2><span class="badge muted" id="movement-mode">Unavailable</span></header>

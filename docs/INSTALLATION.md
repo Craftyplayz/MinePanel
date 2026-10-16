@@ -4,7 +4,7 @@
 
 - Minecraft Java Edition 26.1.2.
 - Fabric Loader and Java 25, with versions verified for the target game release.
-- JourneyMap plus its separate Webmap addon are optional. Litematica and Malilib are optional.
+- JourneyMap plus its separate Webmap addon are optional. Litematica (0.27.14 or newer) and MaLiLib (0.28.12 or newer) are optional; MinePanel never bundles them.
 
 Optional-mod compatibility with Minecraft 26.1.2 has not yet been verified. The Webmap addon is separate from JourneyMap 6.0 onward.
 
@@ -17,3 +17,7 @@ Start the Fabric client and open the local dashboard URL reported by MinePanel. 
 ## JourneyMap Webmap
 
 Install the matching JourneyMap and separate Webmap client mods. Enable/configure Webmap in JourneyMap's own settings and use its actual displayed/configured local endpoint. MinePanel must not assume a port. Direct browser opening is the fallback if iframe embedding is blocked.
+
+## Litematica build progress
+
+Install Litematica and MaLiLib for Minecraft 26.1.2 (MinePanel was compiled against Litematica 0.27.14 and MaLiLib 0.28.12, the minimum it accepts; `fabric.mod.json` lists Litematica under `suggests`). Enable the **Build progress** tile with **Customize**, then load a schematic and select its placement in Litematica. Without Litematica, or with an older version, the tile says so and everything else works as usual. This integration has not yet been tested in game.

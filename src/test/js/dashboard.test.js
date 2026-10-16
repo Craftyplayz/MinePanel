@@ -52,24 +52,25 @@ function details() {
       glider: null },
     xp: { level: 5, progress: 0.5, points: 63, gained: { 10: 0, 30: 0, 60: 12, 300: 40, 600: 40, 3600: 90 } },
     portal: { crossing: null, obsidian: [], lit: null },
-    pickups: [], advancements: null, villagers: [], enderChest: null
+    pickups: [], advancements: null, villagers: [], enderChest: null,
+    build: { available: false, reason: "missing", placement: null, materials: [] }
   };
 }
 
 function snapshot(overrides = {}) {
-  return { schemaVersion: 3, revision: 4, capturedAt: 100, available: true,
+  return { schemaVersion: 4, revision: 4, capturedAt: 100, available: true,
     sessionSeconds: 3665, dimension: "minecraft:overworld", position: { x: 1, y: 64, z: -3 },
     health: 18, maxHealth: 20, absorption: 2, inventory: inventory(),
     statistics: statistics(), history: history(), food: 18, saturation: 5.5, effects: [], ...details(), ...overrides };
 }
 
 function initial(state = snapshot()) {
-  return { schemaVersion: 3, type: "initial", modVersion: "0.1.0", state };
+  return { schemaVersion: 4, type: "initial", modVersion: "0.1.0", state };
 }
 
 function update(state = {}) {
-  return { schemaVersion: 3, type: "update",
-    state: { schemaVersion: 3, baseRevision: 4, revision: 7, capturedAt: 101, ...state } };
+  return { schemaVersion: 4, type: "update",
+    state: { schemaVersion: 4, baseRevision: 4, revision: 7, capturedAt: 101, ...state } };
 }
 
 function unavailable(overrides = {}) {
@@ -77,7 +78,7 @@ function unavailable(overrides = {}) {
     position: { x: null, y: null, z: null }, health: null, maxHealth: null,
     absorption: null, inventory: null, statistics: null, history: history({ active: false }),
     food: null, saturation: null, effects: null, world: null, motion: null, xp: null, portal: null, pickups: null,
-    advancements: null, villagers: null, enderChest: null, ...overrides });
+    advancements: null, villagers: null, enderChest: null, build: null, ...overrides });
 }
 
 function defaultFetch(storedLayout = null, requests = []) {
@@ -324,7 +325,7 @@ test("availability transitions require full snapshots and baseline", () => {
   assert.equal(back.inventory.slots.length, 36);
   assert.throws(() => h.apply(snapshot(), update({ available: false, inventory: null })));
   const missing = unavailable({ revision: 7 });
-  assert.throws(() => h.apply(snapshot(), { schemaVersion: 3, type: "update", state: missing }));
+  assert.throws(() => h.apply(snapshot(), { schemaVersion: 4, type: "update", state: missing }));
   assert.throws(() => h.apply(snapshot(), update({ inventory: null })));
   assert.throws(() => h.apply(undefined, initial(snapshot({ inventory: null }))));
 });
@@ -1850,3 +1851,89 @@ test("a rules-only tile keeps its space and appears when a rule made in the edit
 });
 
 const TILE_INDEX_MOVEMENT = 6;
+
+function buildPlacement(overrides = {}) {
+  return { id: "5f0c1a2b-0000-4000-8000-000000000001", name: "Starter House", total: 1200, placed: 300, wrong: 4,
+    extra: 7, uncheckedChunks: 2, scanComplete: false, checkedAt: 99, ...overrides };
+}
+
+function material(name, left, have) {
+  return { itemId: `minecraft:${name.toLowerCase().replace(/ /g, "_")}`, name, icon: null, left, have };
+}
+
+test("build progress is validated like the Java model", () => {
+  const h = harness();
+  const valid = [
+    { available: false, reason: "missing", placement: null, materials: [] },
+    { available: false, reason: "version", placement: null, materials: [] },
+    { available: true, reason: "none", placement: null, materials: [] },
+    { available: true, reason: "counting", placement: null, materials: [] },
+    { available: true, reason: null, placement: buildPlacement(), materials: [material("Stone", 5, 0)] },
+    { available: true, reason: null, placement: buildPlacement({ total: 0, placed: 0, wrong: 0 }), materials: [] }
+  ];
+  for (const build of valid) {
+    assert.deepEqual(plain(h.apply(undefined, initial(snapshot({ build }))).build), build);
+  }
+  const many = Array.from({ length: 129 }, (_, index) => material(`Item ${index}`, 1, 0));
+  for (const build of [null, {},
+    { available: false, reason: "none", placement: null, materials: [] },
+    { available: true, reason: "missing", placement: null, materials: [] },
+    { available: true, reason: null, placement: null, materials: [] },
+    { available: false, reason: "error", placement: buildPlacement(), materials: [] },
+    { available: true, reason: "none", placement: null, materials: [material("Stone", 1, 0)] },
+    { available: true, reason: null, placement: buildPlacement({ placed: 1200 }), materials: [] },
+    { available: true, reason: null, placement: buildPlacement({ name: "" }), materials: [] },
+    { available: true, reason: null, placement: buildPlacement({ uncheckedChunks: -1 }), materials: [] },
+    { available: true, reason: null, placement: buildPlacement(), materials: [material("Stone", 0, 0)] },
+    { available: true, reason: null, placement: buildPlacement(), materials: [{ ...material("Stone", 1, 0), itemId: "stone" }] },
+    { available: true, reason: null, placement: buildPlacement(), materials: many }]) {
+    assert.throws(() => h.apply(undefined, initial(snapshot({ build }))), JSON.stringify(build)?.slice(0, 100));
+  }
+  assert.throws(() => h.apply(undefined, initial(unavailable({ build: valid[0] }))));
+});
+
+test("build progress shows placed / total, a bar, notes and the materials still needed", async () => {
+  const h = harness();
+  await h.flush();
+  const build = { available: true, reason: null, placement: buildPlacement(),
+    materials: [material("Oak Planks", 600, 64), material("Glass Pane", 40, 8), material("Stone", 30, 128)] };
+  h.sockets[0].message(initial(snapshot({ build })));
+  assert.equal(h.get("#build-status").textContent, "Scanning");
+  assert.equal(h.get("#build-name").textContent, "Starter House");
+  assert.equal(h.get("#build-count").textContent, "300 / 1,200 blocks · 25%");
+  assert.equal(h.get("#build-fill").style.width, "25%");
+  assert.equal(h.get("#build-notes").textContent, "4 wrong · 2 chunks not checked yet (out of range) · 7 to clear");
+  assert.equal(h.get("#build-materials").hidden, false);
+  const rows = () => h.get("#build-material-list").children;
+  assert.deepEqual(rows().map(row => row.children.slice(1).map(cell => cell.textContent)),
+    [["Oak Planks", "600", "64", "536"], ["Glass Pane", "40", "8", "32"], ["Stone", "30", "128", "✓"]]);
+  assert.deepEqual(rows().map(row => row.classList.contains("covered")), [false, false, true]);
+  const first = rows()[0];
+  h.sockets[0].message(update({ build: { ...build, placement: buildPlacement({ placed: 1200, wrong: 0, extra: 0,
+    uncheckedChunks: 0, scanComplete: true }), materials: [] } }));
+  assert.equal(h.get("#build-status").textContent, "Complete");
+  assert.equal(h.get("#build-count").textContent, "1,200 / 1,200 blocks · 100%");
+  assert.equal(h.get("#build-notes").textContent, "");
+  assert.equal(h.get("#build-materials").hidden, true);
+  assert.equal(h.get("#build-message").textContent, "Nothing left to place.");
+  assert.notEqual(rows()[0], first);
+});
+
+test("build progress explains why there is nothing to show", async () => {
+  const h = harness();
+  await h.flush();
+  const message = () => [h.get("#build-status").textContent, h.get("#build-message").textContent];
+  h.sockets[0].message(initial(snapshot()));
+  assert.deepEqual(message(), ["Unavailable", "Install Litematica to see the progress of a schematic placement."]);
+  assert.equal(h.get("#build-progress").hidden, true);
+  h.sockets[0].message(update({ build: { available: true, reason: "none", placement: null, materials: [] } }));
+  assert.deepEqual(message(), ["Idle", "No placement selected in Litematica."]);
+  h.sockets[0].message(update({ revision: 8, baseRevision: 7,
+    build: { available: true, reason: "counting", placement: null, materials: [] } }));
+  assert.deepEqual(message(), ["Counting", "Counting the schematic's blocks…"]);
+  h.sockets[0].message(update({ revision: 9, baseRevision: 8,
+    build: { available: false, reason: "error", placement: null, materials: [] } }));
+  assert.deepEqual(message(), ["Unavailable", "Build progress stopped after an error; see the game log."]);
+  h.sockets[0].message(update({ ...unavailable(), revision: 10, baseRevision: 9 }));
+  assert.deepEqual(message(), ["Unavailable", "Join a world to see build progress."]);
+});
