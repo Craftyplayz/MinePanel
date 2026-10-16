@@ -898,7 +898,6 @@ function renderVillagers(player) {
 
 const windowsLayer = $("#windows");
 const EQUIPMENT_INDEX = { 36: "head", 37: "chest", 38: "legs", 39: "feet", 40: "offhand" };
-const enderChestButton = $("#enderchest-open");
 /** Open item windows: {source, slot, pinned, x, y, element, parts}. One unpinned window at a time. */
 let openWindows = [];
 
@@ -1029,7 +1028,6 @@ function renderWindows(player) {
   if (windowsLayer.children.length !== elements.length || elements.some((element, index) => windowsLayer.children[index] !== element)) {
     windowsLayer.replaceChildren(...elements);
   }
-  setHidden(enderChestButton, !player?.available || !player.enderChest);
 }
 
 [...inventorySlots, ...equipmentSlots].forEach((slot, index) => {
@@ -1037,8 +1035,9 @@ function renderWindows(player) {
     if (Array.isArray(slot.item?.contents) && !editing) openItemWindow("inventory", index, event);
   });
 });
-stopDrag(enderChestButton);
-enderChestButton.addEventListener("click", event => openItemWindow("enderchest", 0, event));
+enderChestSlot.element.addEventListener("click", event => {
+  if (enderChestSlot.item && !editing) openItemWindow("enderchest", 0, event);
+});
 
 /** Clicking elsewhere or pressing Escape closes the unpinned window (and the XP and performance window menus). */
 function closeTransient(event) {
@@ -1058,12 +1057,17 @@ function closeTransient(event) {
 window.addEventListener("pointerdown", closeTransient);
 window.addEventListener("keyup", event => { if (event.key === "Escape") closeTransient(); });
 
-// ----------------------------------------------------------------------------------------------- Rules list
+// ---------------------------------------------------------------------------------------------- Rules editor
 
-// Read-only until the rules side panel (docs/RULES_V2.md, phase 3) replaces this dialog.
+// A near-full-screen editor over the dashboard: the rule list (plus places, toggles and recent activity) on the
+// left, the chosen rule's When / Then / Else on the right. Every edit is checked with normalizeLayout and saved at
+// once; an edit that doesn't validate yet (say a half-typed number) stays here, shown as an error, until it does.
+// Values re-render the editor only when its shape changes, so typing and clicking are never interrupted.
 
 const rulesDialog = $("#rules-dialog");
-const rulesList = $("#rules-list");
+const rulesSidebar = $("#rules-sidebar");
+const rulesDetail = $("#rules-detail");
+const rulesError = $("#rules-error");
 const CONDITION_LABELS = { world: "Server / world", dimension: "Dimension", biome: "Biome", time: "Time of day",
   weather: "Weather", day: "Day", gameMode: "Game mode", nearPlace: "Near", yLevel: "Y level", health: "Health",
   food: "Hunger", saturation: "Saturation", absorption: "Absorption", xpLevel: "XP level", effect: "Status effect",
@@ -1073,124 +1077,921 @@ const CONDITION_LABELS = { world: "Server / world", dimension: "Dimension", biom
   killedMob: "Killed", tookDamage: "Took damage (hearts)", advancement: "Advancement earned", died: "Died",
   changedDimension: "Changed dimension", joinedWorld: "Joined the world", inCombat: "In combat",
   villagersNearby: "Known villagers nearby", portalLinking: "Linking a portal", toggle: "Toggle on",
-  ruleActive: "Rule active", width: "Dashboard width (px)", realTime: "Real-world time",
-  sessionTime: "Session time (min)", inGame: "In a world" };
-const COMPARE_SYMBOLS = { "<": "<", "<=": "≤", "=": "=", ">=": "≥", ">": ">", "!=": "≠" };
+  ruleActive: "Rule active", width: "Dashboard width", realTime: "Real-world time",
+  sessionTime: "Session time", inGame: "In a world" };
+const FAMILY_LABELS = { world: "World", position: "Position", player: "Player", inventory: "Inventory",
+  amounts: "Amounts", events: "Events", villagers: "Villagers", features: "Features", meta: "Dashboard" };
+const COMPARE_LABELS = { "<": "<", "<=": "≤", "=": "=", ">=": "≥", ">": ">", "!=": "≠", between: "between" };
+const COMPARE_UNITS = { width: "px", sessionTime: "min", durability: "%", speed: "blocks/s", tookDamage: "hearts" };
+const ACTION_LABELS = { profile: "Switch profile", show: "Show panel", hide: "Hide panel", place: "Place panel",
+  swap: "Swap panels", focus: "Focus panel", set: "Set panel setting", notify: "Notify" };
+const NAME_HINTS = { world: "world or server names", dimension: "e.g. nether, minecraft:the_end",
+  biome: "e.g. minecraft:desert", effect: "e.g. minecraft:speed" };
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-const describeCompare = value => value.compare === "between" ? `${value.value}–${value.value2}`
-  : `${COMPARE_SYMBOLS[value.compare]} ${value.value}`;
-const nameOf = (list, id) => list.find(entry => entry.id === id)?.name ?? id;
+let rulesDraft = null;
+let rulesCommitted = null;
+let rulesSelection = null;
+let liveRefs = { rules: new Map(), conditions: [], log: null };
 
-/** A When row's parameters as text, e.g. "≥ 3 within 16 blocks". */
-function describeConditionParams(condition) {
-  const parts = [];
-  if (condition.values) parts.push(condition.values.join(", ") || "(none chosen)");
-  if (condition.ticks) parts.push(`ticks ${condition.ticks.from}–${condition.ticks.to}`);
-  for (const key of ["item", "stat", "block", "entity", "advancement"]) if (condition[key]) parts.push(condition[key]);
-  if (condition.type === "nearPlace") {
-    const where = condition.place ? nameOf(layout.places, condition.place)
-      : `X ${condition.x} Y ${condition.y} Z ${condition.z}`;
-    parts.push(condition.x2 === undefined ? `${condition.radius} blocks of ${where}${condition.flat ? " (flat)" : ""}`
-      : `the box ${where} to X ${condition.x2} Y ${condition.y2} Z ${condition.z2}`);
+/** The editable parts of the layout, copied so edits can be half-finished without touching the live layout. */
+const draftOf = value => structuredCopy({ rules: value.rules, places: value.places, toggles: value.toggles,
+  folders: value.folders });
+
+/** Validates the draft and saves it; returns whether it was valid. */
+function commitRules() {
+  try {
+    const next = normalizeLayout({ ...layout, ...rulesDraft });
+    setHidden(rulesError, true);
+    rulesCommitted = next;
+    changeLayout(next);
+    return true;
+  } catch (error) {
+    writeText(rulesError, `Not saved yet: ${error.message}`);
+    setHidden(rulesError, false);
+    return false;
   }
-  if (condition.axis && condition.axis !== "total") parts.push(condition.axis);
-  if (condition.target) parts.push(condition.target);
-  if (condition.hand && condition.hand !== "either") parts.push(`${condition.hand} hand`);
-  if (condition.compare) parts.push(describeCompare(condition));
-  if (condition.level) parts.push(`level ${describeCompare(condition.level)}`);
-  if (condition.remaining) parts.push(`${describeCompare(condition.remaining)} s left`);
-  if (condition.enderChest) parts.push("incl. ender chest");
-  if (condition.window) parts.push(`in the last ${condition.window} s`);
-  if (condition.radius && condition.type === "villagersNearby") parts.push(`within ${condition.radius} blocks`);
-  if (condition.minutes) parts.push(`for up to ${condition.minutes} min`);
-  if (condition.toggle) parts.push(nameOf(layout.toggles, condition.toggle));
-  if (condition.rule) parts.push(nameOf(layout.rules, condition.rule));
-  if (condition.from) {
-    parts.push(`${condition.from}–${condition.to}`);
-    if (condition.days) parts.push(condition.days.map(day => WEEKDAYS[day]).join(", "));
-  }
-  return parts.join(" · ");
 }
 
-/** One When row as text, e.g. "not Dimension: nether · for ≥ 30 s". */
-function describeCondition(condition) {
-  const params = describeConditionParams(condition);
-  let text = `${condition.not ? "not " : ""}${CONDITION_LABELS[condition.type]}${params ? `: ${params}` : ""}`;
-  if (condition.for) text += ` · for ≥ ${condition.for} s`;
-  if (condition.within) text += CONDITION_TYPES[condition.type].kind === "event"
-    ? ` · in the last ${condition.within} s` : ` · within ${condition.within} s`;
-  return text;
+/** Applies a change to the draft, saves it and, if its shape changed, redraws the editor. */
+function editRules(change, redraw = true) {
+  change(rulesDraft);
+  commitRules();
+  if (redraw) renderRulesEditor();
+  else renderRuleList();
 }
 
-function describeAction(action) {
-  const panel = TILE_LABELS[action.panel];
-  switch (action.do) {
-    case "profile":
-      return `Switch to ${action.profile === "default" ? "Default" : nameOf(layout.profiles, action.profile)}`;
-    case "show":
-      return `Show ${panel}`;
-    case "hide":
-      return `Hide ${panel}${action.fill === "empty" ? " (leave empty)" : action.fill ? ` (${TILE_LABELS[action.fill]} fills)` : ""}`;
+const selectedRule = () => rulesSelection?.kind === "rule"
+  ? rulesDraft.rules.find(rule => rule.id === rulesSelection.id) : null;
+
+function newRuleId(name) {
+  const used = new Set(rulesDraft.rules.map(rule => rule.id));
+  return uniqueId(name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 24) || "rule", used);
+}
+
+// --------------------------------------------------------------------------------------------- Controls
+
+let focusKeys;
+
+/** Remembers a control by a stable key so it gets focus back after a redraw. */
+function keyed(element, key) {
+  element.dataset.key = key;
+  focusKeys.set(key, element);
+  return element;
+}
+
+function field(labelText, control, className = "rule-field") {
+  const label = create("label", className);
+  if (labelText) label.appendChild(create("span", "rule-field-label", labelText));
+  label.appendChild(control);
+  return label;
+}
+
+function textInput(key, value, onChange, { placeholder = "", maxLength = 64, type = "text" } = {}) {
+  const input = keyed(create("input", "rule-input"), key);
+  input.type = type;
+  input.value = value ?? "";
+  input.placeholder = placeholder;
+  input.maxLength = maxLength;
+  input.addEventListener("change", () => onChange(input.value));
+  return input;
+}
+
+/** A number input; empty or non-numbers pass NaN on so validation reports them. */
+function numberInput(key, value, onChange, { min, max, step = 1 } = {}) {
+  const input = keyed(create("input", "rule-input number"), key);
+  input.type = "number";
+  input.value = value === undefined || Number.isNaN(value) ? "" : String(value);
+  if (min !== undefined) input.min = String(min);
+  if (max !== undefined) input.max = String(max);
+  input.step = String(step);
+  input.addEventListener("change", () => onChange(input.value.trim() === "" ? NaN : Number(input.value)));
+  return input;
+}
+
+function selectInput(key, options, value, onChange) {
+  const select = keyed(create("select", "rule-input"), key);
+  for (const option of options) {
+    if (option.group) {
+      const group = create("optgroup");
+      group.label = option.group;
+      for (const [optionValue, text] of option.options) group.appendChild(optionElement(optionValue, text));
+      select.appendChild(group);
+    } else {
+      select.appendChild(optionElement(option[0], option[1]));
+    }
+  }
+  select.value = value;
+  select.addEventListener("change", () => onChange(select.value));
+  return select;
+}
+
+function optionElement(value, text) {
+  const option = create("option", "", text);
+  option.value = value;
+  return option;
+}
+
+function checkInput(key, labelText, checked, onChange) {
+  const input = keyed(create("input"), key);
+  input.type = "checkbox";
+  input.checked = Boolean(checked);
+  input.addEventListener("change", () => onChange(input.checked));
+  const label = create("label", "rule-check");
+  label.appendChild(input);
+  label.appendChild(create("span", "", labelText));
+  return label;
+}
+
+function button(text, onClick, className = "button quiet small") {
+  const element = create("button", className, text);
+  element.type = "button";
+  element.addEventListener("click", onClick);
+  return element;
+}
+
+/** Chips that pick any of a fixed list of values. */
+function choiceChips(key, choices, values, onChange, labels = {}) {
+  const box = create("span", "rule-chips");
+  choices.forEach((choice, index) => {
+    const chip = keyed(button(labels[choice] ?? String(choice), () => {
+      const set = new Set(values);
+      if (set.has(choice)) set.delete(choice);
+      else set.add(choice);
+      onChange(choices.filter(entry => set.has(entry)));
+    }, "chip"), `${key}.${index}`);
+    chip.setAttribute("aria-pressed", String(values.includes(choice)));
+    box.appendChild(chip);
+  });
+  return box;
+}
+
+const splitList = text => text.split(",").map(entry => entry.trim()).filter(Boolean);
+
+/** A compare row: the comparison, the value and, for "between", the upper value. */
+function compareControls(key, target, onShape, unit) {
+  const row = create("span", "rule-inline");
+  row.appendChild(selectInput(`${key}.compare`, Object.entries(COMPARE_LABELS), target.compare, value => {
+    const between = value === "between";
+    editRules(() => {
+      target.compare = value;
+      if (between && target.value2 === undefined) target.value2 = target.value;
+      if (!between) delete target.value2;
+    }, onShape ?? true);
+  }));
+  row.appendChild(numberInput(`${key}.value`, target.value, value => editRules(() => { target.value = value; }, false),
+    { step: "any" }));
+  if (target.compare === "between") {
+    row.appendChild(create("span", "rule-muted", "and"));
+    row.appendChild(numberInput(`${key}.value2`, target.value2,
+      value => editRules(() => { target.value2 = value; }, false), { step: "any" }));
+  }
+  if (unit) row.appendChild(create("span", "rule-muted", unit));
+  return row;
+}
+
+// ------------------------------------------------------------------------------------------- Conditions
+
+const player = () => currentPlayerState?.available ? currentPlayerState : null;
+
+/** Fresh parameters for a condition type, keeping the row's join, "not" and timing modifier. */
+function conditionWithType(previous, type) {
+  const spec = CONDITION_TYPES[type];
+  const condition = { type };
+  if (previous?.join) condition.join = previous.join;
+  if (previous?.not) condition.not = true;
+  if (spec.kind === "event") condition.within = previous?.within ?? 10;
+  else if (previous?.for !== undefined) condition.for = previous.for;
+  else if (previous?.within !== undefined) condition.within = previous.within;
+  const at = player()?.position;
+  switch (spec.kind) {
+    case "names":
+    case "effect":
+      return { ...condition, values: [] };
+    case "choices":
+      return { ...condition, values: [RULE_CHOICES[type][0]] };
+    case "time":
+      return { ...condition, values: ["night"] };
+    case "compare":
+      return { ...condition, compare: ">=", value: type === "width" ? 700 : 1 };
+    case "speed":
+      return { ...condition, axis: "total", compare: ">=", value: 5 };
     case "place":
-      return `Place ${panel} at column ${action.x + 1}, row ${action.y + 1}, ${action.w} × ${action.h}`;
-    case "swap":
-      return `Swap ${panel} and ${TILE_LABELS[action.with]}`;
-    case "focus":
-      return `Focus ${panel}`;
-    case "set":
-      return `Set ${panel} ${action.setting} to ${JSON.stringify(action.value)}`;
-    case "notify":
-      return `Notify “${action.text}”${action.cooldown ? ` (at most every ${action.cooldown} s)` : ""}`;
+      return { ...condition, x: Math.floor(at?.x ?? 0), y: Math.floor(at?.y ?? 64), z: Math.floor(at?.z ?? 0),
+        radius: 16 };
+    case "holding":
+      return { ...condition, item: "minecraft:diamond_pickaxe", hand: "either" };
+    case "hasItem":
+      return { ...condition, item: "minecraft:torch", compare: "<", value: 16 };
+    case "durability":
+      return { ...condition, target: "held", compare: "<", value: 10 };
+    case "amount":
+      return { ...condition, ...(spec.required ? { stat: "minecraft:custom/minecraft:jump" } : {}),
+        compare: ">=", value: 1, window: 10 };
+    case "villagers":
+      return { ...condition, radius: 16, compare: ">=", value: 3 };
+    case "portal":
+      return { ...condition, minutes: 10 };
+    case "toggle":
+      return { ...condition, toggle: rulesDraft.toggles[0]?.id ?? "" };
+    case "rule":
+      return { ...condition, rule: rulesDraft.rules.find(rule => rule.id !== rulesSelection?.id)?.id ?? "" };
+    case "clock":
+      return { ...condition, from: "09:00", to: "17:00" };
     default:
-      return action.do;
+      return condition;
   }
 }
 
-function actionList(title, actions) {
-  const section = create("div", "rule-actions");
-  section.appendChild(create("span", "rule-label", title));
-  for (const action of actions) section.appendChild(create("p", "rule-condition", describeAction(action)));
+const conditionTypeOptions = () => RULE_FAMILIES.map(family => ({ group: FAMILY_LABELS[family],
+  options: Object.keys(CONDITION_TYPES).filter(type => CONDITION_TYPES[type].family === family)
+    .map(type => [type, CONDITION_LABELS[type]]) }));
+
+/** "+ current" for names: the world, dimension or biome the player is in now. */
+function currentName(type) {
+  const now = player();
+  if (!now?.world) return null;
+  return { world: now.world.name, dimension: now.dimension, biome: now.world.biome }[type] ?? null;
+}
+
+/** The parameter controls of one condition. */
+function conditionControls(condition, key) {
+  const spec = CONDITION_TYPES[condition.type];
+  const box = create("div", "rule-params");
+  const set = (name, redraw = false) => value => editRules(() => { condition[name] = value; }, redraw);
+  const compare = () => compareControls(key, condition, true, COMPARE_UNITS[condition.type]);
+  switch (spec.kind) {
+    case "names": {
+      box.appendChild(field("", textInput(`${key}.values`, condition.values.join(", "),
+        value => editRules(() => { condition.values = splitList(value); }, false),
+        { placeholder: `${NAME_HINTS[condition.type]}, separated by commas`, maxLength: 4000 }), "rule-field grow"));
+      const current = currentName(condition.type);
+      if (current) {
+        box.appendChild(button(`+ ${current}`, () => editRules(() => {
+          if (!condition.values.includes(current)) condition.values.push(current);
+        })));
+      }
+      break;
+    }
+    case "choices":
+      box.appendChild(choiceChips(`${key}.values`, RULE_CHOICES[condition.type], condition.values, set("values", true)));
+      break;
+    case "time": {
+      const ticks = condition.ticks !== undefined;
+      box.appendChild(selectInput(`${key}.mode`, [["periods", "Part of day"], ["ticks", "Tick range"]],
+        ticks ? "ticks" : "periods", value => editRules(() => {
+          if (value === "ticks") {
+            delete condition.values;
+            condition.ticks = { from: 13000, to: 23000 };
+          } else {
+            delete condition.ticks;
+            condition.values = ["night"];
+          }
+        })));
+      if (ticks) {
+        box.appendChild(field("from", numberInput(`${key}.from`, condition.ticks.from,
+          value => editRules(() => { condition.ticks.from = value; }, false), { min: 0, max: 23999 })));
+        box.appendChild(field("to", numberInput(`${key}.to`, condition.ticks.to,
+          value => editRules(() => { condition.ticks.to = value; }, false), { min: 0, max: 23999 })));
+      } else {
+        box.appendChild(choiceChips(`${key}.values`, RULE_CHOICES.time, condition.values, set("values", true)));
+      }
+      break;
+    }
+    case "compare":
+      box.appendChild(compare());
+      break;
+    case "effect": {
+      box.appendChild(field("", textInput(`${key}.values`, condition.values.join(", "),
+        value => editRules(() => { condition.values = splitList(value); }, false),
+        { placeholder: `${NAME_HINTS.effect}, separated by commas`, maxLength: 4000 }), "rule-field grow"));
+      for (const [name, text] of [["level", "Level"], ["remaining", "Seconds left"]]) {
+        box.appendChild(checkInput(`${key}.${name}.on`, text, condition[name] !== undefined, on => editRules(() => {
+          if (on) condition[name] = { compare: ">=", value: 1 };
+          else delete condition[name];
+        })));
+        if (condition[name]) box.appendChild(compareControls(`${key}.${name}`, condition[name]));
+      }
+      break;
+    }
+    case "speed":
+      box.appendChild(selectInput(`${key}.axis`, RULE_CHOICES.axis.map(axis => [axis, axis]), condition.axis,
+        set("axis")));
+      box.appendChild(compare());
+      break;
+    case "place":
+      placeControls(condition, key, box);
+      break;
+    case "holding":
+      box.appendChild(field("item", textInput(`${key}.item`, condition.item, set("item"),
+        { placeholder: "minecraft:diamond_pickaxe", maxLength: 256 })));
+      box.appendChild(field("hand", selectInput(`${key}.hand`, RULE_CHOICES.hand.map(hand => [hand, hand]),
+        condition.hand, set("hand"))));
+      break;
+    case "hasItem":
+      box.appendChild(field("item", textInput(`${key}.item`, condition.item, set("item"),
+        { placeholder: "minecraft:torch", maxLength: 256 })));
+      box.appendChild(compare());
+      box.appendChild(checkInput(`${key}.ender`, "incl. ender chest", condition.enderChest, value => editRules(() => {
+        if (value) condition.enderChest = true;
+        else delete condition.enderChest;
+      }, false)));
+      break;
+    case "durability":
+      box.appendChild(selectInput(`${key}.target`, RULE_CHOICES.durability.map(target => [target, target]),
+        condition.target, set("target")));
+      box.appendChild(compare());
+      break;
+    case "amount":
+      if (spec.subject) {
+        box.appendChild(field(spec.subject, textInput(`${key}.subject`, condition[spec.subject], value => editRules(() => {
+          if (value.trim() || spec.required) condition[spec.subject] = value.trim();
+          else delete condition[spec.subject];
+        }, false), { placeholder: spec.required ? "minecraft:custom/minecraft:jump" : "any", maxLength: 256 })));
+      }
+      box.appendChild(compare());
+      box.appendChild(field("in the last", numberInput(`${key}.window`, condition.window, set("window"),
+        { min: 1, max: 3600 })));
+      box.appendChild(create("span", "rule-muted", "s"));
+      break;
+    case "event":
+      if (spec.subject) {
+        box.appendChild(field(spec.subject, textInput(`${key}.subject`, condition[spec.subject], value => editRules(() => {
+          if (value.trim()) condition[spec.subject] = value.trim();
+          else delete condition[spec.subject];
+        }, false), { placeholder: "any", maxLength: 256 })));
+      }
+      break;
+    case "villagers":
+      box.appendChild(compare());
+      box.appendChild(field("within", numberInput(`${key}.radius`, condition.radius, set("radius"),
+        { min: 1, max: 256 })));
+      box.appendChild(create("span", "rule-muted", "blocks"));
+      break;
+    case "portal":
+      box.appendChild(field("for up to", numberInput(`${key}.minutes`, condition.minutes, set("minutes"),
+        { min: 1, max: 120 })));
+      box.appendChild(create("span", "rule-muted", "min"));
+      break;
+    case "toggle":
+      if (!rulesDraft.toggles.length) box.appendChild(create("span", "rule-muted", "Add a toggle under Toggles first."));
+      else box.appendChild(selectInput(`${key}.toggle`, rulesDraft.toggles.map(toggle => [toggle.id, toggle.name]),
+        condition.toggle, set("toggle")));
+      break;
+    case "rule": {
+      const others = rulesDraft.rules.filter(rule => rule.id !== rulesSelection.id);
+      if (!others.length) box.appendChild(create("span", "rule-muted", "There are no other rules yet."));
+      else box.appendChild(selectInput(`${key}.rule`, others.map(rule => [rule.id, rule.name]), condition.rule,
+        set("rule")));
+      break;
+    }
+    case "clock":
+      box.appendChild(field("from", textInput(`${key}.from`, condition.from, set("from"), { type: "time", maxLength: 5 })));
+      box.appendChild(field("to", textInput(`${key}.to`, condition.to, set("to"), { type: "time", maxLength: 5 })));
+      box.appendChild(choiceChips(`${key}.days`, [0, 1, 2, 3, 4, 5, 6], condition.days ?? [0, 1, 2, 3, 4, 5, 6],
+        days => editRules(() => {
+          if (days.length === 7 || days.length === 0) delete condition.days;
+          else condition.days = days;
+        }), Object.fromEntries(WEEKDAYS.map((day, index) => [index, day]))));
+      break;
+  }
+  return box;
+}
+
+/** Near: a saved place or typed coordinates, then a radius or a box. */
+function placeControls(condition, key, box) {
+  const saved = condition.place !== undefined;
+  const placeOptions = [["coords", "Coordinates"], ...rulesDraft.places.map(place => [place.id, place.name])];
+  box.appendChild(selectInput(`${key}.place`, placeOptions, saved ? condition.place : "coords", value => editRules(() => {
+    for (const name of ["place", "x", "y", "z", "world", "dimension"]) delete condition[name];
+    if (value === "coords") Object.assign(condition, { x: 0, y: 64, z: 0 });
+    else condition.place = value;
+    if (condition.x2 !== undefined) {
+      delete condition.x2; delete condition.y2; delete condition.z2;
+      condition.radius = 16;
+    }
+  })));
+  if (!saved) {
+    for (const axis of ["x", "y", "z"]) {
+      box.appendChild(field(axis.toUpperCase(), numberInput(`${key}.${axis}`, condition[axis],
+        value => editRules(() => { condition[axis] = value; }, false), { step: "any" })));
+    }
+    const at = player()?.position;
+    if (at) {
+      box.appendChild(button("+ here", () => editRules(() => {
+        Object.assign(condition, { x: Math.floor(at.x), y: Math.floor(at.y), z: Math.floor(at.z) });
+        if (player().world) condition.world = player().world.name;
+        condition.dimension = player().dimension;
+      })));
+    }
+  }
+  const box3d = condition.x2 !== undefined;
+  if (!saved) {
+    box.appendChild(selectInput(`${key}.shape`, [["radius", "within a radius"], ["box", "inside a box to"]],
+      box3d ? "box" : "radius", value => editRules(() => {
+        if (value === "box") {
+          delete condition.radius; delete condition.flat;
+          Object.assign(condition, { x2: condition.x + 10, y2: condition.y + 10, z2: condition.z + 10 });
+        } else {
+          delete condition.x2; delete condition.y2; delete condition.z2;
+          condition.radius = 16;
+        }
+      })));
+  }
+  if (box3d) {
+    for (const axis of ["x2", "y2", "z2"]) {
+      box.appendChild(field(axis.toUpperCase(), numberInput(`${key}.${axis}`, condition[axis],
+        value => editRules(() => { condition[axis] = value; }, false), { step: "any" })));
+    }
+  } else {
+    box.appendChild(field("radius", numberInput(`${key}.radius`, condition.radius,
+      value => editRules(() => { condition.radius = value; }, false), { min: 1, step: "any" })));
+    box.appendChild(checkInput(`${key}.flat`, "ignore height", condition.flat, value => editRules(() => {
+      if (value) condition.flat = true;
+      else delete condition.flat;
+    }, false)));
+  }
+  if (!saved && (condition.world !== undefined || condition.dimension !== undefined)) {
+    box.appendChild(create("span", "rule-muted", `in ${[condition.world, condition.dimension].filter(Boolean).join(" · ")}`));
+  }
+}
+
+/** The timing modifier: right away, held for N s, or (events and states) in the last N s. */
+function modifierControls(condition, key) {
+  const event = CONDITION_TYPES[condition.type].kind === "event";
+  const row = create("span", "rule-inline");
+  const mode = condition.for !== undefined ? "for" : condition.within !== undefined ? "within" : "now";
+  if (event) {
+    row.appendChild(create("span", "rule-muted", "in the last"));
+  } else {
+    row.appendChild(selectInput(`${key}.modifier`, [["now", "right now"], ["for", "for at least"],
+      ["within", "at any time in the last"]], mode, value => editRules(() => {
+      const seconds = condition.for ?? condition.within ?? 10;
+      delete condition.for;
+      delete condition.within;
+      if (value !== "now") condition[value] = seconds;
+    })));
+  }
+  if (mode !== "now") {
+    row.appendChild(numberInput(`${key}.seconds`, condition[mode], value => editRules(() => { condition[mode] = value; },
+      false), { min: 1, max: 3600 }));
+    row.appendChild(create("span", "rule-muted", "s"));
+  }
+  return row;
+}
+
+function moveItem(list, index, by) {
+  const target = index + by;
+  if (target < 0 || target >= list.length) return;
+  [list[index], list[target]] = [list[target], list[index]];
+}
+
+function whenSection(rule) {
+  const section = create("section", "rule-section");
+  const head = create("div", "rule-section-head");
+  head.appendChild(create("h3", "", "When"));
+  head.appendChild(create("span", "rule-muted",
+    "Each row joins the one above with AND or OR. OR starts a new block; the rule matches when any block is all green."));
+  section.appendChild(head);
+  if (!rule.when.length) section.appendChild(create("p", "empty-note", "No conditions yet: this rule is never active."));
+  let block;
+  rule.when.forEach((condition, index) => {
+    if (index === 0 || condition.join === "or") {
+      if (index > 0) section.appendChild(create("div", "rule-or-divider", "OR"));
+      block = create("div", "rule-block");
+      section.appendChild(block);
+    }
+    const key = `when.${index}`;
+    const row = create("div", "rule-row");
+    const state = create("span", "rule-state");
+    liveRefs.conditions.push({ index, row, state });
+    const join = index === 0 ? create("span", "rule-join first", "IF")
+      : selectInput(`${key}.join`, [["and", "AND"], ["or", "OR"]], condition.join ?? "and",
+        value => editRules(() => { condition.join = value; }));
+    if (index > 0) join.classList.add("rule-join");
+    row.appendChild(join);
+    row.appendChild(checkInput(`${key}.not`, "not", condition.not, value => editRules(() => {
+      if (value) condition.not = true;
+      else delete condition.not;
+    }, false)));
+    row.appendChild(selectInput(`${key}.type`, conditionTypeOptions(), condition.type,
+      value => editRules(() => { rule.when[index] = conditionWithType(condition, value); })));
+    row.appendChild(conditionControls(condition, key));
+    row.appendChild(modifierControls(condition, key));
+    row.appendChild(state);
+    row.appendChild(rowTools(rule.when, index, `${key}`));
+    block.appendChild(row);
+  });
+  const add = create("div", "rule-add");
+  add.appendChild(button("+ AND condition", () => editRules(() => {
+    rule.when.push(conditionWithType({ join: "and" }, "dimension"));
+  }), "button small"));
+  if (rule.when.length) {
+    add.appendChild(button("+ OR condition", () => editRules(() => {
+      rule.when.push(conditionWithType({ join: "or" }, "dimension"));
+    }), "button quiet small"));
+  }
+  section.appendChild(add);
   return section;
 }
 
-function ruleCard(rule) {
-  const state = ruleEvaluation?.states.get(rule.id);
-  const card = create("article", state?.active ? "rule active" : "rule");
-  const head = create("div", "rule-head");
-  head.appendChild(create("strong", "rule-name", rule.name));
-  head.appendChild(create("span", state?.active ? "badge" : "badge muted",
-    !rule.enabled ? "Disabled" : state?.active ? "Active now" : "Not active"));
-  card.appendChild(head);
-  const when = create("div", "rule-groups");
-  when.appendChild(create("span", "rule-label", "When"));
-  if (rule.when.length === 0) when.appendChild(create("p", "empty-note", "No conditions: this rule is never active."));
-  rule.when.forEach((condition, index) => {
-    if (index > 0) when.appendChild(create("span", condition.join === "or" ? "rule-or" : "rule-and", condition.join.toUpperCase()));
-    const row = create("p", "rule-condition", describeCondition(condition));
-    if (state?.conditions[index]) row.classList.add(state.conditions[index].ok ? "ok" : "bad");
-    when.appendChild(row);
+/** Move up / down and delete for one row of a list. */
+function rowTools(list, index, key) {
+  const tools = create("span", "rule-row-tools");
+  const up = keyed(button("↑", () => editRules(() => moveItem(list, index, -1))), `${key}.up`);
+  up.title = "Move up";
+  up.disabled = index === 0;
+  const down = keyed(button("↓", () => editRules(() => moveItem(list, index, 1))), `${key}.down`);
+  down.title = "Move down";
+  down.disabled = index === list.length - 1;
+  const remove = keyed(button("✕", () => editRules(() => list.splice(index, 1))), `${key}.remove`);
+  remove.title = "Remove";
+  tools.appendChild(up);
+  tools.appendChild(down);
+  tools.appendChild(remove);
+  return tools;
+}
+
+// ---------------------------------------------------------------------------------------------- Actions
+
+const panelOptions = (exclude) => TILE_IDS.filter(id => id !== exclude).map(id => [id, TILE_LABELS[id]]);
+const settingKeys = panel => SETTING_RULES.filter(([tile]) => tile === panel).map(([, key]) => key);
+const firstSettingPanel = () => TILE_IDS.find(id => settingKeys(id).length);
+
+function actionWithType(type, previous) {
+  const panel = previous?.panel && TILE_IDS.includes(previous.panel) ? previous.panel : "xp";
+  switch (type) {
+    case "profile":
+      return { do: "profile", profile: layout.profiles[0]?.id ?? "default" };
+    case "place": {
+      const minimum = TILE_MINIMUMS[panel];
+      return { do: "place", panel, x: 0, y: 0, w: Math.max(4, minimum.w), h: Math.max(4, minimum.h) };
+    }
+    case "swap":
+      return { do: "swap", panel, with: TILE_IDS.find(id => id !== panel) };
+    case "set": {
+      const tile = settingKeys(panel).length ? panel : firstSettingPanel();
+      return settingAction(tile, settingKeys(tile)[0]);
+    }
+    case "notify":
+      return { do: "notify", text: "Rule active", cooldown: 0 };
+    default:
+      return { do: type, panel };
+  }
+}
+
+/** A "set" action with the setting's default value. */
+function settingAction(panel, setting) {
+  return { do: "set", panel, setting, value: structuredCopy(defaultSettings()[panel][setting]) };
+}
+
+function settingValueControl(action, key) {
+  const value = action.value;
+  const change = next => editRules(() => { action.value = next; }, false);
+  const choices = { xp: { window: XP_WINDOW_CHOICES }, performance: { window: PERFORMANCE_WINDOW_CHOICES } }
+    [action.panel]?.[action.setting];
+  if (choices) return selectInput(`${key}.value`, choices.map(choice => [String(choice), `${choice} s`]),
+    String(value), next => change(Number(next)));
+  if (typeof value === "boolean") return checkInput(`${key}.value`, "on", value, change);
+  if (typeof value === "number") return numberInput(`${key}.value`, value, change, { min: 0 });
+  if (Array.isArray(value)) {
+    const numbers = action.panel === "xp";
+    return textInput(`${key}.value`, value.join(", "), text => change(splitList(text)
+      .map(entry => numbers ? Number(entry) : entry)), { placeholder: "comma separated", maxLength: 8000 });
+  }
+  return textInput(`${key}.value`, value, change, { maxLength: 200 });
+}
+
+function actionParams(action, key) {
+  const box = create("div", "rule-params");
+  const set = (name, redraw = false) => value => editRules(() => { action[name] = value; }, redraw);
+  const panel = (onChange = set("panel")) => selectInput(`${key}.panel`, panelOptions(), action.panel, onChange);
+  switch (action.do) {
+    case "profile":
+      box.appendChild(selectInput(`${key}.profile`, [["default", "Default"],
+        ...layout.profiles.map(profile => [profile.id, profile.name])], action.profile, set("profile")));
+      break;
+    case "show":
+    case "focus":
+      box.appendChild(panel());
+      break;
+    case "hide":
+      box.appendChild(panel(value => editRules(() => {
+        action.panel = value;
+        if (action.fill === value) delete action.fill;
+      })));
+      box.appendChild(field("space", selectInput(`${key}.fill`, [["auto", "neighbours fill it"],
+        ["empty", "leave empty"], ...panelOptions(action.panel).map(([id, label]) => [id, `${label} fills it`])],
+      action.fill ?? "auto", value => editRules(() => {
+        if (value === "auto") delete action.fill;
+        else action.fill = value;
+      }, false))));
+      break;
+    case "place":
+      box.appendChild(panel(value => editRules(() => {
+        action.panel = value;
+        action.w = Math.max(action.w, TILE_MINIMUMS[value].w);
+        action.h = Math.max(action.h, TILE_MINIMUMS[value].h);
+      })));
+      for (const [name, label, offset] of [["x", "column", 1], ["y", "row", 1], ["w", "width", 0], ["h", "height", 0]]) {
+        box.appendChild(field(label, numberInput(`${key}.${name}`, action[name] + offset,
+          value => editRules(() => { action[name] = value - offset; }, false), { min: 1 })));
+      }
+      break;
+    case "swap":
+      box.appendChild(panel(value => editRules(() => {
+        action.panel = value;
+        if (action.with === value) action.with = TILE_IDS.find(id => id !== value);
+      })));
+      box.appendChild(create("span", "rule-muted", "with"));
+      box.appendChild(selectInput(`${key}.with`, panelOptions(action.panel), action.with, set("with")));
+      break;
+    case "set":
+      box.appendChild(selectInput(`${key}.panel`, TILE_IDS.filter(id => settingKeys(id).length)
+        .map(id => [id, TILE_LABELS[id]]), action.panel,
+      value => editRules(list => { Object.assign(action, settingAction(value, settingKeys(value)[0])); })));
+      box.appendChild(selectInput(`${key}.setting`, settingKeys(action.panel).map(setting => [setting, setting]),
+        action.setting, value => editRules(() => { Object.assign(action, settingAction(action.panel, value)); })));
+      box.appendChild(create("span", "rule-muted", "to"));
+      box.appendChild(settingValueControl(action, key));
+      break;
+    case "notify":
+      box.appendChild(field("", textInput(`${key}.text`, action.text, set("text"), { maxLength: 128 }), "rule-field grow"));
+      box.appendChild(field("at most every", numberInput(`${key}.cooldown`, action.cooldown, set("cooldown"),
+        { min: 0, max: 3600 })));
+      box.appendChild(create("span", "rule-muted", "s"));
+      break;
+  }
+  return box;
+}
+
+function actionSection(rule, list, title, note) {
+  const section = create("section", "rule-section");
+  const head = create("div", "rule-section-head");
+  head.appendChild(create("h3", "", title));
+  head.appendChild(create("span", "rule-muted", note));
+  section.appendChild(head);
+  if (!rule[list].length) section.appendChild(create("p", "empty-note", "No actions."));
+  rule[list].forEach((action, index) => {
+    const key = `${list}.${index}`;
+    const row = create("div", "rule-row");
+    row.appendChild(selectInput(`${key}.do`, ACTION_TYPES.map(type => [type, ACTION_LABELS[type]]), action.do,
+      value => editRules(() => { rule[list][index] = actionWithType(value, action); })));
+    row.appendChild(actionParams(action, key));
+    row.appendChild(rowTools(rule[list], index, key));
+    section.appendChild(row);
   });
-  card.appendChild(when);
-  card.appendChild(actionList("Then", rule.then));
-  if (rule.else.length) card.appendChild(actionList("Else", rule.else));
-  return card;
+  const add = create("div", "rule-add");
+  add.appendChild(button("+ Action", () => editRules(() => { rule[list].push(actionWithType("show")); }),
+    "button small"));
+  section.appendChild(add);
+  return section;
+}
+
+// ------------------------------------------------------------------------------------------------ Panels
+
+function ruleDetail(rule) {
+  const box = create("div", "rule-detail");
+  const head = create("div", "rule-detail-head");
+  head.appendChild(field("Name", textInput("rule.name", rule.name, value => editRules(() => {
+    rule.name = value.trim().slice(0, 64);
+  }, false)), "rule-field grow"));
+  head.appendChild(checkInput("rule.enabled", "Enabled", rule.enabled, value => editRules(() => {
+    rule.enabled = value;
+  }, false)));
+  const index = rulesDraft.rules.indexOf(rule);
+  head.appendChild(button("Duplicate", () => editRules(() => {
+    const copy = { ...structuredCopy(rule), id: newRuleId(`${rule.name} copy`), name: `${rule.name} (copy)`.slice(0, 64) };
+    rulesDraft.rules.splice(index + 1, 0, copy);
+    rulesSelection = { kind: "rule", id: copy.id };
+  })));
+  head.appendChild(button("Delete", () => editRules(() => {
+    rulesDraft.rules.splice(index, 1);
+    for (const other of rulesDraft.rules) {
+      other.when = other.when.filter(condition => !(condition.type === "ruleActive" && condition.rule === rule.id));
+    }
+    const next = rulesDraft.rules[Math.min(index, rulesDraft.rules.length - 1)];
+    rulesSelection = next ? { kind: "rule", id: next.id } : null;
+  }), "button quiet small danger"));
+  box.appendChild(head);
+  box.appendChild(whenSection(rule));
+  box.appendChild(actionSection(rule, "then", "Then", "Applies while the rule is active."));
+  box.appendChild(actionSection(rule, "else", "Else", "Applies while the rule is enabled but not active."));
+  const timing = create("section", "rule-section");
+  const timingHead = create("div", "rule-section-head");
+  timingHead.appendChild(create("h3", "", "Timing"));
+  timingHead.appendChild(create("span", "rule-muted",
+    "Delay: how long the When list must match first. Linger: how long the rule stays active after it stops matching."));
+  timing.appendChild(timingHead);
+  const row = create("div", "rule-row");
+  for (const [name, label, min] of [["delayMs", "Delay", 0], ["lingerMs", "Linger", 0.5]]) {
+    row.appendChild(field(label, numberInput(`rule.${name}`, rule.timing[name] / 1000,
+      value => editRules(() => { rule.timing[name] = Math.round(value * 1000); }, false),
+      { min, max: 600, step: 0.1 })));
+    row.appendChild(create("span", "rule-muted", "s"));
+  }
+  timing.appendChild(row);
+  box.appendChild(timing);
+  return box;
+}
+
+function placesDetail() {
+  const box = create("div", "rule-detail");
+  const head = create("div", "rule-section-head");
+  head.appendChild(create("h3", "", "Places"));
+  head.appendChild(create("span", "rule-muted", "Saved spots for “Near” conditions. A place only counts in the world and dimension it was saved in."));
+  box.appendChild(head);
+  if (!rulesDraft.places.length) box.appendChild(create("p", "empty-note", "No places yet."));
+  rulesDraft.places.forEach((place, index) => {
+    const key = `place.${index}`;
+    const row = create("div", "rule-row");
+    row.appendChild(field("Name", textInput(`${key}.name`, place.name, value => editRules(() => { place.name = value.trim(); }, false))));
+    for (const axis of ["x", "y", "z"]) {
+      row.appendChild(field(axis.toUpperCase(), numberInput(`${key}.${axis}`, place[axis],
+        value => editRules(() => { place[axis] = value; }, false), { step: "any" })));
+    }
+    row.appendChild(create("span", "rule-muted", `${place.world} · ${place.dimension}`));
+    const remove = button("✕", () => editRules(() => {
+      rulesDraft.places.splice(index, 1);
+      for (const rule of rulesDraft.rules) {
+        rule.when = rule.when.filter(condition => condition.place !== place.id);
+      }
+    }));
+    remove.title = "Remove (and the conditions that use it)";
+    row.appendChild(remove);
+    box.appendChild(row);
+  });
+  const now = player();
+  const add = create("div", "rule-add");
+  const addButton = button("+ Current position", () => editRules(() => {
+    const used = new Set(rulesDraft.places.map(place => place.id));
+    const name = `Place ${rulesDraft.places.length + 1}`;
+    rulesDraft.places.push({ id: uniqueId(`place-${rulesDraft.places.length + 1}`, used), name,
+      world: now.world.name.slice(0, 128), dimension: now.dimension,
+      x: Math.floor(now.position.x), y: Math.floor(now.position.y), z: Math.floor(now.position.z) });
+  }), "button small");
+  addButton.disabled = !now?.world || !now.position;
+  if (addButton.disabled) addButton.title = "Join a world first";
+  add.appendChild(addButton);
+  box.appendChild(add);
+  return box;
+}
+
+function togglesDetail() {
+  const box = create("div", "rule-detail");
+  const head = create("div", "rule-section-head");
+  head.appendChild(create("h3", "", "Toggles"));
+  head.appendChild(create("span", "rule-muted", "Switches you flip by hand, for “Toggle on” conditions."));
+  box.appendChild(head);
+  if (!rulesDraft.toggles.length) box.appendChild(create("p", "empty-note", "No toggles yet."));
+  rulesDraft.toggles.forEach((toggle, index) => {
+    const key = `toggle.${index}`;
+    const row = create("div", "rule-row");
+    row.appendChild(field("Name", textInput(`${key}.name`, toggle.name, value => editRules(() => {
+      toggle.name = value.trim().slice(0, 32);
+    }, false), { maxLength: 32 })));
+    row.appendChild(checkInput(`${key}.on`, "On", toggle.on, value => editRules(() => { toggle.on = value; }, false)));
+    const remove = button("✕", () => editRules(() => {
+      rulesDraft.toggles.splice(index, 1);
+      for (const rule of rulesDraft.rules) {
+        rule.when = rule.when.filter(condition => !(condition.type === "toggle" && condition.toggle === toggle.id));
+      }
+    }));
+    remove.title = "Remove (and the conditions that use it)";
+    row.appendChild(remove);
+    box.appendChild(row);
+  });
+  const add = create("div", "rule-add");
+  const addButton = button("+ Toggle", () => editRules(() => {
+    const used = new Set(rulesDraft.toggles.map(toggle => toggle.id));
+    const number = rulesDraft.toggles.length + 1;
+    rulesDraft.toggles.push({ id: uniqueId(`toggle-${number}`, used), name: `Toggle ${number}`, on: false });
+  }), "button small");
+  addButton.disabled = rulesDraft.toggles.length >= MAX_TOGGLES;
+  add.appendChild(addButton);
+  box.appendChild(add);
+  return box;
+}
+
+/** The left column: rules in priority order, then places, toggles and recent activity. */
+function renderRuleList() {
+  liveRefs.rules = new Map();
+  const list = create("div", "rules-nav");
+  const head = create("div", "rules-nav-head");
+  head.appendChild(create("span", "rule-label", "Rules"));
+  const add = button("+ New rule", () => editRules(() => {
+    const id = newRuleId(`rule-${rulesDraft.rules.length + 1}`);
+    rulesDraft.rules.push({ id, name: `Rule ${rulesDraft.rules.length + 1}`, enabled: true, folder: null, when: [],
+      then: [], else: [], timing: { ...DEFAULT_TIMING }, animation: null });
+    rulesSelection = { kind: "rule", id };
+  }), "button small");
+  add.disabled = rulesDraft.rules.length >= MAX_RULES;
+  head.appendChild(add);
+  list.appendChild(head);
+  list.appendChild(create("p", "rule-muted", "Higher rules win when two change the same thing."));
+  if (!rulesDraft.rules.length) list.appendChild(create("p", "empty-note", "No rules yet."));
+  rulesDraft.rules.forEach((rule, index) => {
+    const selected = rulesSelection?.kind === "rule" && rulesSelection.id === rule.id;
+    const item = create("div", selected ? "rules-nav-item selected" : "rules-nav-item");
+    const dot = create("span", "rule-dot");
+    liveRefs.rules.set(rule.id, dot);
+    const name = keyed(button(rule.name || "(unnamed)", () => {
+      rulesSelection = { kind: "rule", id: rule.id };
+      renderRulesEditor();
+    }, "rules-nav-name"), `nav.${rule.id}`);
+    if (!rule.enabled) name.classList.add("disabled");
+    const up = button("↑", () => editRules(() => moveItem(rulesDraft.rules, index, -1)), "button quiet tiny");
+    up.title = "Higher priority";
+    up.disabled = index === 0;
+    const down = button("↓", () => editRules(() => moveItem(rulesDraft.rules, index, 1)), "button quiet tiny");
+    down.title = "Lower priority";
+    down.disabled = index === rulesDraft.rules.length - 1;
+    item.appendChild(dot);
+    item.appendChild(name);
+    item.appendChild(up);
+    item.appendChild(down);
+    list.appendChild(item);
+  });
+  for (const [kind, label, count] of [["places", "Places", rulesDraft.places.length],
+    ["toggles", "Toggles", rulesDraft.toggles.length]]) {
+    const item = create("div", rulesSelection?.kind === kind ? "rules-nav-item selected section" : "rules-nav-item section");
+    item.appendChild(keyed(button(`${label} (${count})`, () => {
+      rulesSelection = { kind };
+      renderRulesEditor();
+    }, "rules-nav-name"), `nav.${kind}`));
+    list.appendChild(item);
+  }
+  list.appendChild(create("span", "rule-label log", "Recent activity"));
+  liveRefs.log = create("div", "rules-log");
+  list.appendChild(liveRefs.log);
+  rulesSidebar.replaceChildren(list);
+  updateRulesLive();
+}
+
+/** Redraws the whole editor, keeping focus on the control that had it. */
+function renderRulesEditor() {
+  if (rulesDialog.hidden) return;
+  const focused = document.activeElement?.dataset?.key;
+  focusKeys = new Map();
+  liveRefs.conditions = [];
+  if (rulesSelection?.kind === "rule" && !selectedRule()) rulesSelection = null;
+  if (!rulesSelection && rulesDraft.rules.length) rulesSelection = { kind: "rule", id: rulesDraft.rules[0].id };
+  const rule = selectedRule();
+  rulesDetail.replaceChildren(rule ? ruleDetail(rule) : rulesSelection?.kind === "places" ? placesDetail()
+    : rulesSelection?.kind === "toggles" ? togglesDetail()
+      : create("p", "empty-note", "Add a rule with “+ New rule”."));
+  renderRuleList();
+  if (focused) focusKeys.get(focused)?.focus?.();
+}
+
+function formatClock(at) {
+  const date = new Date(at);
+  return [date.getHours(), date.getMinutes(), date.getSeconds()].map(part => String(part).padStart(2, "0")).join(":");
+}
+
+function liveValue(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(1);
+  if (typeof value === "boolean") return value ? "yes" : "no";
+  return String(value);
+}
+
+/** Refreshes the live dots and values without redrawing anything. */
+function updateRulesLive() {
+  if (rulesDialog.hidden) return;
+  for (const [id, dot] of liveRefs.rules) {
+    const state = ruleEvaluation?.states.get(id);
+    dot.className = state?.active ? "rule-dot active" : state?.enabled === false ? "rule-dot off" : "rule-dot";
+    dot.title = state?.active ? "Active now" : state?.enabled === false ? "Disabled" : "Not active";
+  }
+  const state = rulesSelection?.kind === "rule" ? ruleEvaluation?.states.get(rulesSelection.id) : null;
+  for (const { index, row, state: label } of liveRefs.conditions) {
+    const result = state?.conditions[index];
+    row.classList.toggle("ok", result?.ok === true);
+    row.classList.toggle("bad", Boolean(result) && result.ok !== true);
+    writeText(label, !result ? "" : result.holds === null ? "unknown" : liveValue(result.value));
+  }
+  if (liveRefs.log) {
+    const entries = ruleEngine.log().slice(-20).reverse();
+    liveRefs.log.replaceChildren(...(entries.length ? entries.map(entry => create("p", "rules-log-entry",
+      `${formatClock(entry.at)} ${entry.name} ${entry.active ? "on" : "off"}`))
+      : [create("p", "empty-note", "Nothing yet.")]));
+  }
 }
 
 function setRulesDialog(open) {
+  if (open) {
+    rulesDraft = draftOf(layout);
+    rulesCommitted = layout;
+    setHidden(rulesError, true);
+  }
   setHidden(rulesDialog, !open);
-  if (open) renderRules();
-}
-
-function renderRules() {
-  if (rulesDialog.hidden) return;
-  rulesList.replaceChildren(...(layout.rules.length ? layout.rules.map(ruleCard)
-    : [create("p", "empty-note", "No rules yet.")]));
+  if (open) renderRulesEditor();
 }
 
 $("#rules-open").addEventListener("click", () => setRulesDialog(true));
 $("#rules-dialog-close").addEventListener("click", () => setRulesDialog(false));
-rulesDialog.addEventListener("click", event => { if (event.target === rulesDialog) setRulesDialog(false); });
+rulesDialog.addEventListener("keydown", event => { if (event.key === "Escape") setRulesDialog(false); });
 
 // ------------------------------------------------------------------------------------------------- Wiring
 
@@ -1217,15 +2018,21 @@ featureHooks.layout.push(() => {
   renderAdvancements(currentPlayerState);
   renderAdvancementSettings();
   syncPinnedWindows();
+  // The layout changed from elsewhere (loaded, imported, reset): start the open editor over from it, unless it
+  // holds an edit that isn't valid yet.
+  if (!rulesDialog.hidden && layout !== rulesCommitted && rulesError.hidden) setRulesDialog(true);
 });
 featureHooks.tick.push(() => {
   renderPickups(currentPlayerState);
-  renderRules();
+  if (rulesDialog.hidden) return;
+  // Rules are paused while customizing, but the editor still shows them live.
+  if (editing) evaluateView(currentPlayerState, Date.now());
+  updateRulesLive();
 });
 
 // Panels that only appear on demand start hidden (the markup says so too).
 for (const element of [xpParts.menu, performanceParts.menu, xpParts.form, pickupParts.form, advancementParts.form, advancementParts.popup, portalBox,
-  villagerParts.nav, rulesDialog, enderChestButton, portalLink]) {
+  villagerParts.nav, rulesDialog, portalLink]) {
   setHidden(element, true);
 }
 featureHooks.layout.forEach(hook => hook());

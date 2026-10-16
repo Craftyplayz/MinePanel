@@ -968,24 +968,28 @@ function withSettings(layout, tileId, changes) {
 
 const SLOT_MAX = 52;
 const SLOT_GAP = 3;
+const SLOT_DIVIDER = 6;
 const SLOT_COMFORTABLE = 32;
 
 /**
  * Decides how the inventory fits a tile body of the given size. Slots never scroll or get clipped: if every row
  * cannot fit at a comfortable size, slots keep the size the width allows and only whole rows that fit are shown,
- * added in order hotbar, bottom main row, middle, top, then the armor row.
- * With armor shown and enough width, armor sits in a column beside the storage rows (offhand next to the hotbar).
+ * added in order hotbar, bottom main row, middle, top, then the equipment row (armor, offhand, ender chest and
+ * player head). With enough width these sit in columns instead: armor left of the storage rows, and right of
+ * them the offhand next to the hotbar, the ender chest above it and the player head at the top.
  */
 function inventoryArrangement(width, height, showArmor) {
   const rowsHeight = (count, size) => count * size + (count - 1) * SLOT_GAP;
   const fit = (columns, count) => {
-    const byWidth = Math.floor((width - (columns - 1) * SLOT_GAP - (columns > 9 ? 2 * SLOT_GAP : 0)) / columns);
+    // Each extra column beyond the nine storage columns is set apart by a divider track.
+    const dividers = (columns - 9) * (SLOT_DIVIDER + SLOT_GAP);
+    const byWidth = Math.floor((width - (columns - 1) * SLOT_GAP - dividers) / columns);
     const byHeight = Math.floor((height - (count - 1) * SLOT_GAP) / count);
     return { byWidth: Math.min(SLOT_MAX, byWidth), all: Math.min(SLOT_MAX, byWidth, byHeight) };
   };
   const order = ["hotbar", "main3", "main2", "main1"];
-  const candidates = [{ wide: false, rows: showArmor ? [...order, "equipment"] : order, columns: 9 }];
-  if (showArmor) candidates.push({ wide: true, rows: order, columns: 11 });
+  const candidates = [{ wide: false, rows: [...order, "equipment"], columns: 9 },
+    { wide: true, rows: order, columns: showArmor ? 11 : 10 }];
   let best;
   for (const candidate of candidates) {
     const size = fit(candidate.columns, candidate.rows.length);
@@ -1000,12 +1004,15 @@ function inventoryArrangement(width, height, showArmor) {
       if (rowsHeight(rows.length, slot) > height) slot = Math.max(1, height);
     }
     const option = { wide: candidate.wide, slot, rows, height: rowsHeight(rows.length, slot) };
-    // Prefer more inventory rows, then bigger slots, then more armor (in the armor column, one piece per
-    // visible row plus the offhand next to the hotbar).
+    // Prefer more inventory rows, then bigger slots, then more equipment (in the columns, one armor piece per
+    // visible row; the offhand, ender chest and head beside the hotbar, bottom and top main rows).
     const storage = rows.filter(row => row !== "equipment").length;
-    const armor = candidate.wide ? rows.length + (rows.includes("hotbar") ? 1 : 0) : rows.includes("equipment") ? 5 : 0;
-    // On a tie the armor column wins: it matches the game's inventory and leaves height for other content.
-    const score = storage * 100000 + option.slot * 100 + armor * 2 + (candidate.wide ? 1 : 0);
+    const pieces = (showArmor ? 4 : 0) + 3;
+    const equipment = candidate.wide
+      ? (showArmor ? rows.length : 0) + rows.filter(row => row !== "main2").length
+      : rows.includes("equipment") ? pieces : 0;
+    // On a tie the columns win: they match the game's inventory and leave height for other content.
+    const score = storage * 100000 + option.slot * 100 + equipment * 2 + (candidate.wide ? 1 : 0);
     if (!best || score > best.score) best = { ...option, score };
   }
   if (!best) return { wide: false, slot: 1, rows: ["hotbar"], height: 1 };

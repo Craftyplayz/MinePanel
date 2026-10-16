@@ -53,7 +53,9 @@ function details() {
     xp: { level: 5, progress: 0.5, points: 63, gained: { 10: 0, 30: 0, 60: 12, 300: 40, 600: 40, 3600: 90 } },
     portal: { crossing: null, obsidian: [], lit: null },
     pickups: [], advancements: null, villagers: [], enderChest: null, performance: performance(),
-    build: { available: false, reason: "missing", placement: null, materials: [] }
+    build: { available: false, reason: "missing", placement: null, materials: [] },
+    icons: { head: item({ itemId: "minecraft:player_head", name: "Steve's Head", count: 1, icon: "e0-head" }),
+      enderChest: item({ itemId: "minecraft:ender_chest", name: "Ender Chest", count: 1, icon: "e0-ender" }) }
   };
 }
 
@@ -83,7 +85,7 @@ function unavailable(overrides = {}) {
     position: { x: null, y: null, z: null }, health: null, maxHealth: null,
     absorption: null, inventory: null, statistics: null, history: history({ active: false }),
     food: null, saturation: null, effects: null, world: null, motion: null, xp: null, portal: null, pickups: null,
-    advancements: null, villagers: null, enderChest: null, performance: null, build: null, ...overrides });
+    advancements: null, villagers: null, enderChest: null, performance: null, build: null, icons: null, ...overrides });
 }
 
 function defaultFetch(storedLayout = null, requests = []) {
@@ -202,9 +204,23 @@ function harness(fetchImpl = defaultFetch()) {
 }
 
 const plain = value => JSON.parse(JSON.stringify(value));
+const findAll = (element, match, found = []) => {
+  if (match(element)) found.push(element);
+  for (const child of element.children) findAll(child, match, found);
+  return found;
+};
+const byKey = (element, key) => findAll(element, child => child.dataset.key === key)[0];
+const savedLayout = requests => JSON.parse(requests.filter(request => request.method === "PUT").at(-1).body);
+/** Sets a control's value (or checked state) and fires its change event, as a person would. */
+const setValue = (element, value) => {
+  if (typeof value === "boolean") element.checked = value;
+  else element.value = value;
+  element.emit("change");
+};
 const hotbar = h => h.get("#inventory-grid").children.slice(0, 9);
 const main = h => h.get("#inventory-grid").children.slice(9, 36);
 const equipment = h => h.get("#inventory-grid").children.slice(36, 41);
+const extras = h => h.get("#inventory-grid").children.slice(41, 43);
 const slotParts = slot => {
   const [placeholder, icon, fallback, count, durability] = slot.children;
   return { placeholder, icon, fallback, count, durability, bar: durability.children[0] };
@@ -1324,26 +1340,28 @@ test("tiles move and resize by dragging only in customize mode, snapping to grid
   assert.equal(requests.filter(request => request.method === "PUT").length, 1);
 });
 
-test("inventory arrangement shows only whole rows that fit, preferring rows, then slot size, then armor", () => {
+test("inventory arrangement shows only whole rows that fit, preferring rows, then slot size, then equipment", () => {
   const h = harness();
   const arrange = (width, height, armor) => plain(h.run(`inventoryArrangement(${width}, ${height}, ${armor})`));
   assert.deepEqual(arrange(500, 300, true), { wide: false, slot: 52,
     rows: ["hotbar", "main3", "main2", "main1", "equipment"], height: 272 });
   assert.deepEqual(arrange(700, 250, true), { wide: true, slot: 52, rows: ["hotbar", "main3", "main2", "main1"],
     height: 217 }, "with room for an armor column, armor sits beside the storage rows");
-  assert.equal(arrange(700, 250, false).wide, false);
+  assert.deepEqual(arrange(700, 250, false), { wide: true, slot: 52, rows: ["hotbar", "main3", "main2", "main1"],
+    height: 217 }, "with armor hidden, the offhand, ender chest and head column still sits beside the rows");
   assert.deepEqual(arrange(500, 110, true), { wide: false, slot: 52, rows: ["hotbar", "main3"], height: 107 },
     "too short for everything: keep full-size slots and add only rows that fully fit");
   assert.deepEqual(arrange(500, 60, true).rows, ["hotbar"]);
-  assert.deepEqual(arrange(200, 300, false), { wide: false, slot: 19, rows: ["hotbar", "main3", "main2", "main1"],
-    height: 85 }, "narrow tiles shrink slots instead of dropping rows");
+  assert.deepEqual(arrange(200, 300, false), { wide: false, slot: 19,
+    rows: ["hotbar", "main3", "main2", "main1", "equipment"], height: 107 },
+    "narrow tiles shrink slots instead of dropping rows");
   for (const width of [60, 150, 333, 480, 900]) {
     for (const height of [20, 45, 100, 170, 260, 500]) {
       for (const armor of [true, false]) {
         const result = arrange(width, height, armor);
-        const columns = result.wide ? 11 : 9;
+        const columns = !result.wide ? 9 : armor ? 11 : 10;
         assert.ok(result.height <= height, `fits height ${width}x${height}`);
-        assert.ok(columns * result.slot + (columns - 1) * 3 + (result.wide ? 6 : 0) <= width, `fits width ${width}x${height}`);
+        assert.ok(columns * result.slot + (columns - 1) * 3 + (columns - 9) * 9 <= width, `fits width ${width}x${height}`);
         assert.equal(result.rows[0], "hotbar", "the hotbar is always the first row kept");
       }
     }
@@ -1363,18 +1381,25 @@ test("inventory grid places rows and armor, toggles armor and drops rows as the 
   assert.equal(grid.style.gridTemplateColumns, "repeat(9, var(--slot))");
   assert.deepEqual([hotbar(h)[0].style.gridRow, main(h)[0].style.gridRow, main(h)[26].style.gridRow,
     equipment(h)[4].style.gridRow, equipment(h)[4].style.gridColumn], ["5", "2", "4", "1", "5"]);
+  assert.deepEqual(extras(h).map(slot => [slot.style.gridRow, slot.style.gridColumn]), [["1", "9"], ["1", "6"]],
+    "the ender chest follows the offhand and the head ends the equipment row");
   assert.equal(h.get("#held-value").hidden, false);
 
   resize({ left: 0, top: 0, width: 728, height: 280 });
   assert.equal(grid.style.gridTemplateColumns, "var(--slot) 6px repeat(9, var(--slot)) 6px var(--slot)");
   assert.deepEqual(equipment(h).map(slot => [slot.style.gridRow, slot.style.gridColumn]),
     [["1", "1"], ["2", "1"], ["3", "1"], ["4", "1"], ["4", "13"]], "armor column beside rows, offhand by the hotbar");
+  assert.deepEqual(extras(h).map(slot => [slot.style.gridRow, slot.style.gridColumn]), [["1", "13"], ["3", "13"]],
+    "the head tops the offhand column with the ender chest above the offhand");
   assert.equal(hotbar(h)[0].style.gridColumn, "3");
 
   h.get("#armor-toggle").emit("click");
   assert.equal(h.get("#armor-toggle").attributes["aria-pressed"], "false");
-  assert.equal(equipment(h).every(slot => slot.hidden), true);
-  assert.equal(grid.style.gridTemplateColumns, "repeat(9, var(--slot))");
+  assert.deepEqual(equipment(h).map(slot => slot.hidden), [true, true, true, true, false], "only armor hides");
+  assert.equal(grid.style.gridTemplateColumns, "repeat(9, var(--slot)) 6px var(--slot)");
+  assert.deepEqual([equipment(h)[4], ...extras(h)].map(slot => [slot.style.gridRow, slot.style.gridColumn]),
+    [["4", "11"], ["1", "11"], ["3", "11"]], "the offhand, head and ender chest stay beside the rows");
+  assert.equal(hotbar(h)[0].style.gridColumn, "1");
   await h.runTimers(400);
   assert.equal(JSON.parse(requests.filter(request => request.method === "PUT").at(-1).body).settings.inventory.showArmor,
     false, "the armor choice is saved with the layout");
@@ -2345,8 +2370,10 @@ test("a rules-only tile keeps its space and appears when a converted v1 rule mat
   assert.equal(movement.style.getPropertyValue("--grid-row"), position, "and it keeps its place");
   assert.equal(h.get("#tile-statistics").style.getPropertyValue("--grid-row"), "5 / span 9", "nothing else moves");
   h.get("#rules-open").emit("click");
-  assert.match(h.get("#rules-list").children[0].textContent,
-    /^NetherActive nowWhenDimension: minecraft:the_netherThenShow Movement$/);
+  assert.equal(byKey(h.get("#rules-sidebar"), "nav.rule-1").textContent, "Nether");
+  assert.equal(findAll(h.get("#rules-sidebar"), element => element.className === "rule-dot active").length, 1);
+  assert.equal(byKey(h.get("#rules-detail"), "when.0.values").value, "minecraft:the_nether");
+  assert.equal(byKey(h.get("#rules-detail"), "then.0.panel").value, "movement");
   await h.runTimers(400);
   const saved = JSON.parse(requests.filter(request => request.method === "PUT").at(-1).body);
   assert.equal(saved.version, 2);
@@ -2374,6 +2401,89 @@ test("a stored layout that can't be converted is kept and not overwritten until 
   await h.flush();
   await h.runTimers(400);
   assert.equal(saves(), 1, "importing a layout replaces it");
+});
+
+const buttonNamed = (element, text) => findAll(element, child => child.tagName === "button"
+  && child.textContent === text)[0];
+
+test("rules editor: a new rule's When and Then are edited and saved", async () => {
+  const requests = [];
+  const h = harness(defaultFetch(null, requests));
+  await h.flush();
+  h.sockets[0].message(initial(snapshot()));
+  h.get("#rules-open").emit("click");
+  const sidebar = h.get("#rules-sidebar");
+  const detail = h.get("#rules-detail");
+  buttonNamed(sidebar, "+ New rule").emit("click");
+  setValue(byKey(detail, "rule.name"), "Low health");
+  buttonNamed(detail, "+ AND condition").emit("click");
+  setValue(byKey(detail, "when.0.type"), "health");
+  setValue(byKey(detail, "when.0.compare"), "<");
+  setValue(byKey(detail, "when.0.value"), "6");
+  buttonNamed(detail, "+ OR condition").emit("click");
+  setValue(byKey(detail, "when.1.values"), "nether, the_end");
+  buttonNamed(detail, "+ Action").emit("click");
+  setValue(byKey(detail, "then.0.panel"), "player");
+  setValue(byKey(detail, "then.0.do"), "focus");
+  await h.runTimers(400);
+  const rule = savedLayout(requests).rules[0];
+  assert.equal(rule.name, "Low health");
+  assert.deepEqual(rule.when, [{ type: "health", compare: "<", value: 6 },
+    { type: "dimension", join: "or", values: ["nether", "the_end"] }]);
+  assert.deepEqual(rule.then, [{ do: "focus", panel: "player" }]);
+  assert.equal(byKey(sidebar, `nav.${rule.id}`).textContent, "Low health");
+  assert.equal(findAll(detail, element => element.className === "rule-block").length, 2, "OR starts a new block");
+});
+
+test("rules editor: an invalid value is reported and not saved until it is fixed", async () => {
+  const requests = [];
+  const stored = { version: 2, tiles: [], rules: [{ id: "r", name: "R", enabled: true,
+    when: [{ type: "dimension", values: ["minecraft:overworld"] }, { type: "yLevel", compare: ">", value: 100 }] }] };
+  const h = harness(defaultFetch(stored, requests));
+  await h.flush();
+  h.sockets[0].message(initial(snapshot()));
+  h.get("#rules-open").emit("click");
+  const detail = h.get("#rules-detail");
+  const rows = findAll(detail, element => element.className === "rule-block").flatMap(block => block.children);
+  assert.deepEqual(rows.map(row => row.className), ["rule-row ok", "rule-row bad"], "live state on each condition");
+  const redraws = detail.replacements;
+  const saves = () => requests.filter(request => request.method === "PUT").length;
+  const before = saves();
+  setValue(byKey(detail, "when.1.value"), "");
+  await h.runTimers(400);
+  assert.equal(saves(), before);
+  assert.equal(h.get("#rules-error").hidden, false);
+  assert.match(h.get("#rules-error").textContent, /^Not saved yet: Rule "R": condition 2: /);
+  setValue(byKey(detail, "when.1.value"), "50");
+  await h.runTimers(400);
+  assert.equal(h.get("#rules-error").hidden, true);
+  assert.equal(savedLayout(requests).rules[0].when[1].value, 50);
+  assert.equal(detail.replacements, redraws, "typing a value never redraws (and so never steals focus)");
+});
+
+test("rules editor: places and toggles are managed, and removing one drops the conditions that use it", async () => {
+  const requests = [];
+  const stored = { version: 2, tiles: [], toggles: [{ id: "afk", name: "AFK", on: false }],
+    rules: [{ id: "r", name: "R", enabled: true, when: [{ type: "toggle", toggle: "afk" }] }] };
+  const h = harness(defaultFetch(stored, requests));
+  await h.flush();
+  h.sockets[0].message(initial(snapshot()));
+  h.get("#rules-open").emit("click");
+  const sidebar = h.get("#rules-sidebar");
+  const detail = h.get("#rules-detail");
+  byKey(sidebar, "nav.toggles").emit("click");
+  setValue(byKey(detail, "toggle.0.on"), true);
+  await h.runTimers(400);
+  assert.equal(savedLayout(requests).toggles[0].on, true);
+  findAll(detail, element => element.title?.startsWith("Remove"))[0].emit("click");
+  byKey(sidebar, "nav.places").emit("click");
+  buttonNamed(detail, "+ Current position").emit("click");
+  await h.runTimers(400);
+  const saved = savedLayout(requests);
+  assert.deepEqual(saved.toggles, []);
+  assert.deepEqual(saved.rules[0].when, []);
+  assert.equal(saved.places.length, 1);
+  assert.equal(saved.places[0].dimension, "minecraft:overworld");
 });
 
 function buildPlacement(overrides = {}) {

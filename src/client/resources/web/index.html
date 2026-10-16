@@ -64,7 +64,7 @@
     </article>
     <article class="tile" id="tile-inventory" data-tile="inventory" aria-labelledby="inventory-title">
       <header class="tile-head" id="head-inventory"><h2 id="inventory-title">Inventory</h2>
-        <span class="head-actions"><button type="button" class="chip small" id="enderchest-open" hidden title="Ender chest contents, as last seen">Ender chest</button><button type="button" class="chip small" id="armor-toggle" aria-pressed="true">Armor</button><span class="badge muted" id="inventory-status">Unavailable</span></span></header>
+        <span class="head-actions"><button type="button" class="chip small" id="armor-toggle" aria-pressed="true">Armor</button><span class="badge muted" id="inventory-status">Unavailable</span></span></header>
       <div class="tile-body inventory-body" id="inventory-body">
         <p class="held" id="held-value">Held item unavailable</p>
         <div class="inventory-grid" id="inventory-grid" aria-label="Inventory"></div>
@@ -251,13 +251,16 @@
   <div class="advancement-popup" id="advancement-popup" role="status" hidden></div>
   <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
   <div class="dialog-backdrop" id="rules-dialog" hidden>
-    <section class="dialog wide" role="dialog" aria-modal="true" aria-labelledby="rules-dialog-title">
+    <section class="dialog rules-editor" role="dialog" aria-modal="true" aria-labelledby="rules-dialog-title">
       <header class="dialog-head">
         <h2 id="rules-dialog-title">Rules</h2>
+        <span class="rules-error" id="rules-error" role="alert" hidden></span>
         <button type="button" class="button" id="rules-dialog-close">Done</button>
       </header>
-      <p class="dialog-note">A rule applies <strong>Then</strong> while its <strong>When</strong> list matches, and <strong>Else</strong> otherwise. Each condition joins the one above with AND or OR; AND binds tighter, so “A and B or C” means (A and B) or C. Higher rules win when two change the same thing. Rules pause while you customize. The new rules editor is coming soon; until then rules are listed here read-only.</p>
-      <div class="dialog-list" id="rules-list"></div>
+      <div class="rules-body">
+        <nav class="rules-sidebar" id="rules-sidebar" aria-label="Rules"></nav>
+        <div class="rules-main" id="rules-detail"></div>
+      </div>
     </section>
   </div>
   <div class="dialog-backdrop" id="statistics-dialog" hidden>

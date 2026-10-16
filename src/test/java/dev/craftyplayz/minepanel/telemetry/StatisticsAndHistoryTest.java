@@ -153,6 +153,8 @@ public final class StatisticsAndHistoryTest {
                 id -> "Zombie");
         check(last(tracker).label().equals("Killed Zombie"), "attributions are consumed once");
 
+        tracker.containerOpened(29000, "§6Large Chest§f");
+        check(last(tracker).label().equals("Opened Large Chest"), "legacy formatting codes are stripped");
         tracker.containerOpened(30000, "Chest");
         tracker.inventoryChanged(30500, "Chest", Map.of("Diamond", 3, "Cobblestone", -10));
         check(last(tracker).label().equals("Inventory changed (Chest)")

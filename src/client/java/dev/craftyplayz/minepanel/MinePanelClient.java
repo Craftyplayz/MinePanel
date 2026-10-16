@@ -249,7 +249,8 @@ public final class MinePanelClient implements ClientModInitializer {
                     experience.observe(millis, player.experienceLevel, player.experienceProgress), portals.state(),
                     pickups.pickups(), advancements.collect(client.getConnection(), icons),
                     worldData.villagers(client, level, icons), worldData.enderChest(client, level, icons),
-                    FrameCollector.snapshot(), build.snapshot(client, snapshot, icons));
+                    FrameCollector.snapshot(), build.snapshot(client, snapshot, icons),
+                    MinecraftInventoryCollector.icons(client, player, icons));
             telemetry.updatePlayer(
                     millis,
                     (now - sessionStartedNanos) / 1_000_000_000L,

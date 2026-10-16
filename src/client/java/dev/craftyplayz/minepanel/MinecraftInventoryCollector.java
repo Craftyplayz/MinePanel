@@ -3,6 +3,7 @@ package dev.craftyplayz.minepanel;
 import dev.craftyplayz.minepanel.telemetry.InventorySnapshot;
 import dev.craftyplayz.minepanel.telemetry.ItemExtractor;
 import dev.craftyplayz.minepanel.telemetry.ItemSnapshot;
+import dev.craftyplayz.minepanel.telemetry.PlayerDetails;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -12,9 +13,11 @@ import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.item.component.BundleContents;
 import net.minecraft.world.item.component.ItemContainerContents;
+import net.minecraft.world.item.component.ResolvableProfile;
 import net.minecraft.world.item.enchantment.ItemEnchantments;
 
 import java.util.ArrayList;
@@ -29,6 +32,7 @@ final class MinecraftInventoryCollector {
     /** Extracted items by stack (item, components and count): tooltips are costly and most stacks rarely change. */
     private static final Map<CachedStack, ItemSnapshot> CACHE = new HashMap<>();
     private static int cacheEpoch = -1;
+    private static final ItemStack ENDER_CHEST = new ItemStack(Items.ENDER_CHEST);
 
     private MinecraftInventoryCollector() {
     }
@@ -46,6 +50,21 @@ final class MinecraftInventoryCollector {
                     case "offhand" -> EquipmentSlot.OFFHAND;
                     default -> throw new IllegalArgumentException("Unsupported equipment slot");
                 }), icons));
+    }
+
+    /** The player's own head and an ender chest, drawn beside the inventory on the dashboard. */
+    static PlayerDetails.Icons icons(Minecraft minecraft, Player player, IconRenderer icons) {
+        // The tab-list profile carries the skin textures; the local player's own profile may not.
+        var info = minecraft.getConnection() == null ? null : minecraft.getConnection().getPlayerInfo(player.getUUID());
+        var profile = ResolvableProfile.createResolved(info == null ? player.getGameProfile() : info.getProfile());
+        ItemSnapshot head = null;
+        // Until the skin has loaded the head renders with the default skin, and its icon would be cached that way.
+        if (minecraft.playerSkinRenderCache().lookup(profile).isDone()) {
+            var stack = new ItemStack(Items.PLAYER_HEAD);
+            stack.set(DataComponents.PROFILE, profile);
+            head = item(minecraft, stack, icons);
+        }
+        return new PlayerDetails.Icons(head, item(minecraft, ENDER_CHEST, icons));
     }
 
     /** Client thread: the dashboard value of one stack, including the contents of shulker boxes and bundles. */

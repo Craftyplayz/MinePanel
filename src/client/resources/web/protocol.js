@@ -212,7 +212,7 @@ function applyHistory(previous, patch) {
 // ------------------------------------------------------------------------------- World, motion and other details
 
 const DETAIL_FIELDS = ["world", "motion", "xp", "portal", "pickups", "advancements", "villagers", "enderChest",
-  "performance", "build"];
+  "performance", "build", "icons"];
 const WEATHER = ["clear", "rain", "thunder"];
 const GAME_MODES = ["survival", "creative", "adventure", "spectator"];
 const MOTION_MODES = ["ground", "elytra", "swimming", "riding", "flying", "falling"];
@@ -378,6 +378,12 @@ function validateBuild(build) {
   return { available, reason, placement: checked, materials };
 }
 
+/** Items drawn beside the inventory: the player's head (null until their skin has loaded) and an ender chest. */
+function validateIcons(icons) {
+  requireValid(object(icons));
+  return { head: icons.head === null ? null : filledItem(icons.head), enderChest: filledItem(icons.enderChest) };
+}
+
 /** Validates the detail fields: required while in a world (advancements and ender chest may be null), else null. */
 function validateDetails(state) {
   requireValid(DETAIL_FIELDS.every(key => has(state, key)));
@@ -387,7 +393,7 @@ function validateDetails(state) {
   }
   const validators = { world: validateWorld, motion: validateMotion, xp: validateXp, portal: validatePortal,
     pickups: validatePickups, advancements: validateAdvancements, villagers: validateVillagers,
-    enderChest: validateEnderChest, performance: validatePerformance, build: validateBuild };
+    enderChest: validateEnderChest, performance: validatePerformance, build: validateBuild, icons: validateIcons };
   return Object.fromEntries(DETAIL_FIELDS.map(key => {
     const value = state[key];
     // Deltas carry over unchanged fields from the previous state, which were validated when they arrived.

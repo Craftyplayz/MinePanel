@@ -138,7 +138,7 @@ function initials(name) {
 }
 
 function renderSlot(slot, item, selected) {
-  const className = selected ? "slot selected" : "slot";
+  const className = `${slot.base ?? "slot"}${selected ? " selected" : ""}`;
   if (slot.element.className !== className) slot.element.className = className;
   const changed = slot.item !== item;
   slot.item = item;
@@ -178,6 +178,12 @@ const hotbarSlots = Array.from({ length: 9 }, () => createSlot(inventoryGrid));
 const mainSlots = Array.from({ length: 27 }, () => createSlot(inventoryGrid));
 const inventorySlots = [...hotbarSlots, ...mainSlots];
 const equipmentSlots = EQUIPMENT_SLOTS.map(([, label]) => createSlot(inventoryGrid, label));
+// The player head and ender chest float beside the slots, without a slot frame; the ender chest opens its window.
+const headSlot = createSlot(inventoryGrid);
+const enderChestSlot = createSlot(inventoryGrid);
+headSlot.base = enderChestSlot.base = "slot floating";
+enderChestSlot.element.id = "enderchest-open";
+enderChestSlot.element.title = "Ender chest contents, as last seen";
 const inventoryRows = {
   hotbar: hotbarSlots, main1: mainSlots.slice(0, 9), main2: mainSlots.slice(9, 18), main3: mainSlots.slice(18, 27),
   equipment: equipmentSlots
@@ -210,8 +216,10 @@ function layoutInventory() {
     : ["equipment", "main1", "main2", "main3", "hotbar"]).filter(row => arrangement.rows.includes(row));
   const rowOf = name => visual.indexOf(name) + 1;
   inventoryGrid.style.setProperty("--slot", `${arrangement.slot}px`);
-  inventoryGrid.style.gridTemplateColumns = arrangement.wide
-    ? "var(--slot) 6px repeat(9, var(--slot)) 6px var(--slot)" : "repeat(9, var(--slot))";
+  inventoryGrid.style.gridTemplateColumns = !arrangement.wide ? "repeat(9, var(--slot))"
+    : `${showArmor ? "var(--slot) 6px " : ""}repeat(9, var(--slot)) 6px var(--slot)`;
+  const firstStorage = arrangement.wide && showArmor ? 3 : 1;
+  const side = firstStorage + 10;
   const place = (slot, row, column) => {
     setHidden(slot.element, row < 1);
     if (row >= 1) {
@@ -220,17 +228,27 @@ function layoutInventory() {
     }
   };
   for (const name of ["hotbar", "main1", "main2", "main3"]) {
-    inventoryRows[name].forEach((slot, index) => place(slot, rowOf(name), (arrangement.wide ? 3 : 1) + index));
+    inventoryRows[name].forEach((slot, index) => place(slot, rowOf(name), firstStorage + index));
   }
-  // Armor pieces line up with the storage rows beside them; the offhand sits next to the hotbar.
-  const armorRows = arrangement.wide ? ["main1", "main2", "main3", "hotbar"] : [];
+  // In columns, armor pieces line up with the storage rows beside them; on the other side the offhand sits next
+  // to the hotbar, the ender chest above it and the player head at the top. In a row, they follow each other
+  // with the head at the far end. Hiding armor keeps the rest.
+  const armorRows = ["main1", "main2", "main3", "hotbar"];
+  const offhandColumn = showArmor ? 5 : 1;
   equipmentSlots.forEach((slot, index) => {
-    if (!showArmor) return place(slot, 0, 0);
-    if (arrangement.wide) {
-      return index < 4 ? place(slot, rowOf(armorRows[index]), 1) : place(slot, rowOf("hotbar"), 13);
+    if (index === 4) {
+      return arrangement.wide ? place(slot, rowOf("hotbar"), side) : place(slot, rowOf("equipment"), offhandColumn);
     }
-    place(slot, rowOf("equipment"), 1 + index);
+    if (!showArmor) return place(slot, 0, 0);
+    place(slot, rowOf(arrangement.wide ? armorRows[index] : "equipment"), arrangement.wide ? 1 : 1 + index);
   });
+  if (arrangement.wide) {
+    place(enderChestSlot, rowOf("main3"), side);
+    place(headSlot, rowOf("main1"), side);
+  } else {
+    place(enderChestSlot, rowOf("equipment"), offhandColumn + 1);
+    place(headSlot, rowOf("equipment"), 9);
+  }
 }
 
 if (typeof ResizeObserver === "function") new ResizeObserver(() => layoutInventory()).observe(inventoryBody);
@@ -240,7 +258,7 @@ armorToggle.addEventListener("pointerdown", event => event.stopPropagation());
 armorToggle.addEventListener("click", () =>
   changeSettings("inventory", { showArmor: !displaySettings().inventory.showArmor }));
 
-function renderInventory(inventory) {
+function renderInventory(inventory, icons) {
   writeText(inventoryStatus, inventory ? `Slot ${inventory.selectedHotbarSlot + 1}` : "Unavailable");
   const held = inventory?.equipment.mainhand;
   writeText(heldValue, !inventory ? "Held item unavailable"
@@ -249,6 +267,8 @@ function renderInventory(inventory) {
     renderSlot(slot, inventory?.slots[index] ?? null, inventory !== null && index === inventory?.selectedHotbarSlot));
   equipmentSlots.forEach((slot, index) =>
     renderSlot(slot, inventory?.equipment[EQUIPMENT_SLOTS[index][0]] ?? null, false));
+  renderSlot(headSlot, icons?.head ?? null, false);
+  renderSlot(enderChestSlot, icons?.enderChest ?? null, false);
 }
 
 // --------------------------------------------------------------------------------------------------- Tooltips
@@ -529,7 +549,7 @@ historySearch.addEventListener("input", () => renderHistory(displayedHistory));
 function renderPlayer(player) {
   updateView(player);
   for (const hook of featureHooks.render) hook(player);
-  renderInventory(player?.available ? player.inventory : null);
+  renderInventory(player?.available ? player.inventory : null, player?.available ? player.icons : null);
   renderStatistics(player?.available ? player.statistics : null);
   renderHistory(player?.history);
   if (!player?.available) {

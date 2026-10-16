@@ -319,8 +319,13 @@ public final class GameplayTracker {
     }
 
     private static GameplayHistory.Event event(long id, long timestamp, String category, String label, String details) {
-        return new GameplayHistory.Event(id, timestamp, category, truncate(label, 256),
-                truncate(details, GameplayHistory.MAX_DETAILS_LENGTH));
+        return new GameplayHistory.Event(id, timestamp, category, truncate(stripFormatting(label), 256),
+                truncate(stripFormatting(details), GameplayHistory.MAX_DETAILS_LENGTH));
+    }
+
+    /** Servers and data packs can put legacy § colour codes straight into names and titles. */
+    static String stripFormatting(String value) {
+        return value.replaceAll("§.?", "");
     }
 
     private static String truncate(String value, int length) {

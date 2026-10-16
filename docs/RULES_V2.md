@@ -1,6 +1,6 @@
 # Rules v2 design
 
-Status: **approved design. Phase 1 is implemented on branch `rules-v2`; phases 2–6 have not started.** All open questions were answered on 2026-10-16 (see [Resolved questions](#resolved-questions)). It replaces the v1 rules in `rules.js`, `layout.js` (`normalizeRule`) and the rules dialog in `features.js`. What phase 1 built, and the decisions made while building it, are in [Implementation status](#implementation-status).
+Status: **approved design. Phase 1 is implemented on branch `rules-v2`, and the first part of phase 3 (the editor); the rest has not started.** All open questions were answered on 2026-10-16 (see [Resolved questions](#resolved-questions)). It replaces the v1 rules in `rules.js`, `layout.js` (`normalizeRule`) and the rules dialog in `features.js`. What phase 1 built, and the decisions made while building it, are in [Implementation status](#implementation-status).
 
 The model is Factorio's train wait conditions: a flat list of conditions joined by AND/OR. When it matches, a list of actions changes the dashboard: hide, show, move, resize, swap, focus, configure or notify. Every change animates, and nothing on screen jumps or flickers.
 
@@ -344,6 +344,12 @@ Answered by the maintainer on 2026-10-16.
 - A stored file that fails validation loads as nothing, as before. It is now first copied to `layout.rejected.json`, so a later save can't lose it.
 - The map URL setting is now also limited to 200 characters, and ids must be JSON strings. Both match `layout.js`.
 
-**Interim UI.** The rules dialog lists rules read-only, with a live dot on each condition and their actions, until the phase 3 side panel replaces it. Notify actions are evaluated, but nothing shows them yet: the toast UI comes in phase 3.
+**Editor (first part of phase 3, 2026-10-16).** The read-only list is replaced by an editor that covers nearly the whole screen (the maintainer asked for that size instead of a side panel). It lives in `features.js` ("Rules editor").
+
+- Left: rules in priority order (live active dot, ↑/↓ to reorder, + New rule), Places, Toggles and the activity log.
+- Right: the chosen rule's name, enabled, duplicate and delete; the When list (AND/OR per row, OR rows start a new boxed block, `not`, type picker grouped by family, parameters per kind, the `for`/`within` modifier, a live green/red edge and value on each row); Then and Else action lists; delay and linger.
+- Every edit is validated with `normalizeLayout` and saved at once. An edit that doesn't validate yet stays in the editor and the error is shown in the header until it is fixed. Value edits don't redraw the editor, so focus and clicks are never lost.
+- Removing a place, toggle or rule also removes the conditions that refer to it.
+- Not built yet: Force on/off preview, the inspector, registry pickers with icons (ids are typed; "+ current" exists for world, dimension, biome and position), placing a panel by dragging a ghost (Place takes numbers), toolbar buttons for toggles, folders, the animation override and the Notify toast.
 
 **Not verified.** Nothing has been run in a Minecraft client. The tests use synthetic snapshots.

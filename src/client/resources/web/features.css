@@ -138,20 +138,71 @@
 .float-grid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 3px; padding: 10px; }
 .inventory-grid .slot { cursor: default; }
 
-/* Rules (read-only list until the rules side panel) */
-.dialog.wide { width: min(860px, 100%); }
-.rule { margin-top: 10px; padding: 10px; border: 1px solid #2c363c; border-radius: 8px; font-size: 12px; }
-.rule.active { border-color: #3a4c43; background: #73e0b108; }
-.rule-head { display: flex; align-items: center; gap: 8px; }
-.rule-name { flex: 1; min-width: 0; color: #edf2f5; font-size: 12px; }
-.rule-groups, .rule-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
-.rule-label { width: 100%; color: var(--accent); font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .04em; }
-.rule-and { width: 100%; color: #f0b85a; font-size: 11px; font-weight: 700; }
-.rule-or { width: 100%; color: var(--muted); font-size: 11px; font-weight: 700; }
-.rule-condition { position: relative; width: 100%; margin: 0; padding-left: 14px; }
-.rule-condition.ok::before, .rule-condition.bad::before { content: ""; position: absolute; left: 2px; top: .45em; width: 7px; height: 7px; border-radius: 50%; }
-.rule-condition.ok::before { background: var(--accent); }
-.rule-condition.bad::before { background: var(--danger); }
+/* Rules editor: nearly the whole screen, rule list on the left, the chosen rule on the right; each side scrolls */
+.dialog.rules-editor { width: calc(100vw - 32px); height: calc(100vh - 32px); max-height: none; }
+.rules-editor .dialog-head { gap: 12px; }
+.rules-editor .dialog-head h2 { flex: none; }
+.rules-error { flex: 1; min-width: 0; color: var(--danger); font-size: 12px; }
+.rules-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 260px minmax(0, 1fr); }
+.rules-sidebar, .rules-main { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.rules-sidebar { padding: 12px; border-right: 1px solid var(--line); font-size: 12px; }
+.rules-main { padding: 14px 18px 24px; font-size: 12px; }
+.rules-nav-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.rules-nav-item { display: flex; align-items: center; gap: 4px; margin-top: 2px; padding: 2px 4px; border-radius: 6px; }
+.rules-nav-item.selected { background: #73e0b114; }
+.rules-nav-item.section { margin-top: 12px; }
+.rules-nav-item.section + .rules-nav-item.section { margin-top: 2px; }
+.rules-nav-name { flex: 1; min-width: 0; padding: 5px 4px; border: 0; background: none; color: #edf2f5; text-align: left; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+.rules-nav-name.disabled { color: var(--muted); text-decoration: line-through; }
+.rules-nav-item.selected .rules-nav-name { color: var(--accent); }
+.rule-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #3a464d; }
+.rule-dot.active { background: var(--accent); box-shadow: 0 0 8px #73e0b180; }
+.rule-dot.off { background: transparent; border: 1px solid #3a464d; }
+.rule-label { color: var(--accent); font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .04em; }
+.rule-label.log { display: block; margin-top: 18px; }
+.rules-log-entry { margin: 4px 0 0; color: var(--muted); font-variant-numeric: tabular-nums; }
+.rule-muted { color: var(--muted); font-size: 12px; }
+.button.small { padding: 4px 9px; }
+.button.tiny { padding: 1px 6px; }
+.button.danger { color: var(--danger); }
+.button:disabled { opacity: .4; cursor: default; }
+.rule-detail-head { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
+.rule-section { margin-top: 18px; }
+.rule-section-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-bottom: 8px; }
+.rule-section-head h3 { margin: 0; color: var(--accent); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+.rule-block { padding: 4px 8px; border: 1px solid #2c363c; border-radius: 8px; }
+.rule-or-divider { margin: 6px 0 6px 10px; color: #f0b85a; font-size: 11px; font-weight: 700; }
+.rule-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 6px 4px; border-left: 3px solid transparent; }
+.rule-block .rule-row + .rule-row { border-top: 1px solid #1a2329; }
+.rule-row.ok { border-left-color: var(--accent); }
+.rule-row.bad { border-left-color: var(--danger); }
+.rule-section > .rule-row { border: 1px solid #1f292f; border-radius: 8px; margin-top: 6px; padding: 6px 8px; }
+.rule-params, .rule-inline { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.rule-params { flex: 1 1 260px; min-width: 0; }
+.rule-field { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); }
+.rule-detail-head .rule-field { flex-direction: column; align-items: stretch; gap: 3px; }
+.rule-field.grow { flex: 1 1 200px; min-width: 0; }
+.rule-field.grow .rule-input { width: 100%; }
+.rule-field-label { font-size: 11px; }
+.rule-input { min-width: 0; padding: 5px 7px; border: 1px solid #2c363c; border-radius: 6px; background: #0c1419; color: #edf2f5; font-size: 12px; }
+.rule-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+.rule-input.number { width: 76px; }
+.rule-join { width: 64px; font-weight: 700; }
+.rule-join.first { display: inline-block; padding-left: 8px; color: var(--muted); font-size: 11px; }
+.rule-check { display: inline-flex; align-items: center; gap: 4px; color: #c5cfce; cursor: pointer; }
+.rule-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.rule-chips .chip { padding: 3px 8px; }
+.rule-state { min-width: 48px; color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+.rule-row.ok .rule-state { color: var(--accent); }
+.rule-row.bad .rule-state { color: var(--danger); }
+.rule-row-tools { display: inline-flex; gap: 2px; margin-left: auto; }
+.rule-add { display: flex; gap: 6px; margin-top: 8px; }
+@media (max-width: 720px) {
+  .dialog.rules-editor { width: 100%; height: calc(100vh - 16px); }
+  .rules-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 35%) minmax(0, 1fr); }
+  .rules-sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
+  .rules-main { padding: 12px; }
+}
 
 /* Build progress */
 .build-name { margin: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
