@@ -643,8 +643,11 @@ let editingProfile = "default";
 let saveTimer;
 let drag;
 const ruleEngine = createRuleEngine();
-let view = effectiveView(layout, []);
+let ruleEvaluation = null;
+let view = effectiveView(layout, null);
 let viewKey;
+// Set when the stored layout could not be read or converted: it stays untouched on disk, so nothing is saved.
+let layoutLocked = false;
 const tileElements = Object.fromEntries(TILE_IDS.map(id => [id, $(`#tile-${id}`)]));
 const tileToggles = Object.fromEntries(TILE_IDS.map(id => {
   const chip = create("button", "chip", TILE_LABELS[id]);
@@ -687,10 +690,24 @@ function changeSettings(tileId, changes) {
   changeProfile(profile => withSettings(profile, tileId, changes));
 }
 
+/** The local wall clock, for "real-world time" rule conditions. */
+function wallClock(now) {
+  const date = new Date(now);
+  return { minutes: date.getHours() * 60 + date.getMinutes(), weekday: date.getDay() };
+}
+
+/** Evaluates the rules now and works out what the dashboard shows. */
+function evaluateView(player, now) {
+  ruleEvaluation = ruleEngine.evaluate(layout, { player, width: window.innerWidth, clock: wallClock(now) }, now);
+  return effectiveView(layout, ruleEvaluation);
+}
+
+const viewKeyOf = value => JSON.stringify([value.profileId, [...value.visible].sort(), value.settings]);
+
 /** Re-evaluates the rules; re-applies the layout only when what should be shown has changed. */
 function updateView(player = currentPlayerState, now = Date.now()) {
-  view = effectiveView(layout, ruleEngine.active(layout, player, now));
-  const key = JSON.stringify([view.profileId, [...view.visible].sort(), view.settings]);
+  view = evaluateView(player, now);
+  const key = viewKeyOf(view);
   if (key === viewKey) return;
   viewKey = key;
   applyLayout();
@@ -800,8 +817,8 @@ function changeLayout(next) {
 /** Applies a new or reloaded layout: profiles or rules may have changed, so re-evaluate them. */
 function refreshLayout() {
   if (!layout.profiles.some(profile => profile.id === editingProfile)) editingProfile = "default";
-  view = effectiveView(layout, ruleEngine.active(layout, currentPlayerState, Date.now()));
-  viewKey = JSON.stringify([view.profileId, [...view.visible].sort(), view.settings]);
+  view = evaluateView(currentPlayerState, Date.now());
+  viewKey = viewKeyOf(view);
   applyLayout();
   renderProfileTools();
 }
@@ -813,6 +830,7 @@ function setLayoutStatus(text, error = false) {
 
 function scheduleSave() {
   window.clearTimeout(saveTimer);
+  if (layoutLocked) return;
   setLayoutStatus("Saving…");
   saveTimer = window.setTimeout(async () => {
     try {
@@ -834,8 +852,19 @@ async function loadLayout() {
     const { layout: stored } = await response.json();
     layoutLoaded = true;
     if (stored && !layoutChanged) {
-      layout = normalizeLayout(stored);
+      let normalized;
+      try {
+        // A version 1 layout is converted here; saving it back stores version 2 (the mod keeps a v1 backup).
+        normalized = normalizeLayout(stored);
+      } catch (error) {
+        layoutLocked = true;
+        setLayoutStatus(`The saved layout couldn't be loaded (${error.message}). It is kept unchanged on disk, `
+          + "and changes here won't be saved.", true);
+        return;
+      }
+      layout = normalized;
       refreshLayout();
+      if (stored.version !== layout.version) scheduleSave();
     }
   } catch {
     // Keep the default layout; the next connection retries.
@@ -849,7 +878,7 @@ function setEditing(value) {
   grid.className = editing ? "grid editing" : "grid";
   setHidden(editToolbar, !editing);
   editToggle.setAttribute("aria-pressed", String(editing));
-  if (!editing) setLayoutStatus("");
+  if (!editing && !layoutLocked) setLayoutStatus("");
   refreshLayout();
 }
 
@@ -920,11 +949,16 @@ layoutFile.addEventListener("change", async () => {
   const file = layoutFile.files?.[0];
   layoutFile.value = "";
   if (!file) return;
+  let imported;
   try {
-    changeLayout(normalizeLayout(JSON.parse(await file.text())));
-  } catch {
-    setLayoutStatus("That file is not a MinePanel layout", true);
+    imported = normalizeLayout(JSON.parse(await file.text()));
+  } catch (error) {
+    setLayoutStatus(`That file is not a MinePanel layout (${error.message})`, true);
+    return;
   }
+  // Importing replaces a stored layout that couldn't be loaded; the mod keeps a copy of that file.
+  layoutLocked = false;
+  changeLayout(imported);
 });
 
 function gridMetrics() {

@@ -4,11 +4,24 @@ MinePanel is a client-only Fabric mod, a loopback-only local service, and a stat
 
 The client adapter owns lifecycle and reads Minecraft state on the client thread. It copies state into immutable snapshots before publishing to bounded background service workers. The service serves only bundled resources and narrowly scoped authenticated read-only data. Optional integrations are separate adapters; absence or failure is reported as unavailable and does not prevent startup.
 
-Gameplay history is session-only and bounded to 100 immutable events. Open/last-viewed containers and pins remain unimplemented. Chat is not retained. Configurable layouts/preferences remain outstanding.
+Gameplay history is session-only and bounded to 100 immutable events. Open/last-viewed containers and pins remain unimplemented. Chat is not retained. Layouts, preferences and rules are configurable (see [Layout and rules](#layout-and-rules)).
 
 Client tick sampling is capped at four samples per second, suppresses unchanged values, and writes immutable versioned position/dimension/health snapshots into an atomic store. The browser WebSocket receives a full initial snapshot followed by changed-field deltas and reconnects after disconnect. HTTP state access uses a bearer token; the browser session endpoint sets the same random per-server token as an HttpOnly cookie for WebSocket authentication, never in a URL. Both listeners bind to IPv4 loopback; Host and Origin are checked, WebSocket handshakes and frames are bounded, and only read-only paths/frames are supported. No network, disk, or expensive calculation belongs on the Minecraft tick/render thread.
 
 Current player fields include position, dimension ID, health, maximum health, absorption, active-session duration, inventory/equipment, vanilla statistics and session history. The target client has not been compiled or run in Minecraft in this environment.
+
+## Layout and rules
+
+The dashboard layout (tiles, settings, profiles, pinned windows, update rate and rules) is stored by the mod as `config/minepanel/layout.json`. It is read and written through the authenticated `/api/layout` endpoint and validated on both sides: `normalizeLayout` in `layout.js`, and `LayoutStore` with `LayoutRules` in Java. Both must accept and reject the same layouts, and the shared cases in `src/test/fixtures/layouts-v2.json` are checked by both test suites. Rules are evaluated only in the browser (`rules.js`), against the snapshots it already receives. They never cause gameplay actions.
+
+Layout version 2 (rules v2, see [RULES_V2.md](RULES_V2.md)) is current.
+
+- **Version 1** is still read, and the browser converts it. On the first version 2 save over a version 1 file, the mod copies the old file to `layout.v1-backup.json` and never overwrites that copy.
+- **Saving** accepts only version 2.
+- **A stored file that fails validation** loads as nothing. It is first copied to `layout.rejected.json`, so a later save can't lose it.
+- **A version 1 file the browser can't convert** stays untouched: the dashboard shows the error and doesn't save until a layout is imported.
+
+Rules v2 phase 1 added no snapshot fields. Its conditions use only data the protocol already carries. New sensors and registry lists (phase 4) will be new snapshot fields.
 
 ## Inventory and equipment protocol
 

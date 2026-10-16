@@ -1,6 +1,6 @@
 # Rules v2 design
 
-Status: **approved design, nothing implemented yet.** All open questions were answered on 2026-10-16 (see [Resolved questions](#resolved-questions)). It replaces the rules described in `rules.js`, `layout.js` (`normalizeRule`) and the rules dialog in `features.js`.
+Status: **approved design. Phase 1 is implemented on branch `rules-v2`; phases 2–6 have not started.** All open questions were answered on 2026-10-16 (see [Resolved questions](#resolved-questions)). It replaces the v1 rules in `rules.js`, `layout.js` (`normalizeRule`) and the rules dialog in `features.js`. What phase 1 built, and the decisions made while building it, are in [Implementation status](#implementation-status).
 
 The model is Factorio's train wait conditions: a flat list of conditions joined by AND/OR. When it matches, a list of actions changes the dashboard: hide, show, move, resize, swap, focus, configure or notify. Every change animates, and nothing on screen jumps or flickers.
 
@@ -233,9 +233,9 @@ This runs on every evaluation (each snapshot plus a 1 s timer for timed conditio
 - "Rules only" panels stay a panel mode. While hidden, their reserved space is filled by neighbours (auto-grow), and they get it back when a rule shows them.
 - Before converting, the original v1 JSON is kept beside the layout as a backup file.
 
-## Delivery phases (proposed, none started)
+## Delivery phases
 
-1. Schema v2, evaluator (blocks, modifiers, delay, linger), migration and unit tests, using only the existing conditions.
+1. **Done (2026-10-16).** Schema v2, evaluator (blocks, modifiers, delay, linger), migration and unit tests, using only the existing conditions.
 2. Layout solver (auto-grow, shrink, swap, focus, dwell) and FLIP animation, with unit tests for the solver.
 3. Side-panel editor, Factorio-style When UI, live state, preview, inspector, log, places and toggles.
 4. Mod-side sensors and registry lists, family by family (player state, screens, threats, world).
@@ -257,7 +257,93 @@ Answered by the maintainer on 2026-10-16.
 
 ## Implementation notes
 
-- **Two validators.** `src/main/java/dev/craftyplayz/minepanel/service/LayoutStore.java` validates and re-serializes the layout on the mod side. It has its own limits (`MAX_RULES`, `MAX_GROUPS`, …) and currently rejects any `version` other than 1, and an invalid stored file loads as `null`. It has to accept and validate v2 with the same rules as `normalizeLayout` in `layout.js`, and it must keep reading v1 so a stored v1 layout can be migrated instead of lost.
+- **Two validators.** `LayoutStore.java` and `LayoutRules.java` validate and re-serialize the layout on the mod side, with the same rules and limits as `normalizeLayout` in `layout.js`. They read versions 1 and 2 and save only version 2. Any change to the format must be made in both places and added to the shared cases in `src/test/fixtures/layouts-v2.json`, which both test suites check.
 - **Pure logic stays DOM-free.** Evaluation and the layout solver belong in `rules.js` and `layout.js`, which have no DOM access, so they can be unit-tested in `src/test/js/dashboard.test.js` (run with `node --test src/test/js/dashboard.test.js`). The editor UI goes in `features.js`, and its wiring in `app.js`.
 - **Tests:** `./gradlew releaseBuild` runs `serviceTest` (Java, `main()`-based), `frontendSyntax` and `frontendTest`. See `docs/TESTING.md`. The full Gradle build may fail to resolve Loom in some sandboxes. Run the Node and `javac` checks directly in that case.
 - **Protocol:** new sensors and registry lists are new snapshot fields. Follow the versioning, full-snapshot-plus-delta and bounds rules in `docs/ARCHITECTURE.md`. Everything stays read-only and loopback-only.
+
+## Implementation status
+
+### Phase 1 (2026-10-16)
+
+**Where it lives**
+
+| Piece | Code |
+|---|---|
+| Schema, validation, migration | `layout.js`: `normalizeLayout`, `normalizeRule`, `normalizeCondition`, `normalizeAction`, `CONDITION_TYPES`, `ruleBlocks`, `migrateLayoutV1` |
+| Evaluator | `rules.js`: `evaluateCondition`, `createRuleEngine` (`evaluate`, `log`), `effectiveView` |
+| Wiring | `app.js`: `evaluateView` and `updateView` (each snapshot and the 1 s timer) |
+| Mod-side validator | `LayoutRules.java` (v2 rules) and `LayoutStore.java` (versions, files) |
+| Tests | `dashboard.test.js` ("rules v2: …" tests) and `LayoutStoreTest.java`. Both also check the shared cases in `src/test/fixtures/layouts-v2.json`, so the two validators accept and reject the same layouts |
+
+**Stored format as built.** It follows [Stored format](#stored-format-layout-version-2). These details were settled during implementation:
+
+- Limits are the proposed ones: 128 rules, 32 conditions, 16 Then and 16 Else actions, 32 folders, 64 places, 16 toggles.
+- Timing: `delayMs` 0–600 000 and `lingerMs` 500–600 000. `animation.durationMs` is 0–5000. `easing` is one of `linear`, `ease`, `ease-in`, `ease-out`, `ease-in-out`.
+- `compare` is stored as `<`, `<=`, `=`, `>=`, `>`, `!=` or `between`. `between` includes both ends. Values are limited to ±10⁹.
+- Unknown keys are dropped. A rule's `join` on its first condition is dropped. Missing `then`, `else`, `timing`, `animation` and `folder` get their defaults.
+- Ids match `[a-z0-9-]{1,32}`. Names are 1–64 characters, and toggle names 1–32.
+
+**Condition types.** `values` lists hold up to 32 entries. Everything else is a fixed parameter.
+
+| Type | Parameters | Notes |
+|---|---|---|
+| `world`, `dimension`, `biome` | `values` | Same matching as v1: names or kind, dimension aliases, `minecraft:` is optional |
+| `time` | `values` (dawn, day, dusk, night) or `ticks: {from, to}` | Tick ranges wrap past midnight when `from > to` |
+| `weather`, `gameMode`, `movement` | `values` from a fixed list | |
+| `day`, `yLevel`, `health`, `food`, `saturation`, `absorption`, `xpLevel`, `freeSlots`, `width` (px), `sessionTime` (minutes) | compare | |
+| `nearPlace` | `place`, or `x y z` (optionally `world`, `dimension`); then `radius` (optionally `flat`) or a box `x2 y2 z2` | A place only counts in its own world and dimension. Box corners are block coordinates and are inclusive |
+| `effect` | `values`; optional `level` and `remaining` (seconds) compares | Level is 1-based. Infinite effects have infinite time remaining |
+| `speed` | `axis` (total, horizontal, vertical); compare | In blocks per second. Vertical is signed (negative while falling) |
+| `still` | — | Total speed below 0.1 b/s |
+| `holding` | `item`, `hand` (either, main, off) | |
+| `hasItem` | `item`, compare, optional `enderChest` | Counts the 36 slots, armor and offhand, plus the last seen ender chest if `enderChest` is set |
+| `durability` | `target` (held, armor, tool), compare (percent) | True if any matching item passes. `tool` means any damageable item in the inventory or offhand |
+| `elytra`, `inGame` | — | |
+| `xpGained`, `pickedUp` (`item`?), `statRose` (`stat`), `minedBlock` (`block`?), `placedBlock` (`block`?), `killedMob` (`entity`?), `tookDamage` (hearts) | compare, `window` 1–3600 s | See "Amounts" below |
+| `advancement` (`advancement`?), `died`, `changedDimension`, `joinedWorld`, `inCombat` | `within` (required, 1–3600 s) | Events take `within`, not `for`. `inCombat` is damage, a kill or a death, as v1 `combat` |
+| `villagersNearby` | `radius` 1–256, compare | Known villagers in the current dimension |
+| `portalLinking` | `minutes` 1–120 | See "Portal linking" below |
+| `toggle` | `toggle` | |
+| `ruleActive` | `rule` | Loops are rejected when the layout is validated |
+| `realTime` | `from`, `to` (`HH:MM`), optional `days` (0 = Sunday) | The end time is excluded. Spans wrap past midnight |
+
+**Evaluation**
+
+- **Unknown values.** Outside a world, every condition except the meta ones (`toggle`, `ruleActive`, `width`, `realTime`, `inGame`) is *unknown*. Missing data is unknown too, for example a statistic not synced yet or a specific advancement while the advancement list is unavailable. An unknown condition never counts as true, even with `not`, so "not in the Nether" doesn't fire on the title screen. This matches v1, where no rule matched outside a world.
+- **Modifiers.** `for` and `within` are applied at each evaluation (every snapshot plus a 1 s timer), so they are accurate to about a second.
+- **Delay and linger.** Delay counts from the first evaluation at which the rule matched. Linger counts from the last evaluation at which it was ready.
+- **Engine results.**
+  - The engine returns per-rule state (enabled, matched, active, forced, block and condition results with live values), the activations and deactivations of this evaluation, and the notifications to show.
+  - `log()` keeps the last 100 activations and deactivations.
+  - A Force preview is a parameter of `evaluate`. Forcing a disabled rule on applies it.
+- **Amounts.**
+  - `xpGained` uses the mod's exact gains for its windows (10, 30, 60, 300, 600 and 3600 s). Any other window is sampled in the browser.
+  - `pickedUp` reads the recent pickups list, which holds at most 32 entries.
+  - `minedBlock` and `placedBlock` for a specific block read the `minecraft:mined/<block>` and `minecraft:used/<block>` statistics.
+  - `minedBlock` and `placedBlock` for any block, and `killedMob` (the entity id is the start of the event details), read history events. Coalesced events count only what they grew by, at their own timestamps.
+  - `tookDamage` adds up drops in health plus absorption.
+  - Sampled amounts only cover the time since the dashboard opened. Statistic-based amounts lag by up to about 10 s, because statistics are requested from the server at most every 10 s. Only counters that an enabled rule references are sampled.
+- **Portal linking.** It is active from a crossing while you are in the target dimension. It ends when the target portal is lit (`portal.lit`), when `minutes` pass, or when you go back through. Going back through means the next crossing reverses the direction and lands within 16 blocks of where the previous one started. Such a return trip doesn't start linking.
+- **Claims.** `effectiveView` returns the profile, visibility, settings, `rects` (Place and Swap), `focus` and every claim with `won` set.
+  - Until phase 2 only the profile, visibility and settings are applied. Rectangles and focus are computed but not drawn.
+  - Show still only affects panels that are on or rules-only in the base profile, as in v1. Whether Show can bring in a panel that is off belongs with the phase 2 solver.
+
+**Migration (as built).** It follows [Migration](#migration-layout-v1--v2), plus these decisions by the maintainer:
+
+- **Rule order is kept.** v1 applied show/hide and settings from the last active rule, but v2's first rule wins. So two v1 rules that claimed the same panel or setting now resolve the other way. Profile conflicts are unchanged, because the first rule already won in v1. Such conflicts are expected to be rare.
+- **Helper rules.** They are created when the expanded When list would need more than 32 rows. They are named "<rule> (part N)", have ids ending in `-pN`, sit just above their rule, have no actions and linger 500 ms (the minimum). A converted rule can therefore turn off up to 0.5 s later than in v1.
+- **More than 16 actions** continue in "<rule> (2)", which has the same When list and is placed right after the rule.
+- **Values that never matched** in v1 are dropped: unknown time periods, game modes and movement modes. A `min` above `max` becomes `< 0`, which never matches, as in v1.
+- **Too many rules.** If conversion would produce more than 128 rules, it fails with a message. The dashboard then shows the error, uses the default layout and doesn't save, so the stored file stays as it was. Importing a layout replaces it.
+- **Where it runs.** The browser converts the layout when it loads and saves the result straight away. On that first version 2 save, the mod copies the version 1 file to `layout.v1-backup.json`, and never overwrites that backup.
+
+**Mod side (`LayoutStore.java`)**
+
+- Version 1 and 2 are read. Only version 2 is saved, so a stale dashboard tab can't write version 1 back.
+- A stored file that fails validation loads as nothing, as before. It is now first copied to `layout.rejected.json`, so a later save can't lose it.
+- The map URL setting is now also limited to 200 characters, and ids must be JSON strings. Both match `layout.js`.
+
+**Interim UI.** The rules dialog lists rules read-only, with a live dot on each condition and their actions, until the phase 3 side panel replaces it. Notify actions are evaluated, but nothing shows them yet: the toast UI comes in phase 3.
+
+**Not verified.** Nothing has been run in a Minecraft client. The tests use synthetic snapshots.

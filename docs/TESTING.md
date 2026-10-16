@@ -171,3 +171,37 @@ Nothing below has been run in game. With Litematica 0.27.14 and MaLiLib 0.28.12 
 - [ ] Material list: Left/Have/Still need with items in the hotbar, offhand, a shulker box and a bundle; waterlogged blocks need a water bucket.
 - [ ] Multiplayer server without MinePanel or Litematica server-side.
 - [ ] Frame time with a large placement (for example 500 × 500 × 100) stays smooth while scanning.
+
+## Rules v2 phase 1 (2026-10-16)
+
+Run on Windows 11 on branch `rules-v2`, with Temurin 25.0.4.1 and Node 24.19.0:
+
+- `./gradlew releaseBuild` **passed**. Loom and Minecraft 26.1.2 resolved from the local Gradle cache. The build ran `serviceTest` (now including `LayoutStoreTest`), `frontendSyntax`, `frontendTest` (82 tests), `litematicaIsolation` and the release JAR validation.
+- These were also run directly:
+  - `node --check` on each dashboard script and on the test file.
+  - `node --test src/test/js/dashboard.test.js`.
+  - `javac --release 25` over `src/main/java` and `src/test/java` with Gson on the classpath, followed by `LocalDashboardServerTest` (which runs `LayoutStoreTest`).
+
+**What the tests cover**
+
+- `src/test/fixtures/layouts-v2.json` holds 15 valid and 100 invalid version 2 layouts. The JS suite and `LayoutStoreTest` both check it, so `layout.js` and `LayoutStore.java` accept and reject the same layouts. When the format changes, add cases there.
+- **Evaluator:**
+  - The AND/OR truth table.
+  - `for`, `within` and `not`.
+  - Delay and linger at their boundaries.
+  - Unknown values outside a world.
+  - First-claim-wins priority with overridden claims, Else, folders, Force previews, and Notify edges and cooldowns.
+  - Each condition type against synthetic snapshots.
+  - Amounts within windows, including coalesced history events.
+  - Portal linking, including return trips.
+- **Migration:**
+  - A seeded property test: random v1 rules give the same match as their converted rules (and helper rules) on random inputs.
+  - The documented mappings, splitting rules with more than 16 actions, and the 128-rule limit.
+  - An app test: a stored v1 layout loads, its rule shows a rules-only tile, and it is saved back as version 2.
+  - A layout that can't be converted is never saved over.
+- **Java:** v1 is read, a v1 save is rejected, `layout.v1-backup.json` is written once, and an invalid stored file is copied to `layout.rejected.json`.
+- **Mutation checks:**
+  - JS: swapping AND/OR precedence, letting unknown values pass `not`, making the last claim win, skipping helper rules and removing linger each made the JS suite fail.
+  - Java: changing the minimum linger, or allowing a place together with a position, made `LayoutStoreTest` fail.
+
+**Not run.** Nothing was run in Minecraft. The checks use synthetic snapshots, not a live client.

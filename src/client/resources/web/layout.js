@@ -6,7 +6,9 @@
 // The top-level tiles and settings are the "Default" profile. Optional profiles are other named layouts; rules
 // (evaluated in rules.js) switch profile, show or hide tiles and override settings based on what happens in game.
 // A "rules-only" tile keeps its place in the grid but stays hidden until a rule shows it, so nothing moves.
+// The rules format is described in docs/RULES_V2.md; LayoutStore.java validates the same format on the mod side.
 
+const LAYOUT_VERSION = 2;
 const LAYOUT_COLUMNS = 12;
 const LAYOUT_MAX_Y = 1000;
 const LAYOUT_MAX_H = 60;
@@ -25,22 +27,12 @@ const PERFORMANCE_WINDOW_CHOICES = [10, 30, 60, 600];
 const MAX_XP_GOALS = 8;
 const MAX_XP_GOAL_LEVEL = 10000;
 const MAX_PROFILES = 16;
-const MAX_RULES = 64;
-const MAX_RULE_GROUPS = 8;
-const MAX_GROUP_CONDITIONS = 8;
-const MAX_CONDITION_VALUES = 32;
 const MAX_PINNED = 16;
 const PIN_SOURCES = ["inventory", "enderchest", "enderchest-item"];
 // How often the game samples the player, in ms; one client tick is 50 ms, so 50 is the fastest. Global, not per
 // profile: the game samples at one rate whichever profile is shown.
 const UPDATE_INTERVAL_CHOICES = [50, 100, 250, 500, 1000];
 const DEFAULT_UPDATE_INTERVAL = 250;
-/** Condition types and what they take: a list of values, a min/max range, a duration, or nothing. */
-const CONDITION_TYPES = {
-  world: "values", dimension: "values", biome: "values", time: "values", gameMode: "values",
-  health: "range", food: "range", saturation: "range", effect: "values", movement: "values",
-  elytra: "none", advancement: "seconds", combat: "seconds"
-};
 const custom = name => `minecraft:custom/minecraft:${name}`;
 
 function defaultSettings() {
@@ -128,7 +120,7 @@ function mergeSettings(settings, overrides) {
 }
 
 function defaultLayout() {
-  return { version: 1, settings: defaultSettings(), tiles: [
+  return { version: LAYOUT_VERSION, settings: defaultSettings(), tiles: [
     { id: "player", enabled: true, x: 0, y: 0, w: 4, h: 4 },
     { id: "inventory", enabled: true, x: 4, y: 0, w: 8, h: 8 },
     { id: "statistics", enabled: true, x: 0, y: 4, w: 4, h: 9 },
@@ -141,7 +133,8 @@ function defaultLayout() {
     { id: "villagers", enabled: true, x: 0, y: 25, w: 8, h: 8 },
     { id: "map", enabled: false, x: 0, y: 33, w: 6, h: 6 },
     { id: "build", enabled: false, x: 6, y: 33, w: 6, h: 4 }
-  ], profiles: [], rules: [], pinned: [], updates: { intervalMillis: DEFAULT_UPDATE_INTERVAL } };
+  ], profiles: [], pinned: [], updates: { intervalMillis: DEFAULT_UPDATE_INTERVAL },
+  animation: { ...DEFAULT_ANIMATION }, folders: [], places: [], toggles: [], rules: [] };
 }
 
 const wholeNumber = value => Number.isSafeInteger(value);
@@ -171,8 +164,21 @@ function normalizeTiles(value) {
   return settle(tiles, null);
 }
 
-function normalizeCondition(value) {
-  if (!isObject(value) || !Object.hasOwn(CONDITION_TYPES, value.type)) throw new Error("Invalid condition");
+// ------------------------------------------------------------------------------------------- Layout version 1
+
+// Version 1 rules: every group needs one matching condition (AND of OR-groups). Still validated strictly so a stored
+// or imported v1 layout can be migrated (see migrateLayoutV1); nothing writes this format any more.
+const V1_CONDITION_TYPES = {
+  world: "values", dimension: "values", biome: "values", time: "values", gameMode: "values",
+  health: "range", food: "range", saturation: "range", effect: "values", movement: "values",
+  elytra: "none", advancement: "seconds", combat: "seconds"
+};
+const V1_MAX_RULES = 64;
+const V1_MAX_GROUPS = 8;
+const V1_MAX_GROUP_CONDITIONS = 8;
+
+function normalizeConditionV1(value) {
+  if (!isObject(value) || !Object.hasOwn(V1_CONDITION_TYPES, value.type)) throw new Error("Invalid condition");
   const condition = { type: value.type };
   if (value.not !== undefined && typeof value.not !== "boolean") throw new Error("Invalid condition");
   if (value.not) condition.not = true;
@@ -197,17 +203,17 @@ function normalizeCondition(value) {
   return condition;
 }
 
-/** A rule matches when every group has at least one matching condition: (1) and (2 or 3). */
-function normalizeRule(value, profileIds) {
+/** A v1 rule matches when every group has at least one matching condition: (1) and (2 or 3). */
+function normalizeRuleV1(value, profileIds) {
   if (!isObject(value) || !validId(value.id) || !validName(value.name) || typeof value.enabled !== "boolean"
-    || !Array.isArray(value.groups) || value.groups.length > MAX_RULE_GROUPS) {
+    || !Array.isArray(value.groups) || value.groups.length > V1_MAX_GROUPS) {
     throw new Error("Invalid rule");
   }
   const groups = value.groups.map(group => {
-    if (!Array.isArray(group) || group.length === 0 || group.length > MAX_GROUP_CONDITIONS) {
+    if (!Array.isArray(group) || group.length === 0 || group.length > V1_MAX_GROUP_CONDITIONS) {
       throw new Error("Invalid rule group");
     }
-    return group.map(normalizeCondition);
+    return group.map(normalizeConditionV1);
   });
   const rule = { id: value.id, name: value.name, enabled: value.enabled, groups };
   if (value.profile !== undefined && value.profile !== null) {
@@ -245,34 +251,608 @@ function normalizeUpdates(value) {
   return { intervalMillis: interval };
 }
 
-/** Validates untrusted layout JSON (stored config or an imported file) and fills in any missing tiles. */
-function normalizeLayout(value) {
-  if (value === null || typeof value !== "object" || value.version !== 1) throw new Error("Invalid layout");
-  const tiles = normalizeTiles(value.tiles);
-  const profileIds = new Set(["default"]);
-  if (value.profiles !== undefined && (!Array.isArray(value.profiles) || value.profiles.length > MAX_PROFILES)) {
-    throw new Error("Invalid profiles");
-  }
-  const profiles = (value.profiles ?? []).map(profile => {
-    if (!isObject(profile) || !validId(profile.id) || profileIds.has(profile.id) || !validName(profile.name)) {
+function normalizeProfiles(value) {
+  if (value !== undefined && (!Array.isArray(value) || value.length > MAX_PROFILES)) throw new Error("Invalid profiles");
+  const ids = new Set(["default"]);
+  const profiles = (value ?? []).map(profile => {
+    if (!isObject(profile) || !validId(profile.id) || ids.has(profile.id) || !validName(profile.name)) {
       throw new Error("Invalid profile");
     }
-    profileIds.add(profile.id);
+    ids.add(profile.id);
     return { id: profile.id, name: profile.name, tiles: normalizeTiles(profile.tiles),
       settings: normalizeSettings(profile.settings) };
   });
-  if (value.rules !== undefined && (!Array.isArray(value.rules) || value.rules.length > MAX_RULES)) {
+  return { profiles, ids };
+}
+
+/** Validates a version 1 layout; only used to migrate it. */
+function normalizeLayoutV1(value) {
+  if (!isObject(value) || value.version !== 1) throw new Error("Invalid layout");
+  const tiles = normalizeTiles(value.tiles);
+  const { profiles, ids: profileIds } = normalizeProfiles(value.profiles);
+  if (value.rules !== undefined && (!Array.isArray(value.rules) || value.rules.length > V1_MAX_RULES)) {
     throw new Error("Invalid rules");
   }
   const ruleIds = new Set();
   const rules = (value.rules ?? []).map(rule => {
-    const normalized = normalizeRule(rule, profileIds);
+    const normalized = normalizeRuleV1(rule, profileIds);
     if (ruleIds.has(normalized.id)) throw new Error("Duplicate rule");
     ruleIds.add(normalized.id);
     return normalized;
   });
   return { version: 1, settings: normalizeSettings(value.settings), tiles, profiles, rules,
     pinned: normalizePinned(value.pinned), updates: normalizeUpdates(value.updates) };
+}
+
+/**
+ * Validates untrusted layout JSON (stored config or an imported file) and fills in any missing tiles and defaults.
+ * A version 1 layout is migrated to version 2 first. Throws an Error naming the problem (and the rule, if any).
+ */
+function normalizeLayout(value) {
+  if (!isObject(value)) throw new Error("Invalid layout");
+  if (value.version === 1) return normalizeLayout(migrateLayoutV1(normalizeLayoutV1(value)));
+  if (value.version !== LAYOUT_VERSION) throw new Error("Invalid layout");
+  const tiles = normalizeTiles(value.tiles);
+  const { profiles, ids: profileIds } = normalizeProfiles(value.profiles);
+  const folders = normalizeList(value.folders, MAX_FOLDERS, "folders", folder => {
+    if (!isObject(folder) || !validId(folder.id) || !validName(folder.name)
+      || typeof folder.enabled !== "boolean" || typeof folder.collapsed !== "boolean") {
+      throw new Error("Invalid folder");
+    }
+    return { id: folder.id, name: folder.name, enabled: folder.enabled, collapsed: folder.collapsed };
+  });
+  const places = normalizeList(value.places, MAX_PLACES, "places", place => {
+    if (!isObject(place) || !validId(place.id) || !validName(place.name) || !validName(place.world, 128)
+      || !validRegistryId(place.dimension) || !["x", "y", "z"].every(key => coordinate(place[key]))) {
+      throw new Error("Invalid place");
+    }
+    return { id: place.id, name: place.name, world: place.world, dimension: place.dimension,
+      x: place.x, y: place.y, z: place.z };
+  });
+  const toggles = normalizeList(value.toggles, MAX_TOGGLES, "toggles", toggle => {
+    if (!isObject(toggle) || !validId(toggle.id) || !validName(toggle.name, 32) || typeof toggle.on !== "boolean") {
+      throw new Error("Invalid toggle");
+    }
+    return { id: toggle.id, name: toggle.name, on: toggle.on };
+  });
+  if (value.rules !== undefined && (!Array.isArray(value.rules) || value.rules.length > MAX_RULES)) {
+    throw new Error(`Too many rules (at most ${MAX_RULES})`);
+  }
+  const ruleIds = new Set();
+  for (const rule of value.rules ?? []) {
+    if (isObject(rule) && validId(rule.id)) {
+      if (ruleIds.has(rule.id)) throw new Error(`${ruleLabel(rule)}: another rule has the same id`);
+      ruleIds.add(rule.id);
+    }
+  }
+  const refs = { profiles: profileIds, folders: idSet(folders), places: idSet(places), toggles: idSet(toggles),
+    rules: ruleIds };
+  const rules = (value.rules ?? []).map((rule, index) => normalizeRule(rule, refs, index));
+  checkRuleCycles(rules);
+  return { version: LAYOUT_VERSION, settings: normalizeSettings(value.settings), tiles, profiles,
+    pinned: normalizePinned(value.pinned), updates: normalizeUpdates(value.updates),
+    animation: value.animation === undefined ? { ...DEFAULT_ANIMATION } : normalizeAnimation(value.animation),
+    folders, places, toggles, rules };
+}
+
+/** An optional list with unique ids. */
+function normalizeList(value, max, what, normalize) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > max) throw new Error(`Too many ${what} (at most ${max})`);
+  const result = value.map(normalize);
+  if (idSet(result).size !== result.length) throw new Error(`Duplicate ${what}`);
+  return result;
+}
+
+const idSet = list => new Set(list.map(entry => entry.id));
+
+// ---------------------------------------------------------------------------------------------- Rules (v2)
+
+// A rule's When list is flat: each condition joins the one above with "and" or "or", and AND binds tighter, so
+// "A and B or C" means (A and B) or C. Then applies while the rule is active, Else while it is enabled but not.
+
+const MAX_RULES = 128;
+const MAX_CONDITIONS = 32;
+const MAX_ACTIONS = 16;
+const MAX_FOLDERS = 32;
+const MAX_PLACES = 64;
+const MAX_TOGGLES = 16;
+const MAX_CONDITION_VALUES = 32;
+const MAX_RULE_SECONDS = 3600;
+const MAX_TIMING_MILLIS = 600000;
+const MIN_LINGER_MILLIS = 500;
+const DEFAULT_TIMING = { delayMs: 0, lingerMs: 2000 };
+const MAX_ANIMATION_MILLIS = 5000;
+const DEFAULT_ANIMATION = { durationMs: 300, easing: "ease-out" };
+const EASINGS = ["linear", "ease", "ease-in", "ease-out", "ease-in-out"];
+const COMPARES = ["<", "<=", "=", ">=", ">", "!=", "between"];
+const MAX_COMPARE_VALUE = 1e9;
+const MAX_COORDINATE = 30000000;
+const MAX_PLACE_RADIUS = 100000;
+const MAX_VILLAGER_RADIUS = 256;
+const MAX_PORTAL_MINUTES = 120;
+const MAX_NOTIFY_TEXT = 128;
+/** Fixed choices of the conditions and actions that pick from a list. */
+const RULE_CHOICES = {
+  time: ["dawn", "day", "dusk", "night"], weather: ["clear", "rain", "thunder"],
+  gameMode: ["survival", "creative", "adventure", "spectator"],
+  movement: ["ground", "elytra", "swimming", "riding", "flying", "falling"],
+  axis: ["total", "horizontal", "vertical"], hand: ["either", "main", "off"], durability: ["held", "armor", "tool"]
+};
+const RULE_FAMILIES = ["world", "position", "player", "inventory", "amounts", "events", "villagers", "features", "meta"];
+/**
+ * Condition types: the family the editor lists them under and the shape of their parameters (see
+ * conditionParams). "Meta" conditions don't need the player to be in a world; all others are unknown (never true,
+ * even with "not") while not in one.
+ */
+const CONDITION_TYPES = {
+  world: { family: "world", kind: "names" },
+  dimension: { family: "world", kind: "names" },
+  biome: { family: "world", kind: "names" },
+  time: { family: "world", kind: "time" },
+  weather: { family: "world", kind: "choices" },
+  day: { family: "world", kind: "compare" },
+  gameMode: { family: "world", kind: "choices" },
+  nearPlace: { family: "position", kind: "place" },
+  yLevel: { family: "position", kind: "compare" },
+  health: { family: "player", kind: "compare" },
+  food: { family: "player", kind: "compare" },
+  saturation: { family: "player", kind: "compare" },
+  absorption: { family: "player", kind: "compare" },
+  xpLevel: { family: "player", kind: "compare" },
+  effect: { family: "player", kind: "effect" },
+  movement: { family: "player", kind: "choices" },
+  speed: { family: "player", kind: "speed" },
+  still: { family: "player", kind: "none" },
+  holding: { family: "inventory", kind: "holding" },
+  hasItem: { family: "inventory", kind: "hasItem" },
+  freeSlots: { family: "inventory", kind: "compare" },
+  durability: { family: "inventory", kind: "durability" },
+  elytra: { family: "inventory", kind: "none" },
+  xpGained: { family: "amounts", kind: "amount" },
+  pickedUp: { family: "amounts", kind: "amount", subject: "item" },
+  statRose: { family: "amounts", kind: "amount", subject: "stat", required: true },
+  minedBlock: { family: "amounts", kind: "amount", subject: "block" },
+  placedBlock: { family: "amounts", kind: "amount", subject: "block" },
+  killedMob: { family: "amounts", kind: "amount", subject: "entity" },
+  tookDamage: { family: "amounts", kind: "amount" },
+  advancement: { family: "events", kind: "event", subject: "advancement" },
+  died: { family: "events", kind: "event" },
+  changedDimension: { family: "events", kind: "event" },
+  joinedWorld: { family: "events", kind: "event" },
+  inCombat: { family: "events", kind: "event" },
+  villagersNearby: { family: "villagers", kind: "villagers" },
+  portalLinking: { family: "features", kind: "portal" },
+  toggle: { family: "meta", kind: "toggle", meta: true },
+  ruleActive: { family: "meta", kind: "rule", meta: true },
+  width: { family: "meta", kind: "compare", meta: true },
+  realTime: { family: "meta", kind: "clock", meta: true },
+  sessionTime: { family: "meta", kind: "compare" },
+  inGame: { family: "meta", kind: "none", meta: true }
+};
+const ACTION_TYPES = ["profile", "show", "hide", "place", "swap", "focus", "set", "notify"];
+
+const validRegistryId = value => typeof value === "string" && value.length <= 256
+  && /^[a-z0-9_.-]+:[a-z0-9/._-]+$/.test(value);
+const statisticId = value => validStatisticIds([value]);
+const finiteIn = (value, min, max) => typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
+const coordinate = value => finiteIn(value, -MAX_COORDINATE, MAX_COORDINATE);
+const validClock = value => typeof value === "string" && /^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(value);
+const ruleLabel = (rule, index) => isObject(rule) && validName(rule.name) ? `Rule "${rule.name}"`
+  : `Rule ${index === undefined ? "" : index + 1}`.trim();
+
+function ensure(valid, message) {
+  if (!valid) throw new Error(message);
+}
+
+/** compare / value / value2: "< ≤ = ≥ > ≠" one value, or "between" two (inclusive). */
+function normalizeCompare(value, what = "compare") {
+  ensure(isObject(value) && COMPARES.includes(value.compare), `${what}: unknown comparison`);
+  ensure(finiteIn(value.value, -MAX_COMPARE_VALUE, MAX_COMPARE_VALUE), `${what}: invalid value`);
+  const result = { compare: value.compare, value: value.value };
+  if (value.compare === "between") {
+    ensure(finiteIn(value.value2, value.value, MAX_COMPARE_VALUE), `${what}: invalid upper value`);
+    result.value2 = value.value2;
+  }
+  return result;
+}
+
+function normalizeNames(value, choices) {
+  ensure(Array.isArray(value) && value.length <= MAX_CONDITION_VALUES
+    && value.every(entry => choices ? choices.includes(entry) : validName(entry, 128)), "invalid values");
+  return [...new Set(value)];
+}
+
+function optionalChoice(value, choices, what) {
+  if (value === undefined) return choices[0];
+  ensure(choices.includes(value), `invalid ${what}`);
+  return value;
+}
+
+/** The parameters of one condition type; unknown keys are dropped. */
+function conditionParams(value, spec, refs) {
+  switch (spec.kind) {
+    case "names":
+      return { values: normalizeNames(value.values) };
+    case "choices":
+      return { values: normalizeNames(value.values, RULE_CHOICES[value.type]) };
+    case "time":
+      if (value.ticks === undefined) return { values: normalizeNames(value.values, RULE_CHOICES.time) };
+      ensure(value.values === undefined && isObject(value.ticks) && wholeIn(value.ticks.from, 0, 23999)
+        && wholeIn(value.ticks.to, 0, 23999), "invalid tick range");
+      return { ticks: { from: value.ticks.from, to: value.ticks.to } };
+    case "compare":
+      return normalizeCompare(value);
+    case "none":
+      return {};
+    case "effect": {
+      const result = { values: normalizeNames(value.values) };
+      if (value.level !== undefined) result.level = normalizeCompare(value.level, "level");
+      if (value.remaining !== undefined) result.remaining = normalizeCompare(value.remaining, "remaining time");
+      return result;
+    }
+    case "speed":
+      return { axis: optionalChoice(value.axis, RULE_CHOICES.axis, "axis"), ...normalizeCompare(value) };
+    case "place":
+      return placeParams(value, refs);
+    case "holding":
+      ensure(validRegistryId(value.item), "invalid item");
+      return { item: value.item, hand: optionalChoice(value.hand, RULE_CHOICES.hand, "hand") };
+    case "hasItem": {
+      ensure(validRegistryId(value.item), "invalid item");
+      ensure(value.enderChest === undefined || typeof value.enderChest === "boolean", "invalid ender chest flag");
+      const result = { item: value.item, ...normalizeCompare(value) };
+      if (value.enderChest) result.enderChest = true;
+      return result;
+    }
+    case "durability":
+      return { target: optionalChoice(value.target, RULE_CHOICES.durability, "target"), ...normalizeCompare(value) };
+    case "amount": {
+      ensure(wholeIn(value.window, 1, MAX_RULE_SECONDS), "invalid window");
+      return { ...subject(value, spec), ...normalizeCompare(value), window: value.window };
+    }
+    case "event":
+      return subject(value, spec);
+    case "villagers":
+      ensure(wholeIn(value.radius, 1, MAX_VILLAGER_RADIUS), "invalid radius");
+      return { radius: value.radius, ...normalizeCompare(value) };
+    case "portal":
+      ensure(wholeIn(value.minutes, 1, MAX_PORTAL_MINUTES), "invalid minutes");
+      return { minutes: value.minutes };
+    case "toggle":
+      ensure(refs.toggles.has(value.toggle), "unknown toggle");
+      return { toggle: value.toggle };
+    case "rule":
+      ensure(refs.rules.has(value.rule), "unknown rule");
+      return { rule: value.rule };
+    case "clock": {
+      ensure(validClock(value.from) && validClock(value.to), "invalid time");
+      const result = { from: value.from, to: value.to };
+      if (value.days !== undefined) {
+        ensure(Array.isArray(value.days) && value.days.length >= 1 && value.days.length <= 7
+          && value.days.every(day => wholeIn(day, 0, 6)) && new Set(value.days).size === value.days.length,
+        "invalid weekdays");
+        result.days = [...value.days].sort((a, b) => a - b);
+      }
+      return result;
+    }
+    default:
+      throw new Error("unknown condition type");
+  }
+}
+
+/** The optional (or required) registry id an amount or event is about, e.g. the block for "mined block". */
+function subject(value, spec) {
+  if (!spec.subject) return {};
+  const id = value[spec.subject];
+  if (id === undefined && !spec.required) return {};
+  ensure(spec.subject === "stat" ? statisticId(id) : validRegistryId(id), `invalid ${spec.subject}`);
+  return { [spec.subject]: id };
+}
+
+/**
+ * Near a saved place or typed X/Y/Z (optionally limited to a world and dimension): within a radius (3D, or
+ * horizontal only with "flat"), or inside the box from X/Y/Z to X2/Y2/Z2.
+ */
+function placeParams(value, refs) {
+  const box = value.x2 !== undefined || value.y2 !== undefined || value.z2 !== undefined;
+  const result = {};
+  if (value.place !== undefined) {
+    ensure(!box && value.x === undefined && refs.places.has(value.place), "unknown place");
+    result.place = value.place;
+  } else {
+    ensure(["x", "y", "z"].every(key => coordinate(value[key])), "invalid position");
+    Object.assign(result, { x: value.x, y: value.y, z: value.z });
+    if (value.world !== undefined) {
+      ensure(validName(value.world, 128), "invalid world");
+      result.world = value.world;
+    }
+    if (value.dimension !== undefined) {
+      ensure(validRegistryId(value.dimension), "invalid dimension");
+      result.dimension = value.dimension;
+    }
+  }
+  if (box) {
+    ensure(["x2", "y2", "z2"].every(key => coordinate(value[key])) && value.radius === undefined, "invalid box");
+    return { ...result, x2: value.x2, y2: value.y2, z2: value.z2 };
+  }
+  ensure(finiteIn(value.radius, 0, MAX_PLACE_RADIUS) && value.radius > 0, "invalid radius");
+  ensure(value.flat === undefined || typeof value.flat === "boolean", "invalid flat flag");
+  result.radius = value.radius;
+  if (value.flat) result.flat = true;
+  return result;
+}
+
+/** One When row: its type, the join to the row above (ignored on the first row), "not" and one timing modifier. */
+function normalizeCondition(value, refs, first) {
+  ensure(isObject(value) && typeof value.type === "string" && Object.hasOwn(CONDITION_TYPES, value.type),
+    "unknown condition type");
+  const spec = CONDITION_TYPES[value.type];
+  const condition = { type: value.type };
+  if (!first) {
+    ensure(value.join === undefined || value.join === "and" || value.join === "or", "join must be and or or");
+    condition.join = value.join ?? "and";
+  }
+  ensure(value.not === undefined || typeof value.not === "boolean", "invalid not");
+  if (value.not) condition.not = true;
+  const event = spec.kind === "event";
+  if (value.for !== undefined) {
+    ensure(!event, "events take \"within\", not \"for\"");
+    ensure(wholeIn(value.for, 1, MAX_RULE_SECONDS), "invalid \"for\" seconds");
+    condition.for = value.for;
+  }
+  if (value.within !== undefined || event) {
+    ensure(wholeIn(value.within, 1, MAX_RULE_SECONDS), "invalid \"within\" seconds");
+    ensure(condition.for === undefined, "use either \"for\" or \"within\", not both");
+    condition.within = value.within;
+  }
+  return { ...condition, ...conditionParams(value, spec, refs) };
+}
+
+function normalizeAction(value, refs) {
+  ensure(isObject(value) && ACTION_TYPES.includes(value.do), "unknown action");
+  const panel = () => {
+    ensure(TILE_IDS.includes(value.panel), "unknown panel");
+    return value.panel;
+  };
+  switch (value.do) {
+    case "profile":
+      ensure(refs.profiles.has(value.profile), "unknown profile");
+      return { do: "profile", profile: value.profile };
+    case "show":
+    case "focus":
+      return { do: value.do, panel: panel() };
+    case "hide": {
+      const result = { do: "hide", panel: panel() };
+      if (value.fill === undefined || value.fill === "auto") return result;
+      ensure(value.fill === "empty" || TILE_IDS.includes(value.fill) && value.fill !== value.panel, "invalid fill");
+      return { ...result, fill: value.fill };
+    }
+    case "place": {
+      const id = panel();
+      const minimum = TILE_MINIMUMS[id];
+      ensure(wholeIn(value.w, minimum.w, LAYOUT_COLUMNS) && wholeIn(value.h, minimum.h, LAYOUT_MAX_H)
+        && wholeIn(value.x, 0, LAYOUT_COLUMNS - value.w) && wholeIn(value.y, 0, LAYOUT_MAX_Y), "invalid rectangle");
+      return { do: "place", panel: id, x: value.x, y: value.y, w: value.w, h: value.h };
+    }
+    case "swap": {
+      const id = panel();
+      ensure(TILE_IDS.includes(value.with) && value.with !== id, "invalid panel to swap with");
+      return { do: "swap", panel: id, with: value.with };
+    }
+    case "set": {
+      const id = panel();
+      const rule = SETTING_RULES.find(([tile, key]) => tile === id && key === value.setting);
+      ensure(rule && rule[2](value.value), "invalid setting");
+      return { do: "set", panel: id, setting: value.setting,
+        value: Array.isArray(value.value) ? [...new Set(value.value)] : value.value };
+    }
+    case "notify": {
+      ensure(validName(value.text, MAX_NOTIFY_TEXT), "invalid notification text");
+      ensure(value.cooldown === undefined || wholeIn(value.cooldown, 0, MAX_RULE_SECONDS), "invalid cooldown");
+      return { do: "notify", text: value.text, cooldown: value.cooldown ?? 0 };
+    }
+  }
+}
+
+function normalizeTiming(value) {
+  if (value === undefined) return { ...DEFAULT_TIMING };
+  ensure(isObject(value), "invalid timing");
+  const delayMs = value.delayMs === undefined ? DEFAULT_TIMING.delayMs : value.delayMs;
+  const lingerMs = value.lingerMs === undefined ? DEFAULT_TIMING.lingerMs : value.lingerMs;
+  ensure(wholeIn(delayMs, 0, MAX_TIMING_MILLIS), "invalid delay");
+  ensure(wholeIn(lingerMs, MIN_LINGER_MILLIS, MAX_TIMING_MILLIS), `linger must be ${MIN_LINGER_MILLIS} ms or more`);
+  return { delayMs, lingerMs };
+}
+
+function normalizeAnimation(value) {
+  ensure(isObject(value) && wholeIn(value.durationMs, 0, MAX_ANIMATION_MILLIS) && EASINGS.includes(value.easing),
+    "invalid animation");
+  return { durationMs: value.durationMs, easing: value.easing };
+}
+
+function normalizeActions(value, refs, what) {
+  if (value === undefined) return [];
+  ensure(Array.isArray(value) && value.length <= MAX_ACTIONS, `${what}: at most ${MAX_ACTIONS} actions`);
+  return value.map((action, index) => {
+    try {
+      return normalizeAction(action, refs);
+    } catch (error) {
+      throw new Error(`${what} action ${index + 1}: ${error.message}`);
+    }
+  });
+}
+
+/** Validates one rule; errors name the rule. */
+function normalizeRule(value, refs, index) {
+  try {
+    ensure(isObject(value), "not an object");
+    ensure(validId(value.id), "invalid id");
+    ensure(validName(value.name), "invalid name");
+    ensure(typeof value.enabled === "boolean", "invalid enabled flag");
+    ensure(value.folder === undefined || value.folder === null || refs.folders.has(value.folder), "unknown folder");
+    ensure(Array.isArray(value.when) && value.when.length <= MAX_CONDITIONS,
+      `at most ${MAX_CONDITIONS} conditions`);
+    const when = value.when.map((condition, position) => {
+      try {
+        return normalizeCondition(condition, refs, position === 0);
+      } catch (error) {
+        throw new Error(`condition ${position + 1}: ${error.message}`);
+      }
+    });
+    return { id: value.id, name: value.name, enabled: value.enabled, folder: value.folder ?? null, when,
+      then: normalizeActions(value.then, refs, "Then"), else: normalizeActions(value.else, refs, "Else"),
+      timing: normalizeTiming(value.timing),
+      animation: value.animation === undefined || value.animation === null ? null : normalizeAnimation(value.animation) };
+  } catch (error) {
+    throw new Error(`${ruleLabel(value, index)}: ${error.message}`);
+  }
+}
+
+/** "Rule active" conditions must not form a cycle (a rule depending on itself, directly or not). */
+function checkRuleCycles(rules) {
+  const byId = new Map(rules.map(rule => [rule.id, rule]));
+  const state = new Map();
+  const visit = rule => {
+    if (state.get(rule.id) === "done") return;
+    if (state.get(rule.id) === "visiting") throw new Error(`${ruleLabel(rule)}: "Rule active" conditions form a loop`);
+    state.set(rule.id, "visiting");
+    for (const id of ruleDependencies(rule)) visit(byId.get(id));
+    state.set(rule.id, "done");
+  };
+  rules.forEach(visit);
+}
+
+/** The ids of the rules a rule's "Rule active" conditions read. */
+function ruleDependencies(rule) {
+  return rule.when.filter(condition => condition.type === "ruleActive").map(condition => condition.rule);
+}
+
+/** Splits a When list into AND blocks (lists of condition indexes); a row joined with "or" starts a new block. */
+function ruleBlocks(when) {
+  const blocks = [];
+  when.forEach((condition, index) => {
+    if (index === 0 || condition.join === "or") blocks.push([]);
+    blocks.at(-1).push(index);
+  });
+  return blocks;
+}
+
+// ------------------------------------------------------------------------------------------------ Migration
+
+/** A fresh id from {@code base} that isn't in {@code used}; adds it to {@code used}. */
+function uniqueId(base, used) {
+  let id = base.slice(0, 32);
+  for (let index = 2; used.has(id); index++) {
+    const suffix = `-${index}`;
+    id = base.slice(0, 32 - suffix.length) + suffix;
+  }
+  used.add(id);
+  return id;
+}
+
+/** The start of an id, without a trailing dash, to build derived ids from. */
+const idPrefix = (id, length) => id.slice(0, length).replace(/-+$/, "");
+
+/** v1 min/max as a comparison. Health, food and saturation are never negative, so "< 0" is v1's empty range. */
+function v1Compare(condition) {
+  const { min, max } = condition;
+  if (min !== undefined && max !== undefined) {
+    return min <= max ? { compare: "between", value: min, value2: max } : { compare: "<", value: 0 };
+  }
+  return max !== undefined ? { compare: "<=", value: max } : { compare: ">=", value: min ?? 0 };
+}
+
+/** One v1 condition as a v2 condition (without its join). Values that never matched in v1 are dropped. */
+function migrateConditionV1(condition) {
+  const result = { type: condition.type };
+  if (condition.not) result.not = true;
+  switch (condition.type) {
+    case "time":
+    case "gameMode":
+    case "movement":
+      return { ...result, values: (condition.values ?? []).filter(value => RULE_CHOICES[condition.type].includes(value)) };
+    case "health":
+    case "food":
+    case "saturation":
+      return { ...result, ...v1Compare(condition) };
+    case "elytra":
+      return result;
+    case "advancement":
+      return { ...result, within: condition.seconds ?? 10 };
+    case "combat":
+      return { ...result, type: "inCombat", within: condition.seconds ?? 10 };
+    default:
+      return { ...result, values: [...(condition.values ?? [])] };
+  }
+}
+
+/** A v1 rule's profile, tile and setting changes as v2 actions, in that order. */
+function migrateActionsV1(rule) {
+  const actions = [];
+  if (rule.profile) actions.push({ do: "profile", profile: rule.profile });
+  for (const [panel, action] of Object.entries(rule.tiles ?? {})) actions.push({ do: action, panel });
+  for (const [tile, key] of SETTING_RULES) {
+    const value = rule.settings?.[tile]?.[key];
+    if (value !== undefined) actions.push({ do: "set", panel: tile, setting: key, value });
+  }
+  return actions;
+}
+
+/** Joins conditions into a When list: {@code blocks} is a list of AND-blocks, joined with OR. */
+function joinBlocks(blocks) {
+  return blocks.flatMap((block, blockIndex) => block.map((condition, index) =>
+    blockIndex === 0 && index === 0 ? condition : { ...condition, join: index === 0 ? "or" : "and" }));
+}
+
+/** Every way of picking one condition from each group: (A or B) and C → (A and C) or (B and C). */
+function expandGroups(groups) {
+  return groups.reduce((blocks, group) => blocks.flatMap(block => group.map(condition => [...block, condition])), [[]]);
+}
+
+/**
+ * Converts a validated v1 layout to v2 without changing what the rules do:
+ * - AND of OR-groups becomes OR of AND-blocks. If that needs more than MAX_CONDITIONS rows, each group becomes a
+ *   helper rule without actions (500 ms linger, the minimum) and the rule requires "Rule active" for all of them.
+ * - min/max become compare; "seconds" becomes "within"; "combat" becomes "In combat".
+ * - Profile, tiles and settings become actions; more than MAX_ACTIONS continue in extra rules with the same When.
+ * - The fixed 2 s hold becomes lingerMs 2000. Rule order (priority) is kept.
+ */
+function migrateLayoutV1(layout) {
+  const used = new Set(layout.rules.map(rule => rule.id));
+  const rules = [];
+  for (const rule of layout.rules) {
+    const groups = rule.groups.map(group => group.map(migrateConditionV1));
+    // Counted before expanding: eight groups of eight would be 16 million blocks.
+    const rows = groups.reduce((count, group) => count * group.length, 1) * groups.length;
+    let when;
+    if (groups.length === 0) {
+      when = [];
+    } else if (rows <= MAX_CONDITIONS) {
+      when = joinBlocks(expandGroups(groups));
+    } else {
+      when = groups.map((group, index) => {
+        const id = uniqueId(`${idPrefix(rule.id, 26)}-p${index + 1}`, used);
+        rules.push({ id, name: `${rule.name.slice(0, 52)} (part ${index + 1})`, enabled: true, folder: null,
+          when: group.map((condition, position) => position === 0 ? condition : { ...condition, join: "or" }),
+          then: [], else: [], timing: { delayMs: 0, lingerMs: MIN_LINGER_MILLIS }, animation: null });
+        return index === 0 ? { type: "ruleActive", rule: id } : { type: "ruleActive", rule: id, join: "and" };
+      });
+    }
+    const actions = migrateActionsV1(rule);
+    for (let start = 0, part = 1; start === 0 || start < actions.length; start += MAX_ACTIONS, part++) {
+      rules.push({ id: part === 1 ? rule.id : uniqueId(`${idPrefix(rule.id, 28)}-${part}`, used),
+        name: part === 1 ? rule.name : `${rule.name.slice(0, 56)} (${part})`, enabled: rule.enabled, folder: null,
+        when, then: actions.slice(start, start + MAX_ACTIONS), else: [], timing: { ...DEFAULT_TIMING },
+        animation: null });
+    }
+  }
+  if (rules.length > MAX_RULES) {
+    throw new Error(`Converting the rules needs ${rules.length} rules, more than the limit of ${MAX_RULES}`);
+  }
+  const { rules: ignored, version, ...rest } = layout;
+  return { ...rest, version: LAYOUT_VERSION, animation: { ...DEFAULT_ANIMATION }, folders: [], places: [],
+    toggles: [], rules };
 }
 
 // ------------------------------------------------------------------------------------------------- Profiles
@@ -307,14 +887,11 @@ function renameProfile(layout, id, name) {
     ? { ...profile, name: name.slice(0, 64) || profile.name } : profile) };
 }
 
-/** Removes a profile; rules that switched to it no longer switch profile. */
+/** Removes a profile; rules lose their "switch profile" actions that pointed at it. */
 function removeProfile(layout, id) {
+  const keep = action => !(action.do === "profile" && action.profile === id);
   return { ...layout, profiles: layout.profiles.filter(profile => profile.id !== id),
-    rules: layout.rules.map(rule => {
-      if (rule.profile !== id) return rule;
-      const { profile, ...rest } = rule;
-      return rest;
-    }) };
+    rules: layout.rules.map(rule => ({ ...rule, then: rule.then.filter(keep), else: rule.else.filter(keep) })) };
 }
 
 const structuredCopy = value => JSON.parse(JSON.stringify(value));

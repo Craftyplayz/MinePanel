@@ -138,24 +138,20 @@
 .float-grid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 3px; padding: 10px; }
 .inventory-grid .slot { cursor: default; }
 
-/* Rules editor */
+/* Rules (read-only list until the rules side panel) */
 .dialog.wide { width: min(860px, 100%); }
 .rule { margin-top: 10px; padding: 10px; border: 1px solid #2c363c; border-radius: 8px; font-size: 12px; }
 .rule.active { border-color: #3a4c43; background: #73e0b108; }
 .rule-head { display: flex; align-items: center; gap: 8px; }
-.rule-name { flex: 1; min-width: 0; padding: 4px 6px; border: 1px solid #2c363c; border-radius: 6px; background: #0b1015; color: #edf2f5; font-size: 12px; }
+.rule-name { flex: 1; min-width: 0; color: #edf2f5; font-size: 12px; }
 .rule-groups, .rule-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
 .rule-label { width: 100%; color: var(--accent); font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .04em; }
-.rule-group { display: grid; gap: 4px; width: 100%; padding: 6px; border: 1px dashed #2c363c; border-radius: 6px; }
 .rule-and { width: 100%; color: #f0b85a; font-size: 11px; font-weight: 700; }
-.rule-or { color: var(--muted); font-size: 11px; }
-.rule-condition { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.rule-condition select, .rule-condition input[type="text"], .rule-condition input[type="number"], .rule-actions select { padding: 3px 6px; border: 1px solid #2c363c; border-radius: 6px; background: #0b1015; color: #edf2f5; font-size: 12px; }
-.rule-condition input[type="text"] { flex: 1; min-width: 160px; }
-.rule-condition input[type="number"] { width: 70px; }
-.rule-field { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
-.rule-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 4px 10px; width: 100%; }
-.rule-tiles .rule-field { justify-content: space-between; }
+.rule-or { width: 100%; color: var(--muted); font-size: 11px; font-weight: 700; }
+.rule-condition { position: relative; width: 100%; margin: 0; padding-left: 14px; }
+.rule-condition.ok::before, .rule-condition.bad::before { content: ""; position: absolute; left: 2px; top: .45em; width: 7px; height: 7px; border-radius: 50%; }
+.rule-condition.ok::before { background: var(--accent); }
+.rule-condition.bad::before { background: var(--danger); }
 
 /* Build progress */
 .build-name { margin: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

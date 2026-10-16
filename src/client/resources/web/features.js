@@ -1058,302 +1058,139 @@ function closeTransient(event) {
 window.addEventListener("pointerdown", closeTransient);
 window.addEventListener("keyup", event => { if (event.key === "Escape") closeTransient(); });
 
-// --------------------------------------------------------------------------------------------- Rules editor
+// ----------------------------------------------------------------------------------------------- Rules list
+
+// Read-only until the rules side panel (docs/RULES_V2.md, phase 3) replaces this dialog.
 
 const rulesDialog = $("#rules-dialog");
 const rulesList = $("#rules-list");
-const rulesStatus = $("#rules-status");
 const CONDITION_LABELS = { world: "Server / world", dimension: "Dimension", biome: "Biome", time: "Time of day",
-  gameMode: "Game mode", health: "Health", food: "Hunger", saturation: "Saturation", effect: "Status effect",
-  movement: "Moving by", elytra: "Wearing elytra", advancement: "Made an advancement", combat: "In combat" };
-const CONDITION_CHOICES = { time: ["dawn", "day", "dusk", "night"], gameMode: ["survival", "creative", "adventure", "spectator"],
-  movement: ["ground", "elytra", "swimming", "riding", "flying", "falling"],
-  dimension: ["minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"] };
-const RANGE_HINTS = { health: "health points (20 = 10 hearts)", food: "hunger points (20 = full)", saturation: "saturation (0–20)" };
-const BOOLEAN_OVERRIDES = [["inventory", "showArmor", "Inventory: armor"], ["movement", "showVertical", "Movement: vertical speed"],
-  ["movement", "showGlider", "Movement: elytra durability"], ["pickups", "showSource", "Pickups: show source"]];
+  weather: "Weather", day: "Day", gameMode: "Game mode", nearPlace: "Near", yLevel: "Y level", health: "Health",
+  food: "Hunger", saturation: "Saturation", absorption: "Absorption", xpLevel: "XP level", effect: "Status effect",
+  movement: "Moving by", speed: "Speed", still: "Standing still", holding: "Holding", hasItem: "Has item",
+  freeSlots: "Free slots", durability: "Durability", elytra: "Wearing elytra", xpGained: "Gained XP",
+  pickedUp: "Picked up", statRose: "Statistic rose", minedBlock: "Mined", placedBlock: "Placed",
+  killedMob: "Killed", tookDamage: "Took damage (hearts)", advancement: "Advancement earned", died: "Died",
+  changedDimension: "Changed dimension", joinedWorld: "Joined the world", inCombat: "In combat",
+  villagersNearby: "Known villagers nearby", portalLinking: "Linking a portal", toggle: "Toggle on",
+  ruleActive: "Rule active", width: "Dashboard width (px)", realTime: "Real-world time",
+  sessionTime: "Session time (min)", inGame: "In a world" };
+const COMPARE_SYMBOLS = { "<": "<", "<=": "≤", "=": "=", ">=": "≥", ">": ">", "!=": "≠" };
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+const describeCompare = value => value.compare === "between" ? `${value.value}–${value.value2}`
+  : `${COMPARE_SYMBOLS[value.compare]} ${value.value}`;
+const nameOf = (list, id) => list.find(entry => entry.id === id)?.name ?? id;
+
+/** A When row's parameters as text, e.g. "≥ 3 within 16 blocks". */
+function describeConditionParams(condition) {
+  const parts = [];
+  if (condition.values) parts.push(condition.values.join(", ") || "(none chosen)");
+  if (condition.ticks) parts.push(`ticks ${condition.ticks.from}–${condition.ticks.to}`);
+  for (const key of ["item", "stat", "block", "entity", "advancement"]) if (condition[key]) parts.push(condition[key]);
+  if (condition.type === "nearPlace") {
+    const where = condition.place ? nameOf(layout.places, condition.place)
+      : `X ${condition.x} Y ${condition.y} Z ${condition.z}`;
+    parts.push(condition.x2 === undefined ? `${condition.radius} blocks of ${where}${condition.flat ? " (flat)" : ""}`
+      : `the box ${where} to X ${condition.x2} Y ${condition.y2} Z ${condition.z2}`);
+  }
+  if (condition.axis && condition.axis !== "total") parts.push(condition.axis);
+  if (condition.target) parts.push(condition.target);
+  if (condition.hand && condition.hand !== "either") parts.push(`${condition.hand} hand`);
+  if (condition.compare) parts.push(describeCompare(condition));
+  if (condition.level) parts.push(`level ${describeCompare(condition.level)}`);
+  if (condition.remaining) parts.push(`${describeCompare(condition.remaining)} s left`);
+  if (condition.enderChest) parts.push("incl. ender chest");
+  if (condition.window) parts.push(`in the last ${condition.window} s`);
+  if (condition.radius && condition.type === "villagersNearby") parts.push(`within ${condition.radius} blocks`);
+  if (condition.minutes) parts.push(`for up to ${condition.minutes} min`);
+  if (condition.toggle) parts.push(nameOf(layout.toggles, condition.toggle));
+  if (condition.rule) parts.push(nameOf(layout.rules, condition.rule));
+  if (condition.from) {
+    parts.push(`${condition.from}–${condition.to}`);
+    if (condition.days) parts.push(condition.days.map(day => WEEKDAYS[day]).join(", "));
+  }
+  return parts.join(" · ");
+}
+
+/** One When row as text, e.g. "not Dimension: nether · for ≥ 30 s". */
+function describeCondition(condition) {
+  const params = describeConditionParams(condition);
+  let text = `${condition.not ? "not " : ""}${CONDITION_LABELS[condition.type]}${params ? `: ${params}` : ""}`;
+  if (condition.for) text += ` · for ≥ ${condition.for} s`;
+  if (condition.within) text += CONDITION_TYPES[condition.type].kind === "event"
+    ? ` · in the last ${condition.within} s` : ` · within ${condition.within} s`;
+  return text;
+}
+
+function describeAction(action) {
+  const panel = TILE_LABELS[action.panel];
+  switch (action.do) {
+    case "profile":
+      return `Switch to ${action.profile === "default" ? "Default" : nameOf(layout.profiles, action.profile)}`;
+    case "show":
+      return `Show ${panel}`;
+    case "hide":
+      return `Hide ${panel}${action.fill === "empty" ? " (leave empty)" : action.fill ? ` (${TILE_LABELS[action.fill]} fills)` : ""}`;
+    case "place":
+      return `Place ${panel} at column ${action.x + 1}, row ${action.y + 1}, ${action.w} × ${action.h}`;
+    case "swap":
+      return `Swap ${panel} and ${TILE_LABELS[action.with]}`;
+    case "focus":
+      return `Focus ${panel}`;
+    case "set":
+      return `Set ${panel} ${action.setting} to ${JSON.stringify(action.value)}`;
+    case "notify":
+      return `Notify “${action.text}”${action.cooldown ? ` (at most every ${action.cooldown} s)` : ""}`;
+    default:
+      return action.do;
+  }
+}
+
+function actionList(title, actions) {
+  const section = create("div", "rule-actions");
+  section.appendChild(create("span", "rule-label", title));
+  for (const action of actions) section.appendChild(create("p", "rule-condition", describeAction(action)));
+  return section;
+}
+
+function ruleCard(rule) {
+  const state = ruleEvaluation?.states.get(rule.id);
+  const card = create("article", state?.active ? "rule active" : "rule");
+  const head = create("div", "rule-head");
+  head.appendChild(create("strong", "rule-name", rule.name));
+  head.appendChild(create("span", state?.active ? "badge" : "badge muted",
+    !rule.enabled ? "Disabled" : state?.active ? "Active now" : "Not active"));
+  card.appendChild(head);
+  const when = create("div", "rule-groups");
+  when.appendChild(create("span", "rule-label", "When"));
+  if (rule.when.length === 0) when.appendChild(create("p", "empty-note", "No conditions: this rule is never active."));
+  rule.when.forEach((condition, index) => {
+    if (index > 0) when.appendChild(create("span", condition.join === "or" ? "rule-or" : "rule-and", condition.join.toUpperCase()));
+    const row = create("p", "rule-condition", describeCondition(condition));
+    if (state?.conditions[index]) row.classList.add(state.conditions[index].ok ? "ok" : "bad");
+    when.appendChild(row);
+  });
+  card.appendChild(when);
+  card.appendChild(actionList("Then", rule.then));
+  if (rule.else.length) card.appendChild(actionList("Else", rule.else));
+  return card;
+}
 
 function setRulesDialog(open) {
   setHidden(rulesDialog, !open);
   if (open) renderRules();
 }
 
+function renderRules() {
+  if (rulesDialog.hidden) return;
+  rulesList.replaceChildren(...(layout.rules.length ? layout.rules.map(ruleCard)
+    : [create("p", "empty-note", "No rules yet.")]));
+}
+
 $("#rules-open").addEventListener("click", () => setRulesDialog(true));
 $("#rules-dialog-close").addEventListener("click", () => setRulesDialog(false));
 rulesDialog.addEventListener("click", event => { if (event.target === rulesDialog) setRulesDialog(false); });
-$("#rule-add").addEventListener("click", () => {
-  if (layout.rules.length >= MAX_RULES) return;
-  const used = new Set(layout.rules.map(rule => rule.id));
-  let number = layout.rules.length + 1;
-  while (used.has(`rule-${number}`)) number++;
-  updateRules([...layout.rules, { id: `rule-${number}`, name: `Rule ${number}`, enabled: true,
-    groups: [[{ type: "dimension", values: ["minecraft:the_nether"] }]] }]);
-});
-
-/** Validates and saves edited rules; an invalid edit is reported and not saved. */
-function updateRules(rules) {
-  try {
-    const profiles = new Set(["default", ...layout.profiles.map(profile => profile.id)]);
-    const normalized = rules.map(rule => normalizeRule(rule, profiles));
-    changeLayout({ ...layout, rules: normalized });
-    writeText(rulesStatus, "");
-    rulesStatus.className = "save-status";
-  } catch (error) {
-    writeText(rulesStatus, error.message);
-    rulesStatus.className = "save-status error";
-  }
-  renderRules();
-}
-
-function editRule(index, change) {
-  updateRules(layout.rules.map((rule, position) => position === index ? change(structuredCopy(rule)) : rule));
-}
-
-/** Values the player could pick right now for a condition, e.g. the current biome. */
-function currentValue(type) {
-  const player = currentPlayerState;
-  if (!player?.available) return null;
-  return { world: player.world.name, dimension: player.dimension, biome: player.world.biome,
-    gameMode: player.world.gameMode, effect: player.effects[0]?.id, movement: player.motion.mode }[type] ?? null;
-}
-
-function labelled(text, control) {
-  const label = create("label", "rule-field");
-  label.appendChild(create("span", "", text));
-  label.appendChild(control);
-  return label;
-}
-
-function conditionEditor(ruleIndex, groupIndex, conditionIndex, condition) {
-  const row = create("div", "rule-condition");
-  const update = change => editRule(ruleIndex, rule => {
-    rule.groups[groupIndex][conditionIndex] = change(rule.groups[groupIndex][conditionIndex]);
-    return rule;
-  });
-  const type = create("select");
-  for (const [value, text] of Object.entries(CONDITION_LABELS)) {
-    const option = create("option", "", text);
-    option.value = value;
-    type.appendChild(option);
-  }
-  type.value = condition.type;
-  type.addEventListener("change", () => update(() => {
-    const kind = CONDITION_TYPES[type.value];
-    return { type: type.value, ...(kind === "values" ? { values: [] } : kind === "seconds" ? { seconds: 10 } : {}) };
-  }));
-  const not = create("label", "option-toggle");
-  const notBox = create("input");
-  notBox.type = "checkbox";
-  notBox.checked = Boolean(condition.not);
-  notBox.addEventListener("change", () => update(value => ({ ...value, not: notBox.checked })));
-  not.appendChild(notBox);
-  not.appendChild(create("span", "", "not"));
-  row.appendChild(not);
-  row.appendChild(type);
-  const kind = CONDITION_TYPES[condition.type];
-  if (kind === "values" && CONDITION_CHOICES[condition.type] && condition.type !== "dimension") {
-    for (const choice of CONDITION_CHOICES[condition.type]) {
-      const label = create("label", "option-toggle");
-      const box = create("input");
-      box.type = "checkbox";
-      box.checked = (condition.values ?? []).includes(choice);
-      box.addEventListener("change", () => update(value => ({ ...value,
-        values: box.checked ? [...(value.values ?? []), choice] : (value.values ?? []).filter(entry => entry !== choice) })));
-      label.appendChild(box);
-      label.appendChild(create("span", "", choice));
-      row.appendChild(label);
-    }
-  } else if (kind === "values") {
-    const input = create("input");
-    input.type = "text";
-    input.value = (condition.values ?? []).join(", ");
-    input.placeholder = condition.type === "dimension" ? "nether, overworld, end" : "comma separated";
-    input.addEventListener("change", () => update(value => ({ ...value,
-      values: input.value.split(",").map(entry => entry.trim()).filter(Boolean).slice(0, MAX_CONDITION_VALUES) })));
-    row.appendChild(input);
-    const current = currentValue(condition.type);
-    if (current) {
-      const use = create("button", "chip small", "+ current");
-      use.type = "button";
-      use.title = `Add ${current}`;
-      use.addEventListener("click", () => update(value => ({ ...value,
-        values: [...new Set([...(value.values ?? []), current])].slice(0, MAX_CONDITION_VALUES) })));
-      row.appendChild(use);
-    }
-  } else if (kind === "range") {
-    for (const key of ["min", "max"]) {
-      const input = create("input");
-      input.type = "number";
-      input.min = "0";
-      input.max = "1024";
-      input.value = condition[key] ?? "";
-      input.placeholder = key;
-      input.addEventListener("change", () => update(value => {
-        const next = { ...value };
-        if (input.value === "") delete next[key];
-        else next[key] = Number(input.value);
-        return next;
-      }));
-      row.appendChild(labelled(key === "min" ? "at least" : "at most", input));
-    }
-    row.appendChild(create("span", "hint", RANGE_HINTS[condition.type]));
-  } else if (kind === "seconds") {
-    const input = create("input");
-    input.type = "number";
-    input.min = "1";
-    input.max = "3600";
-    input.value = String(condition.seconds ?? 10);
-    input.addEventListener("change", () => update(value => ({ ...value, seconds: Math.round(Number(input.value)) })));
-    row.appendChild(labelled("for the last", input));
-    row.appendChild(create("span", "hint", "seconds"));
-  }
-  const remove = create("button", "icon-button", "×");
-  remove.type = "button";
-  remove.setAttribute("aria-label", "Remove condition");
-  remove.addEventListener("click", () => editRule(ruleIndex, rule => {
-    rule.groups[groupIndex].splice(conditionIndex, 1);
-    rule.groups = rule.groups.filter(group => group.length > 0);
-    return rule;
-  }));
-  row.appendChild(remove);
-  return row;
-}
-
-function ruleCard(rule, index, active) {
-  const card = create("article", active ? "rule active" : "rule");
-  const head = create("div", "rule-head");
-  const enabled = create("input");
-  enabled.type = "checkbox";
-  enabled.checked = rule.enabled;
-  enabled.setAttribute("aria-label", "Rule enabled");
-  enabled.addEventListener("change", () => editRule(index, value => ({ ...value, enabled: enabled.checked })));
-  const name = create("input", "rule-name");
-  name.type = "text";
-  name.maxLength = 64;
-  name.value = rule.name;
-  name.addEventListener("change", () => editRule(index, value => ({ ...value, name: name.value.trim() || value.name })));
-  head.appendChild(enabled);
-  head.appendChild(name);
-  head.appendChild(create("span", active ? "badge" : "badge muted", active ? "Active now" : "Not active"));
-  for (const [text, label, move] of [["↑", "Move up", -1], ["↓", "Move down", 1]]) {
-    const button = create("button", "icon-button", text);
-    button.type = "button";
-    button.setAttribute("aria-label", label);
-    button.addEventListener("click", () => {
-      const target = index + move;
-      if (target < 0 || target >= layout.rules.length) return;
-      const rules = [...layout.rules];
-      [rules[index], rules[target]] = [rules[target], rules[index]];
-      updateRules(rules);
-    });
-    head.appendChild(button);
-  }
-  const remove = create("button", "icon-button", "×");
-  remove.type = "button";
-  remove.setAttribute("aria-label", "Delete rule");
-  remove.addEventListener("click", () => updateRules(layout.rules.filter((_, position) => position !== index)));
-  head.appendChild(remove);
-  card.appendChild(head);
-
-  const when = create("div", "rule-groups");
-  when.appendChild(create("span", "rule-label", "When"));
-  rule.groups.forEach((group, groupIndex) => {
-    if (groupIndex > 0) when.appendChild(create("span", "rule-and", "AND"));
-    const box = create("div", "rule-group");
-    group.forEach((condition, conditionIndex) => {
-      if (conditionIndex > 0) box.appendChild(create("span", "rule-or", "or"));
-      box.appendChild(conditionEditor(index, groupIndex, conditionIndex, condition));
-    });
-    if (group.length < MAX_GROUP_CONDITIONS) {
-      const or = create("button", "chip small", "+ or");
-      or.type = "button";
-      or.addEventListener("click", () => editRule(index, value => {
-        value.groups[groupIndex].push({ type: "biome", values: [] });
-        return value;
-      }));
-      box.appendChild(or);
-    }
-    when.appendChild(box);
-  });
-  if (rule.groups.length < MAX_RULE_GROUPS) {
-    const and = create("button", "chip small", "+ and");
-    and.type = "button";
-    and.addEventListener("click", () => editRule(index, value => {
-      value.groups.push([{ type: "elytra" }]);
-      return value;
-    }));
-    when.appendChild(and);
-  }
-  card.appendChild(when);
-
-  const then = create("div", "rule-actions");
-  then.appendChild(create("span", "rule-label", "Then"));
-  const profile = create("select");
-  for (const option of [{ id: "", name: "Keep the current profile" },
-    ...[{ id: "default", name: "Default" }, ...layout.profiles].map(entry => ({ id: entry.id, name: `Switch to ${entry.name}` }))]) {
-    const element = create("option", "", option.name);
-    element.value = option.id;
-    profile.appendChild(element);
-  }
-  profile.value = rule.profile ?? "";
-  profile.addEventListener("change", () => editRule(index, value => {
-    const next = { ...value };
-    if (profile.value) next.profile = profile.value;
-    else delete next.profile;
-    return next;
-  }));
-  then.appendChild(profile);
-  const tiles = create("div", "rule-tiles");
-  for (const id of TILE_IDS) {
-    const select = create("select");
-    for (const [value, text] of [["", "—"], ["show", "show"], ["hide", "hide"]]) {
-      const option = create("option", "", text);
-      option.value = value;
-      select.appendChild(option);
-    }
-    select.value = rule.tiles?.[id] ?? "";
-    select.addEventListener("change", () => editRule(index, value => {
-      const next = { ...(value.tiles ?? {}) };
-      if (select.value) next[id] = select.value;
-      else delete next[id];
-      return { ...value, tiles: next };
-    }));
-    tiles.appendChild(labelled(TILE_LABELS[id], select));
-  }
-  then.appendChild(tiles);
-  const overrides = create("div", "rule-tiles");
-  for (const [tile, key, text] of BOOLEAN_OVERRIDES) {
-    const select = create("select");
-    for (const [value, label] of [["", "—"], ["true", "on"], ["false", "off"]]) {
-      const option = create("option", "", label);
-      option.value = value;
-      select.appendChild(option);
-    }
-    const current = rule.settings?.[tile]?.[key];
-    select.value = current === undefined ? "" : String(current);
-    select.addEventListener("change", () => editRule(index, value => {
-      const settings = structuredCopy(value.settings ?? {});
-      if (select.value === "") {
-        if (settings[tile]) delete settings[tile][key];
-        if (settings[tile] && !Object.keys(settings[tile]).length) delete settings[tile];
-      } else {
-        settings[tile] = { ...settings[tile], [key]: select.value === "true" };
-      }
-      return { ...value, settings };
-    }));
-    overrides.appendChild(labelled(text, select));
-  }
-  then.appendChild(overrides);
-  card.appendChild(then);
-  return card;
-}
-
-function renderRules() {
-  if (rulesDialog.hidden) return;
-  const active = new Set(ruleEngine.active(layout, currentPlayerState, Date.now()).map(rule => rule.id));
-  rulesList.replaceChildren(...(layout.rules.length ? layout.rules.map((rule, index) => ruleCard(rule, index, active.has(rule.id)))
-    : [create("p", "empty-note", "No rules yet. Add one to switch layouts or show tiles automatically.")]));
-}
 
 // ------------------------------------------------------------------------------------------------- Wiring
 
@@ -1383,6 +1220,7 @@ featureHooks.layout.push(() => {
 });
 featureHooks.tick.push(() => {
   renderPickups(currentPlayerState);
+  renderRules();
 });
 
 // Panels that only appear on demand start hidden (the markup says so too).

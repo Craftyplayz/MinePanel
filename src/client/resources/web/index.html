@@ -256,11 +256,7 @@
         <h2 id="rules-dialog-title">Rules</h2>
         <button type="button" class="button" id="rules-dialog-close">Done</button>
       </header>
-      <p class="dialog-note">A rule applies while its conditions match: every <strong>AND</strong> group needs at least one of its conditions (so “in the Nether” AND “wearing elytra or swimming”). The first active rule that switches profile wins; show/hide and settings from all active rules apply in order. Rules pause while you customize.</p>
-      <div class="dialog-tools">
-        <button type="button" class="button" id="rule-add">Add rule</button>
-        <span class="save-status" id="rules-status" role="status"></span>
-      </div>
+      <p class="dialog-note">A rule applies <strong>Then</strong> while its <strong>When</strong> list matches, and <strong>Else</strong> otherwise. Each condition joins the one above with AND or OR; AND binds tighter, so “A and B or C” means (A and B) or C. Higher rules win when two change the same thing. Rules pause while you customize. The new rules editor is coming soon; until then rules are listed here read-only.</p>
       <div class="dialog-list" id="rules-list"></div>
     </section>
   </div>

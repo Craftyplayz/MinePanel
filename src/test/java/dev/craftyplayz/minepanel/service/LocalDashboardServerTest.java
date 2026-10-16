@@ -34,6 +34,7 @@ public final class LocalDashboardServerTest {
         testPngEncoder();
         testLayoutAndIcons();
         testProfilesRulesAndWorlds();
+        LayoutStoreTest.main(args);
         try (LocalDashboardServer server = new LocalDashboardServer()) {
             server.start();
             URI base = URI.create(server.getUrl());
@@ -426,11 +427,11 @@ public final class LocalDashboardServerTest {
                     .header("Cookie", cookie).GET().build(), HttpResponse.BodyHandlers.ofString());
             check(empty.statusCode() == 200 && empty.body().equals("{\"layout\":null}"), "no layout saved yet");
 
-            String layout = "{\"version\":1,\"extra\":true,\"tiles\":[{\"id\":\"player\",\"enabled\":true,"
+            String layout = "{\"version\":2,\"extra\":true,\"tiles\":[{\"id\":\"player\",\"enabled\":true,"
                     + "\"x\":2,\"y\":0,\"w\":4,\"h\":5,\"note\":\"dropped\"}]}";
             check(put(base, cookie, origin, "application/json", layout).statusCode() == 200, "layout saved");
             String saved = java.nio.file.Files.readString(file);
-            check(saved.equals("{\"version\":1,\"tiles\":[{\"id\":\"player\",\"enabled\":true,\"x\":2,\"y\":0,\"w\":4,\"h\":5}]}"),
+            check(saved.equals("{\"version\":2,\"tiles\":[{\"id\":\"player\",\"enabled\":true,\"x\":2,\"y\":0,\"w\":4,\"h\":5}]}"),
                     "layout file keeps only validated fields");
             HttpResponse<String> loaded = CLIENT.send(HttpRequest.newBuilder(base.resolve("api/layout"))
                     .header("Cookie", cookie).GET().build(), HttpResponse.BodyHandlers.ofString());
@@ -443,30 +444,31 @@ public final class LocalDashboardServerTest {
             check(put(base, cookie, "http://evil.example", "application/json", layout).statusCode() == 403,
                     "layout writes reject foreign origins");
             check(put(base, cookie, origin, "text/plain", layout).statusCode() == 415, "layout writes must be JSON");
-            for (String invalid : new String[] {"nope", "{}", "{\"version\":2,\"tiles\":[]}",
-                    "{\"version\":1,\"tiles\":[{\"id\":\"chat\",\"enabled\":true,\"x\":0,\"y\":0,\"w\":1,\"h\":1}]}",
-                    "{\"version\":1,\"tiles\":[{\"id\":\"player\",\"enabled\":true,\"x\":10,\"y\":0,\"w\":4,\"h\":1}]}",
-                    "{\"version\":1,\"tiles\":[{\"id\":\"player\",\"enabled\":\"yes\",\"x\":0,\"y\":0,\"w\":4,\"h\":1}]}",
-                    "{\"version\":1,\"tiles\":[{\"id\":\"player\",\"enabled\":true,\"x\":0.5,\"y\":0,\"w\":4,\"h\":1}]}"}) {
+            for (String invalid : new String[] {"nope", "{}", "{\"version\":3,\"tiles\":[]}",
+                    "{\"version\":1,\"tiles\":[]}", // version 1 is only read, never saved
+                    "{\"version\":2,\"tiles\":[{\"id\":\"chat\",\"enabled\":true,\"x\":0,\"y\":0,\"w\":1,\"h\":1}]}",
+                    "{\"version\":2,\"tiles\":[{\"id\":\"player\",\"enabled\":true,\"x\":10,\"y\":0,\"w\":4,\"h\":1}]}",
+                    "{\"version\":2,\"tiles\":[{\"id\":\"player\",\"enabled\":\"yes\",\"x\":0,\"y\":0,\"w\":4,\"h\":1}]}",
+                    "{\"version\":2,\"tiles\":[{\"id\":\"player\",\"enabled\":true,\"x\":0.5,\"y\":0,\"w\":4,\"h\":1}]}"}) {
                 check(put(base, cookie, origin, "application/json", invalid).statusCode() == 400,
                         "invalid layout rejected: " + invalid);
             }
-            String withSettings = "{\"version\":1,\"tiles\":[],\"settings\":{\"inventory\":{\"showArmor\":false,\"x\":1},"
+            String withSettings = "{\"version\":2,\"tiles\":[],\"settings\":{\"inventory\":{\"showArmor\":false,\"x\":1},"
                     + "\"statistics\":{\"shown\":[\"minecraft:custom/minecraft:jump\",\"minecraft:custom/minecraft:jump\"],"
                     + "\"recentExcluded\":[\"minecraft:custom/minecraft:play_time\"]},\"map\":{\"url\":\"http://127.0.0.1:8080/\"},"
                     + "\"other\":true}}";
             check(put(base, cookie, origin, "application/json", withSettings).statusCode() == 200, "settings saved");
-            check(java.nio.file.Files.readString(file).equals("{\"version\":1,\"tiles\":[],\"settings\":{"
+            check(java.nio.file.Files.readString(file).equals("{\"version\":2,\"tiles\":[],\"settings\":{"
                             + "\"inventory\":{\"showArmor\":false},\"statistics\":{\"shown\":[\"minecraft:custom/minecraft:jump\"],"
                             + "\"recentExcluded\":[\"minecraft:custom/minecraft:play_time\"]},"
                             + "\"map\":{\"url\":\"http://127.0.0.1:8080/\"}}}"),
                     "settings keep known, validated keys with duplicate ids removed");
             for (String invalid : new String[] {
-                    "{\"version\":1,\"tiles\":[],\"settings\":{\"map\":{\"url\":\"https://example.com/\"}}}",
-                    "{\"version\":1,\"tiles\":[],\"settings\":{\"map\":{\"url\":\"http://127.0.0.1.evil.example/\"}}}",
-                    "{\"version\":1,\"tiles\":[],\"settings\":{\"inventory\":{\"showArmor\":\"no\"}}}",
-                    "{\"version\":1,\"tiles\":[],\"settings\":{\"statistics\":{\"shown\":[\"jump\"]}}}",
-                    "{\"version\":1,\"tiles\":[],\"settings\":[]}"}) {
+                    "{\"version\":2,\"tiles\":[],\"settings\":{\"map\":{\"url\":\"https://example.com/\"}}}",
+                    "{\"version\":2,\"tiles\":[],\"settings\":{\"map\":{\"url\":\"http://127.0.0.1.evil.example/\"}}}",
+                    "{\"version\":2,\"tiles\":[],\"settings\":{\"inventory\":{\"showArmor\":\"no\"}}}",
+                    "{\"version\":2,\"tiles\":[],\"settings\":{\"statistics\":{\"shown\":[\"jump\"]}}}",
+                    "{\"version\":2,\"tiles\":[],\"settings\":[]}"}) {
                 check(put(base, cookie, origin, "application/json", invalid).statusCode() == 400,
                         "invalid settings rejected: " + invalid);
             }
@@ -518,12 +520,13 @@ public final class LocalDashboardServerTest {
         java.nio.file.Path layoutFile = java.nio.file.Files.createTempDirectory("minepanel-layout").resolve("layout.json");
         LayoutStore rates = new LayoutStore(layoutFile);
         check(rates.updateIntervalMillis() == LayoutStore.DEFAULT_UPDATE_INTERVAL, "update rate defaults to 4/s");
-        rates.save(full);
+        String saveable = "{\"version\":2,\"tiles\":[],\"updates\":{\"intervalMillis\":100}}";
+        rates.save(saveable);
         check(rates.updateIntervalMillis() == 100, "saving a layout changes the update rate immediately");
         LayoutStore reloaded = new LayoutStore(layoutFile);
         reloaded.load();
         check(reloaded.updateIntervalMillis() == 100, "the saved update rate is restored on startup");
-        rates.save(full.replace(",\"updates\":{\"intervalMillis\":100}", ""));
+        rates.save(saveable.replace(",\"updates\":{\"intervalMillis\":100}", ""));
         check(rates.updateIntervalMillis() == LayoutStore.DEFAULT_UPDATE_INTERVAL, "a layout without a rate resets it");
 
         java.nio.file.Path directory = java.nio.file.Files.createTempDirectory("minepanel-worlds");
