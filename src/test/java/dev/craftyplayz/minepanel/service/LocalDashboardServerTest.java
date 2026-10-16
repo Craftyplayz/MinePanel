@@ -565,7 +565,7 @@ public final class LocalDashboardServerTest {
             check(delete(villager, cookie, origin).statusCode() == 200 && worlds.villagers().isEmpty(),
                     "a villager is forgotten");
             check(delete(villager, cookie, origin).statusCode() == 404, "forgetting twice reports not found");
-            for (String asset : new String[] {"rules.js", "features.js", "features.css"}) {
+            for (String asset : new String[] {"rules.js", "player-links.js", "features.js", "features.css"}) {
                 check(get(base.resolve(asset)).statusCode() == 200, asset + " is served");
             }
         }

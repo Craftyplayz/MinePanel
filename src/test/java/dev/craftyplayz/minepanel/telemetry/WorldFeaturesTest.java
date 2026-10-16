@@ -133,6 +133,12 @@ public final class WorldFeaturesTest {
         check(delta.contains("\"motion\":{\"mode\":\"elytra\",\"speed\":30.0,\"horizontalSpeed\":30.0,"
                         + "\"verticalSpeed\":-1.2,\"yaw\":0.0,\"pitch\":12.0") && !delta.contains("\"world\""),
                 "only changed detail fields are sent, rounded: " + delta);
+        check(json.contains("\"icons\":{\"name\":\"Steve\",\"uuid\":\"8667ba71-b85a-4004-af54-457a9734eed7\",\"head\":null,"),
+                "the head's owner is sent with the icons: " + json);
+        var chest = details.icons().enderChest();
+        invalid(() -> new PlayerDetails.Icons("", "8667ba71-b85a-4004-af54-457a9734eed7", null, chest));
+        invalid(() -> new PlayerDetails.Icons("Steve", "8667BA71-B85A-4004-AF54-457A9734EED7", null, chest));
+        invalid(() -> new PlayerDetails.Icons("Steve", "8667ba71b85a4004af54457a9734eed7", null, chest));
         invalid(() -> new WorldInfo("server", "x", "minecraft:plains", "Plains", "snow", 0, 0, "survival"));
         invalid(() -> new VillagerSnapshot("not-a-uuid", "minecraft:librarian", "Librarian", 1, null,
                 "minecraft:overworld", 0, 0, 0, 0, 0, List.of()));

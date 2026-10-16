@@ -974,79 +974,317 @@ function shareRules(layout, ids, folderId = null) {
 const slug = (text, fallback) => text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 24)
   || fallback;
 
-/**
- * Adds the rules of a share string to a layout. Places that match an existing one exactly, and toggles with the
- * same name, are reused; "Switch profile" goes to the profile with the same name, and is dropped if there is none.
- * Conditions that refer to something the string doesn't carry are left out too. Returns { layout (validated),
- * rules: the new rule ids, folder: the new folder's id or null, dropped: how many conditions and actions were left
- * out }; throws an Error saying what's wrong, naming the rule if one is invalid.
- */
-function importShare(layout, text) {
+// ---------------------------------------------------------------------------------------------- Rule sets
+
+// A rule set is plain JSON (docs/RULE_SETS.md): { format: "minepanel-rules", version: 1, folders, places, toggles,
+// rules }. It is what "Download all rules" saves and what Import reads, from a file or pasted; share strings carry
+// the same data. Ids in it only link its own parts together: importing gives everything fresh ids, unless "replace"
+// starts from no rules, folders, places or toggles, where the file's own ids are kept.
+
+const RULE_SET_FORMAT = "minepanel-rules";
+const RULE_SET_VERSION = 1;
+const MAX_IMPORT_WARNINGS = 50;
+
+/** Pasted or loaded text: a share string, or rule set JSON. */
+function readRuleSet(text) {
   const trimmed = typeof text === "string" ? text.trim() : "";
-  ensure(trimmed.startsWith(SHARE_PREFIX) && trimmed.length <= MAX_SHARE_LENGTH, "Not a MinePanel share string");
-  let data;
+  ensure(trimmed.length > 0, "Paste a share string or a rule set, or choose a file");
+  ensure(trimmed.length <= MAX_SHARE_LENGTH, "That is too long for a rule set");
+  if (trimmed.startsWith("{")) {
+    try {
+      return JSON.parse(trimmed);
+    } catch (error) {
+      throw new Error(`Not valid JSON: ${error.message}`);
+    }
+  }
+  ensure(trimmed.startsWith(SHARE_PREFIX), "Not a MinePanel share string or rule set");
   try {
-    data = JSON.parse(fromBase64url(trimmed.slice(SHARE_PREFIX.length)));
-  } catch (error) {
+    return JSON.parse(fromBase64url(trimmed.slice(SHARE_PREFIX.length)));
+  } catch {
     throw new Error("Not a MinePanel share string");
   }
-  ensure(isObject(data) && data.version === SHARE_VERSION, "This share string is from a newer MinePanel");
-  ensure(Array.isArray(data.rules) && data.rules.length > 0 && data.rules.every(isObject)
-    && ["places", "toggles", "profiles"].every(key => Array.isArray(data[key]) && data[key].every(isObject))
-    && (data.folder === null || isObject(data.folder)), "Invalid share string");
-  const places = [...layout.places];
+}
+
+/** Adds (or with replace, puts in place of the current ones) the rules of a share string or rule set text. */
+function importShare(layout, text, options) {
+  return importRuleSet(layout, readRuleSet(text), options);
+}
+
+/** A profile in a rule set: its name, every panel ("off", or where it is and its mode) and the settings it changes. */
+function exportProfile(profile) {
+  const panels = {};
+  for (const tile of profile.tiles) {
+    const id = tile.id;
+    // Off panels keep their spot too: it's where they appear when turned on.
+    const mode = !tile.enabled ? { mode: "off" } : tile.rulesOnly ? { mode: "rules" } : {};
+    panels[id] = { x: tile.x, y: tile.y, w: tile.w, h: tile.h, ...mode };
+  }
+  const defaults = defaultSettings();
+  const settings = {};
+  for (const [panel, key] of SETTING_RULES) {
+    const value = profile.settings[panel][key];
+    if (JSON.stringify(value) !== JSON.stringify(defaults[panel][key])) settings[panel] = { ...settings[panel], [key]: value };
+  }
+  return { id: profile.id, name: profile.name, panels, settings };
+}
+
+/**
+ * The tiles of a profile from a rule set's "panels": panel id → "off" or { x, y, w, h, mode: "on" | "rules" | "off" }.
+ * Panels left out are off. Panels then settle as on the dashboard (up to the highest free row, no overlaps, at least
+ * their minimum size, within 12 columns); a panel that ends up elsewhere than asked gets a warning.
+ */
+function panelsToTiles(panels, label, warnings) {
+  ensure(isObject(panels), `${label}: "panels" must be an object of panel ids`);
+  const defaults = defaultLayout().tiles;
+  const raw = [];
+  const requested = new Map();
+  for (const [id, spec] of Object.entries(panels)) {
+    const where = `${label}, panel "${id}"`;
+    ensure(TILE_IDS.includes(id), `${label}: unknown panel "${id}"`);
+    const fallback = defaults.find(tile => tile.id === id);
+    if (spec === "off") {
+      raw.push({ ...fallback, enabled: false });
+      continue;
+    }
+    ensure(isObject(spec), `${where}: must be "off" or { x, y, w, h, mode }`);
+    const mode = spec.mode ?? "on";
+    ensure(["on", "rules", "off"].includes(mode), `${where}: mode must be "on", "rules" or "off"`);
+    const keys = ["x", "y", "w", "h"];
+    const placed = keys.some(key => spec[key] !== undefined);
+    ensure(placed ? keys.every(key => wholeNumber(spec[key])) : mode === "off",
+      `${where}: needs x, y, w and h as whole numbers`);
+    const extra = ignoredKeys(spec, { x: 0, y: 0, w: 0, h: 0, mode: "" });
+    if (extra.length) warnings.push(`${where}: ignored ${extra.map(key => `"${key}"`).join(", ")}`);
+    const rect = placed ? { x: spec.x, y: spec.y, w: spec.w, h: spec.h }
+      : { x: fallback.x, y: fallback.y, w: fallback.w, h: fallback.h };
+    raw.push({ id, enabled: mode !== "off", ...rect, ...(mode === "rules" ? { rulesOnly: true } : {}) });
+    if (mode !== "off") requested.set(id, rect);
+  }
+  const tiles = normalizeTiles(raw);
+  for (const tile of tiles) {
+    const want = requested.get(tile.id);
+    if (want && ["x", "y", "w", "h"].some(key => want[key] !== tile[key])) {
+      warnings.push(`${label}, panel "${tile.id}": placed at x ${tile.x}, y ${tile.y}, ${tile.w} × ${tile.h} instead of `
+        + `x ${want.x}, y ${want.y}, ${want.w} × ${want.h} (panels move up to the highest free row, can't overlap, `
+        + "keep their minimum size and stay within 12 columns)");
+    }
+  }
+  return tiles;
+}
+
+/**
+ * The profiles of a rule set. An entry with "panels" or "settings" defines a profile: one named "Default" (or with
+ * id "default") changes the Default layout, one named like an existing profile changes it, and any other is added.
+ * Without "panels" a profile keeps its panels (a new one gets the default arrangement); without "settings" it keeps
+ * its settings (a new one gets the defaults). With replace, profiles the rule set doesn't define are removed, if it
+ * defines any. Entries with only an id and a name (as in share strings) just say which profile a name means.
+ * Returns { tiles, settings (Default's), profiles, ids: rule set profile id → profile id }.
+ */
+function importProfiles(layout, entries, replace, warnings) {
+  const definitions = entries.filter(entry => entry.panels !== undefined || entry.settings !== undefined);
+  let tiles = layout.tiles;
+  let settings = layout.settings;
+  const profiles = replace && definitions.length ? [] : [...layout.profiles];
+  const ids = new Map();
+  const used = new Set(["default", ...profiles.map(profile => profile.id)]);
+  const seen = new Set();
+  const known = new Set(SETTING_RULES.map(([panel, key]) => `${panel}.${key}`));
+  definitions.forEach((entry, index) => {
+    ensure(validName(entry.name), `Profile ${index + 1}: needs a name of 1–64 characters`);
+    const label = `Profile "${entry.name}"`;
+    const name = entry.name.toLowerCase();
+    ensure(!seen.has(name), `${label}: defined twice`);
+    seen.add(name);
+    const extra = ignoredKeys(entry, { id: 0, name: 0, panels: 0, settings: 0 });
+    if (extra.length) warnings.push(`${label}: ignored ${extra.map(key => `"${key}"`).join(", ")}`);
+    const isDefault = entry.id === "default" || name === "default";
+    const existing = isDefault ? getProfile(layout, "default")
+      : profiles.find(profile => profile.name.toLowerCase() === name);
+    const nextTiles = entry.panels === undefined ? existing?.tiles ?? defaultLayout().tiles
+      : panelsToTiles(entry.panels, label, warnings);
+    let nextSettings = existing?.settings ?? defaultSettings();
+    if (entry.settings !== undefined) {
+      try {
+        nextSettings = normalizeSettings(entry.settings);
+      } catch (error) {
+        throw new Error(`${label}: ${error.message}`);
+      }
+      const unknown = Object.entries(entry.settings).flatMap(([panel, values]) => isObject(values)
+        ? Object.keys(values).filter(key => !known.has(`${panel}.${key}`)).map(key => `${panel}.${key}`) : [panel]);
+      if (unknown.length) warnings.push(`${label}: ignored settings ${unknown.map(key => `"${key}"`).join(", ")}`);
+    }
+    if (isDefault) {
+      tiles = nextTiles;
+      settings = nextSettings;
+      ids.set(entry.id ?? "default", "default");
+    } else if (existing) {
+      profiles[profiles.indexOf(existing)] = { ...existing, tiles: nextTiles, settings: nextSettings };
+      if (entry.id !== undefined) ids.set(entry.id, existing.id);
+    } else {
+      const id = uniqueId(validId(entry.id) ? entry.id : slug(entry.name, "profile"), used);
+      profiles.push({ id, name: entry.name, tiles: nextTiles, settings: nextSettings });
+      if (entry.id !== undefined) ids.set(entry.id, id);
+    }
+  });
+  ensure(profiles.length <= MAX_PROFILES, `At most ${MAX_PROFILES} profiles besides Default`);
+  return { tiles, settings, profiles, ids, defined: definitions.length };
+}
+
+/** Everything a rule set holds: profiles (Default first), folders, places, toggles and rules. Switch profile names
+ * the profile instead of its id. */
+function exportRuleSet(layout) {
+  const profileName = id => id === "default" ? "default" : layout.profiles.find(profile => profile.id === id)?.name ?? id;
+  const actions = list => list.map(action => action.do === "profile" ? { ...action, profile: profileName(action.profile) } : action);
+  return { format: RULE_SET_FORMAT, version: RULE_SET_VERSION,
+    profiles: [getProfile(layout, "default"), ...layout.profiles].map(exportProfile),
+    folders: structuredCopy(layout.folders), places: structuredCopy(layout.places), toggles: structuredCopy(layout.toggles),
+    rules: layout.rules.map(rule => ({ ...structuredCopy(rule), then: actions(rule.then), else: actions(rule.else) })) };
+}
+
+/** Keys of {@code source} that normalizing dropped (misspelled or not used by this type), as "a", "b". */
+function ignoredKeys(source, normalized, allowed = []) {
+  if (!isObject(source) || !isObject(normalized)) return [];
+  return Object.keys(source).filter(key => !Object.hasOwn(normalized, key) && !allowed.includes(key));
+}
+
+/** Warnings for every key the validator ignored, so a typo in a hand- or agent-written file doesn't go unnoticed. */
+function ignoredKeyWarnings(sources, layout) {
+  const warnings = [];
+  const byId = new Map(layout.rules.map(rule => [rule.id, rule]));
+  for (const source of sources) {
+    const rule = byId.get(source.id);
+    const label = `Rule "${rule.name}"`;
+    const note = (where, keys) => {
+      if (keys.length) warnings.push(`${label}${where ? `: ${where}` : ""}: ignored ${keys.map(key => `"${key}"`).join(", ")}`);
+    };
+    note("", ignoredKeys(source, rule));
+    if (Array.isArray(source.when)) {
+      source.when.forEach((condition, index) => note(`condition ${index + 1}`,
+        ignoredKeys(condition, rule.when[index], index === 0 ? ["join"] : [])));
+    }
+    for (const [list, title] of [["then", "Then"], ["else", "Else"]]) {
+      if (Array.isArray(source[list])) {
+        source[list].forEach((action, index) => note(`${title} action ${index + 1}`, ignoredKeys(action, rule[list][index])));
+      }
+    }
+    note("timing", ignoredKeys(source.timing, rule.timing));
+    note("animation", ignoredKeys(source.animation, rule.animation));
+  }
+  return warnings;
+}
+
+/**
+ * Adds a rule set (or a share string's data) to a layout, or with {@code replace} puts it in place of the current
+ * rules, folders, places and toggles. Missing optional fields get their defaults (rules and folders enabled, no
+ * folder, empty lists). Places equal in every field to an existing one, and toggles with the same name, are reused.
+ * "Switch profile" names a profile (by name or id, or "default"); conditions that refer to a place, toggle or rule
+ * the rule set doesn't have, and profiles this dashboard doesn't have, are left out with a warning. The result is
+ * validated as a whole. Returns { layout, rules: the new rule ids, folders: the new folder ids, folder: the first of
+ * them or null, dropped: how many conditions and actions were left out, warnings }; throws an Error saying what's
+ * wrong, naming the rule if one is invalid.
+ */
+function importRuleSet(layout, data, { replace = false } = {}) {
+  ensure(isObject(data), "A rule set is a JSON object");
+  ensure(data.format === undefined || data.format === RULE_SET_FORMAT, `"format" must be "${RULE_SET_FORMAT}"`);
+  ensure(data.version === RULE_SET_VERSION, typeof data.version === "number" && data.version > RULE_SET_VERSION
+    ? "This rule set is from a newer MinePanel" : `"version" must be ${RULE_SET_VERSION}`);
+  const list = key => {
+    if (data[key] === undefined || data[key] === null) return [];
+    ensure(Array.isArray(data[key]) && data[key].every(isObject), `"${key}" must be a list of objects`);
+    return data[key];
+  };
+  const sourceRules = list("rules");
+  ensure(sourceRules.length > 0, "The rule set has no rules");
+  // Share strings carry one folder, as "folder", and mark its rules with folder "shared"; rule sets list folders.
+  ensure(data.folder === undefined || data.folder === null || isObject(data.folder), "\"folder\" must be an object");
+  const sourceFolders = isObject(data.folder) ? [{ ...data.folder, id: "shared" }] : list("folders");
+  const base = replace ? { ...layout, rules: [], folders: [], places: [], toggles: [] } : layout;
+  const warnings = [];
+  let dropped = 0;
+  const places = [...base.places];
   const placeIds = new Map();
   const usedPlaces = idSet(places);
-  for (const place of data.places) {
+  for (const place of list("places")) {
     const same = places.find(entry => ["name", "world", "dimension", "x", "y", "z"].every(key => entry[key] === place[key]));
-    const id = same?.id ?? uniqueId(slug(String(place.name ?? ""), "place"), usedPlaces);
+    const id = same?.id ?? uniqueId(validId(place.id) ? place.id : slug(String(place.name ?? ""), "place"), usedPlaces);
     if (!same) places.push({ ...place, id });
     placeIds.set(place.id, id);
   }
-  const toggles = [...layout.toggles];
+  const toggles = [...base.toggles];
   const toggleIds = new Map();
   const usedToggles = idSet(toggles);
-  for (const toggle of data.toggles) {
+  for (const toggle of list("toggles")) {
     const same = toggles.find(entry => entry.name === toggle.name);
-    const id = same?.id ?? uniqueId(slug(String(toggle.name ?? ""), "toggle"), usedToggles);
-    if (!same) toggles.push({ ...toggle, id });
+    const id = same?.id ?? uniqueId(validId(toggle.id) ? toggle.id : slug(String(toggle.name ?? ""), "toggle"), usedToggles);
+    if (!same) toggles.push({ ...toggle, on: toggle.on ?? false, id });
     toggleIds.set(toggle.id, id);
   }
-  const profileIds = new Map(data.profiles.map(profile => [profile.id,
-    layout.profiles.find(entry => entry.name === profile.name)?.id]));
-  profileIds.set("default", "default");
-  const folders = [...layout.folders];
-  let folderId = null;
-  if (data.folder) {
-    folderId = uniqueId(slug(String(data.folder.name ?? ""), "folder"), idSet(folders));
-    folders.push({ id: folderId, name: data.folder.name, enabled: data.folder.enabled, collapsed: false });
+  const folders = [...base.folders];
+  const folderIds = new Map();
+  const usedFolders = idSet(folders);
+  for (const folder of sourceFolders) {
+    const id = uniqueId(folder.id !== "shared" && validId(folder.id) ? folder.id : slug(String(folder.name ?? ""), "folder"),
+      usedFolders);
+    folders.push({ ...folder, id, enabled: folder.enabled ?? true, collapsed: folder.collapsed ?? false });
+    folderIds.set(folder.id, id);
   }
-  const usedRules = idSet(layout.rules);
-  const ruleIds = new Map(data.rules.map(rule => [rule.id, uniqueId(slug(String(rule.id ?? ""), "rule"), usedRules)]));
-  let dropped = 0;
-  const actions = list => (Array.isArray(list) ? list : []).filter(action => {
-    if (action?.do !== "profile") return true;
-    const kept = profileIds.get(action.profile) !== undefined;
-    if (!kept) dropped++;
-    return kept;
-  }).map(action => action.do === "profile" ? { ...action, profile: profileIds.get(action.profile) } : action);
-  const rules = data.rules.map(rule => ({ ...rule, id: ruleIds.get(rule.id),
-    folder: folderId && rule.folder ? folderId : null,
-    // A reference the share string doesn't carry must not land on an unrelated place, toggle or rule here.
-    when: (Array.isArray(rule.when) ? rule.when : []).flatMap(condition => {
+  const sourceProfiles = list("profiles");
+  const arranged = importProfiles(layout, sourceProfiles, replace, warnings);
+  // Share strings list the profiles they use (id and name), so their actions are matched by name.
+  const profileNames = new Map(sourceProfiles.map(profile => [profile.id, profile.name]));
+  const findProfile = value => {
+    if (value === "default" || value === "Default") return "default";
+    if (typeof value !== "string") return undefined;
+    if (arranged.ids.has(value)) return arranged.ids.get(value);
+    const name = profileNames.get(value);
+    if (name === undefined && arranged.profiles.some(profile => profile.id === value)) return value;
+    const wanted = (name ?? value).toLowerCase();
+    return arranged.profiles.find(profile => profile.name.toLowerCase() === wanted)?.id;
+  };
+  const usedRules = idSet(base.rules);
+  const newIds = sourceRules.map(rule => uniqueId(validId(rule.id) ? rule.id : slug(String(rule.name ?? ""), "rule"),
+    usedRules));
+  const ruleIds = new Map();
+  sourceRules.forEach((rule, index) => {
+    if (rule.id !== undefined && !ruleIds.has(rule.id)) ruleIds.set(rule.id, newIds[index]);
+  });
+  const rules = sourceRules.map((rule, index) => {
+    const label = validName(rule.name) ? `Rule "${rule.name}"` : `Rule ${index + 1}`;
+    ensure(rule.folder === undefined || rule.folder === null || folderIds.has(rule.folder),
+      `${label}: folder "${rule.folder}" isn't in the rule set's folders`);
+    const actions = (value, title) => !Array.isArray(value) ? value : value.flatMap((action, position) => {
+      if (!isObject(action) || action.do !== "profile") return [action];
+      const profile = findProfile(action.profile);
+      if (profile !== undefined) return [{ ...action, profile }];
+      dropped++;
+      warnings.push(`${label}: ${title} action ${position + 1} left out: no profile "${action.profile}" on this dashboard`);
+      return [];
+    });
+    const when = !Array.isArray(rule.when) ? rule.when ?? [] : rule.when.flatMap((condition, position) => {
       if (!isObject(condition)) return [condition];
-      const [key, ids] = condition.place !== undefined ? ["place", placeIds]
-        : condition.type === "toggle" ? ["toggle", toggleIds] : condition.type === "ruleActive" ? ["rule", ruleIds] : [];
+      const [key, ids, what] = condition.place !== undefined ? ["place", placeIds, "place"]
+        : condition.type === "toggle" ? ["toggle", toggleIds, "toggle"]
+          : condition.type === "ruleActive" ? ["rule", ruleIds, "rule"] : [];
       if (!key) return [condition];
+      // A reference the rule set doesn't carry must not land on an unrelated place, toggle or rule here.
       if (!ids.has(condition[key])) {
         dropped++;
+        warnings.push(`${label}: condition ${position + 1} left out: ${what} "${condition[key]}" isn't in the rule set`);
         return [];
       }
       return [{ ...condition, [key]: ids.get(condition[key]) }];
-    }),
-    then: actions(rule.then), else: actions(rule.else) }));
-  const next = normalizeLayout({ ...layout, places, toggles, folders, rules: [...layout.rules, ...rules] });
-  return { layout: next, rules: rules.map(rule => rule.id), folder: folderId, dropped };
+    });
+    return { ...rule, id: newIds[index], enabled: rule.enabled ?? true,
+      folder: rule.folder == null ? null : folderIds.get(rule.folder), when,
+      then: actions(rule.then ?? [], "Then"), else: actions(rule.else ?? [], "Else") };
+  });
+  const next = normalizeLayout({ ...base, tiles: arranged.tiles, settings: arranged.settings, profiles: arranged.profiles,
+    places, toggles, folders, rules: [...base.rules, ...rules] });
+  warnings.push(...ignoredKeyWarnings(rules, next));
+  return { layout: next, rules: rules.map(rule => rule.id), profiles: arranged.defined, folders: [...folderIds.values()],
+    folder: folderIds.values().next().value ?? null, dropped,
+    warnings: warnings.length > MAX_IMPORT_WARNINGS
+      ? [...warnings.slice(0, MAX_IMPORT_WARNINGS), `… and ${warnings.length - MAX_IMPORT_WARNINGS} more`] : warnings };
 }
 
 // ------------------------------------------------------------------------------------------------ Migration

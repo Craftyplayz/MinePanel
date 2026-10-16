@@ -6,7 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const web = path.join(__dirname, "../../client/resources/web");
-const sources = ["protocol.js", "layout.js", "rules.js", "app.js", "features.js"].map(name => fs.readFileSync(path.join(web, name), "utf8"));
+const sources = ["protocol.js", "layout.js", "rules.js", "app.js", "player-links.js", "features.js"].map(name => fs.readFileSync(path.join(web, name), "utf8"));
 
 function empty() {
   return { empty: true, itemId: null, name: null, count: 0, maxCount: 0,
@@ -54,7 +54,8 @@ function details() {
     portal: { crossing: null, obsidian: [], lit: null },
     pickups: [], advancements: null, villagers: [], enderChest: null, performance: performance(),
     build: { available: false, reason: "missing", placement: null, materials: [] },
-    icons: { head: item({ itemId: "minecraft:player_head", name: "Steve's Head", count: 1, icon: "e0-head" }),
+    icons: { name: "Steve", uuid: "8667ba71-b85a-4004-af54-457a9734eed7",
+      head: item({ itemId: "minecraft:player_head", name: "Steve's Head", count: 1, icon: "e0-head" }),
       enderChest: item({ itemId: "minecraft:ender_chest", name: "Ender Chest", count: 1, icon: "e0-ender" }) },
     sensors: sensors(), registries: registries()
   };
@@ -236,6 +237,7 @@ const hotbar = h => h.get("#inventory-grid").children.slice(0, 9);
 const main = h => h.get("#inventory-grid").children.slice(9, 36);
 const equipment = h => h.get("#inventory-grid").children.slice(36, 41);
 const extras = h => h.get("#inventory-grid").children.slice(41, 43);
+const spares = h => h.get("#inventory-grid").children.slice(43, 49);
 const slotParts = slot => {
   const [placeholder, icon, fallback, count, durability] = slot.children;
   return { placeholder, icon, fallback, count, durability, bar: durability.children[0] };
@@ -1398,6 +1400,8 @@ test("inventory grid places rows and armor, toggles armor and drops rows as the 
     equipment(h)[4].style.gridRow, equipment(h)[4].style.gridColumn], ["5", "2", "4", "1", "5"]);
   assert.deepEqual(extras(h).map(slot => [slot.style.gridRow, slot.style.gridColumn]), [["1", "9"], ["1", "6"]],
     "the ender chest follows the offhand and the head ends the equipment row");
+  assert.deepEqual(spares(h).map(slot => slot.hidden ? null : slot.style.gridColumn), ["7", "8", null, null, null, null],
+    "spare slots fill the equipment row between the ender chest and the head");
   assert.equal(h.get("#held-value").hidden, false);
 
   resize({ left: 0, top: 0, width: 728, height: 280 });
@@ -1406,6 +1410,8 @@ test("inventory grid places rows and armor, toggles armor and drops rows as the 
     [["1", "1"], ["2", "1"], ["3", "1"], ["4", "1"], ["4", "13"]], "armor column beside rows, offhand by the hotbar");
   assert.deepEqual(extras(h).map(slot => [slot.style.gridRow, slot.style.gridColumn]), [["1", "13"], ["3", "13"]],
     "the head tops the offhand column with the ender chest above the offhand");
+  assert.deepEqual(spares(h).map(slot => slot.hidden ? null : [slot.style.gridRow, slot.style.gridColumn]),
+    [["2", "13"], null, null, null, null, null], "a spare slot fills the side column between head and ender chest");
   assert.equal(hotbar(h)[0].style.gridColumn, "3");
 
   h.get("#armor-toggle").emit("click");
@@ -1430,6 +1436,83 @@ test("inventory grid places rows and armor, toggles armor and drops rows as the 
   resize({ left: 0, top: 0, width: 524, height: 128 });
   assert.deepEqual(main(h).map(slot => slot.hidden), [...Array(18).fill(true), ...Array(9).fill(false)],
     "the main row next to the hotbar appears first");
+});
+
+test("the player head opens a lookup menu with groups, links and a page picker, contacting nothing until clicked", async () => {
+  const requests = [];
+  const h = harness(defaultFetch(null, requests));
+  await h.flush();
+  h.sockets[0].message(initial());
+  await h.flush();
+  const head = extras(h)[0];
+  const menu = h.get("#player-menu");
+  const dialog = h.get("#player-link-dialog");
+  assert.equal(menu.hidden, true);
+  assert.equal(head.className, "slot clickable", "the head is framed like any other slot");
+  assert.equal(extras(h)[1].className, "slot clickable", "and so is the ender chest");
+
+  head.emit("click");
+  assert.equal(menu.hidden, false);
+  const [header, ...groups] = menu.children;
+  assert.match(header.textContent, /^Steve8667ba71-b85a-4004-af54-457a9734eed7Copy nameCopy UUID$/);
+  assert.deepEqual(groups.map(row => row.dataset.group),
+    ["profile", "renders", "hypixel", "pvp", "data", "search"], "no server suggestions in singleplayer");
+  assert.ok(groups.every(row => row.children[1].textContent.length > 0), "every group says what it holds");
+
+  groups[0].emit("click");
+  const nameMc = menu.children.find(row => row.dataset.site === "NameMC");
+  assert.equal(menu.children[0].className, "player-menu-item player-menu-back");
+  assert.deepEqual([nameMc.tagName, nameMc.href, nameMc.target, nameMc.rel],
+    ["a", "https://namemc.com/profile/Steve", "_blank", "noopener noreferrer"]);
+  assert.match(nameMc.textContent, /^NameMCnamemc\.comName history/, "each site shows its domain and what it does");
+  menu.children[0].emit("click");
+  assert.equal(menu.children.length, 7, "Back returns to the groups");
+
+  menu.children.find(row => row.dataset.group === "renders").emit("click");
+  const minotar = menu.children.find(row => row.dataset.site === "Minotar");
+  assert.equal(minotar.tagName, "button", "sites with several pages open the picker instead of a link");
+  minotar.emit("click");
+  assert.equal(dialog.hidden, false);
+  assert.equal(h.get("#player-link-title").textContent, "Minotar");
+  const pages = h.get("#player-link-pages").children;
+  assert.deepEqual(pages.map(page => page.dataset.page).slice(0, 3), ["2D face", "2D face with hat", "3D head"]);
+  assert.deepEqual([pages[0].children[1].href, pages[0].children[1].rel],
+    ["https://minotar.net/avatar/Steve", "noopener noreferrer"]);
+  assert.ok(pages.every(page => page.children[0].children[1].textContent.length > 0), "every page is described");
+  menu.children.find(row => row.dataset.site === "Crafatar").emit("click");
+  assert.equal(h.get("#player-link-pages").children[0].children[1].href,
+    "https://crafatar.com/avatars/8667ba71b85a4004af54457a9734eed7?overlay", "UUID pages use the undashed UUID");
+
+  h.events.keyup({ key: "Escape" });
+  assert.deepEqual([dialog.hidden, menu.hidden], [true, false], "Escape closes the picker first");
+  h.events.keyup({ key: "Escape" });
+  assert.equal(menu.hidden, true, "then the menu");
+  head.emit("click");
+  head.emit("click");
+  assert.equal(menu.hidden, true, "clicking the head again closes it");
+  head.emit("click");
+  h.events.pointerdown({ target: h.get("#inventory-grid") });
+  assert.equal(menu.hidden, true, "clicking elsewhere closes it");
+  assert.ok(requests.every(request => request.url.startsWith("/")), "no lookup site was contacted");
+
+  h.run(`renderPlayerMenu({ name: "Alex", uuid: "0f2a4c1e-9b3d-3c5e-8f7a-1b2c3d4e5f60" }); undefined`);
+  assert.match(menu.children[0].textContent, /Offline-mode account/);
+  h.run(`playerMenuGroup = "renders"; renderPlayerMenu({ name: "Alex", uuid: "0f2a4c1e-9b3d-3c5e-8f7a-1b2c3d4e5f60" }); undefined`);
+  const crafatar = menu.children.find(row => row.dataset.site === "Crafatar");
+  assert.deepEqual([crafatar.tagName, crafatar.attributes["aria-disabled"]], ["span", "true"],
+    "UUID-only sites are greyed out for offline accounts");
+  assert.equal(menu.children.find(row => row.dataset.site === "Minotar").tagName, "button", "name lookups still work");
+
+  assert.equal(h.run(`playerLinkUrl("https://x.test/{name}/{uuid}/{uuidDashed}", { name: "a b&c", uuid: "8667ba71-b85a-4004-af54-457a9734eed7" })`),
+    "https://x.test/a%20b%26c/8667ba71b85a4004af54457a9734eed7/8667ba71-b85a-4004-af54-457a9734eed7");
+  assert.deepEqual(plain(h.run(`suggestedPlayerLinks({ kind: "server", name: "MC.Hypixel.net:25565" }).map(site => site.name)`)),
+    ["Plancke", "25Karma", "Sk1er", "SkyCrypt"]);
+  assert.deepEqual(plain(h.run(`suggestedPlayerLinks({ kind: "server", name: "not2b2t.org" })`)), [],
+    "only the server's own domain and its subdomains match");
+  h.run(`currentPlayerState = { ...currentPlayerState, world: { ...currentPlayerState.world, kind: "server", name: "2b2t.org" } }`);
+  head.emit("click");
+  assert.deepEqual(menu.children.slice(1, 4).map(row => row.textContent.split("2b2tiers")[0]),
+    ["Suggested for this server", "2B2Tiers", "All sites"], "sites for the current server come first");
 });
 
 test("player tile shows saturation and hunger above health, food, and status effects with timers and beacon markers", async () => {
@@ -1584,7 +1667,7 @@ const docLayout = () => ({ version: 2, tiles: [], profiles: [{ id: "nether", nam
 function rulesApi() {
   return harness().run(`({ normalizeLayout, migrateLayoutV1, normalizeLayoutV1, createRuleEngine, effectiveView,
     evaluateCondition, ruleBlocks, defaultLayout, removeProfile, ruleSegments, moveRuleInList, moveSegment, fileRule,
-    newRuleIndex, RULE_TEMPLATES, ruleFromTemplate, shareRules, importShare })`);
+    newRuleIndex, RULE_TEMPLATES, ruleFromTemplate, shareRules, importShare, importRuleSet, exportRuleSet })`);
 }
 
 const ruleLayout = (R, rules, extra = {}) => R.normalizeLayout({ version: 2, tiles: [], ...extra, rules });
@@ -2234,6 +2317,144 @@ test("rules v2: share strings carry rules with what they use, and importing only
   assert.throws(() => R.importShare(full, text), /Too many rules/);
 });
 
+test("rules v2: rule set files fill in defaults, link their own parts, warn about typos and can replace everything", () => {
+  const R = rulesApi();
+  const target = R.normalizeLayout({ version: 2, tiles: [], profiles: [{ id: "p1", name: "Nether trip", tiles: [] }],
+    toggles: [{ id: "afk", name: "AFK", on: true }],
+    rules: [{ id: "old", name: "Old", enabled: true, when: [] }] });
+  const set = { format: "minepanel-rules", version: 1,
+    folders: [{ id: "combat", name: "Combat" }, { id: "travel", name: "Travel", enabled: false }],
+    places: [{ id: "base", name: "Base", world: "W", dimension: "minecraft:overworld", x: 0, y: 64, z: 0 }],
+    toggles: [{ id: "quiet", name: "Quiet" }],
+    rules: [
+      { id: "danger", name: "Danger", folder: "combat",
+        when: [{ type: "hostilesNearby", radius: 16, compare: ">=", value: 3 }, { join: "and", type: "toggle", toggle: "quiet", not: true }],
+        then: [{ do: "show", panel: "history" }] },
+      { name: "Fleeing", folder: "combat", when: [{ type: "ruleActive", rule: "danger" },
+        { join: "and", type: "speed", axis: "total", comapre: ">=", compare: ">", value: 6 }],
+      then: [{ do: "notify", text: "Run!", cooldown: 30, sound: true }] },
+      { id: "home", name: "Home", folder: "travel", when: [{ type: "nearPlace", place: "base", radius: 32, flat: true }],
+        then: [{ do: "profile", profile: "nether trip" }, { do: "profile", profile: "Phone" }],
+        else: [{ do: "profile", profile: "default" }], timing: { lingerMs: 1000, delay: 5 } }] };
+  const added = R.importRuleSet(target, set);
+  const next = added.layout;
+  assert.deepEqual(plain(next.rules.map(rule => rule.id)), ["old", "danger", "fleeing", "home"]);
+  assert.deepEqual(plain(next.folders), [{ id: "combat", name: "Combat", enabled: true, collapsed: false },
+    { id: "travel", name: "Travel", enabled: false, collapsed: false }]);
+  assert.deepEqual(plain(next.toggles), [{ id: "afk", name: "AFK", on: true }, { id: "quiet", name: "Quiet", on: false }]);
+  const [, danger, fleeing, home] = next.rules;
+  assert.equal(danger.enabled, true);
+  assert.equal(fleeing.when[0].rule, "danger");
+  assert.deepEqual(plain(home.then), [{ do: "profile", profile: "p1" }], "profiles are found by name, any case");
+  assert.deepEqual(plain(home.else), [{ do: "profile", profile: "default" }]);
+  assert.equal(added.dropped, 1);
+  assert.deepEqual(plain(added.folders), ["combat", "travel"]);
+  assert.deepEqual(plain(added.warnings), [
+    "Rule \"Home\": Then action 2 left out: no profile \"Phone\" on this dashboard",
+    "Rule \"Fleeing\": condition 2: ignored \"comapre\"",
+    "Rule \"Fleeing\": Then action 1: ignored \"sound\"",
+    "Rule \"Home\": timing: ignored \"delay\""]);
+  // Importing again only adds, with fresh ids that still link up.
+  const again = R.importRuleSet(next, set).layout;
+  assert.deepEqual(plain(again.rules.slice(4).map(rule => rule.id)), ["danger-2", "fleeing-2", "home-2"]);
+  assert.equal(again.rules[5].when[0].rule, "danger-2");
+  assert.equal(again.rules[4].folder, "combat-2");
+  // Replace starts from no rules, folders, places or toggles and keeps the file's ids; the rest of the layout stays.
+  const replaced = R.importRuleSet(again, set, { replace: true }).layout;
+  assert.deepEqual(plain(replaced.rules.map(rule => rule.id)), ["danger", "fleeing", "home"]);
+  assert.deepEqual(plain(replaced.toggles.map(toggle => toggle.id)), ["quiet"]);
+  assert.deepEqual(plain(replaced.profiles), plain(target.profiles));
+  // Export and re-import with replace gives the same rules back.
+  const exported = JSON.parse(JSON.stringify(R.exportRuleSet(replaced)));
+  assert.equal(exported.rules[2].then[0].profile, "Nether trip", "exports name the profile");
+  assert.deepEqual(plain(R.importRuleSet(replaced, exported, { replace: true }).layout), plain(replaced));
+  assert.deepEqual(plain(R.importShare(replaced, JSON.stringify(exported), { replace: true }).layout), plain(replaced),
+    "the same rule set pasted as text");
+  for (const [bad, message] of [[{ ...set, version: 2 }, /newer/], [{ ...set, format: "other" }, /format/],
+    [{ ...set, rules: [] }, /no rules/], [{ ...set, rules: [{ name: "X", folder: "nope", when: [] }] }, /Rule "X": folder "nope"/],
+    [{ ...set, rules: [{ name: "X", when: [{ type: "health", compare: "<" }] }] }, /Rule "X": condition 1: compare: invalid value/],
+    [{ ...set, folders: "combat" }, /"folders" must be a list/]]) {
+    assert.throws(() => R.importRuleSet(target, bad), message);
+  }
+  assert.throws(() => R.importShare(target, "{ not json"), /Not valid JSON/);
+});
+
+test("rules v2: rule sets arrange profiles: Default, existing ones by name and new ones, with warnings", () => {
+  const R = rulesApi();
+  const target = R.normalizeLayout({ version: 2, tiles: [{ id: "player", enabled: true, x: 0, y: 0, w: 4, h: 4 }],
+    settings: { xp: { window: 300 } },
+    profiles: [{ id: "keep", name: "Keep", tiles: [] }, { id: "mine", name: "Mining", tiles: [], settings: { xp: { window: 10 } } }],
+    rules: [] });
+  const set = { format: "minepanel-rules", version: 1,
+    profiles: [
+      { name: "default", panels: { map: { x: 0, y: 0, w: 8, h: 10 }, player: { x: 8, y: 0, w: 4, h: 4, mode: "rules" },
+        xp: { x: 8, y: 9, w: 4, h: 4 }, inventory: "off" } },
+      { name: "mining", settings: { pickups: { maxRows: 12, colour: "red" }, xp: { window: 3600 } } },
+      { id: "fly", name: "Flying", panels: { map: { x: 0, y: 0, w: 12, h: 12, size: "big" } }, layout: true }],
+    rules: [{ name: "Fly", when: [{ type: "movement", values: ["elytra"] }], then: [{ do: "profile", profile: "fly" }] }] };
+  const result = R.importRuleSet(target, set);
+  const next = result.layout;
+  const tile = (tiles, id) => plain(tiles.find(entry => entry.id === id));
+  assert.equal(result.profiles, 3);
+  assert.deepEqual(tile(next.tiles, "map"), { id: "map", enabled: true, x: 0, y: 0, w: 8, h: 10 });
+  assert.deepEqual(tile(next.tiles, "player"), { id: "player", enabled: true, x: 8, y: 0, w: 4, h: 4, rulesOnly: true });
+  assert.deepEqual(tile(next.tiles, "xp"), { id: "xp", enabled: true, x: 8, y: 4, w: 4, h: 4 }, "it floats up");
+  assert.equal(tile(next.tiles, "inventory").enabled, false);
+  assert.equal(tile(next.tiles, "statistics").enabled, false, "panels left out are off");
+  assert.equal(next.settings.xp.window, 300, "Default keeps its settings when the file gives none");
+  const mining = next.profiles.find(profile => profile.id === "mine");
+  assert.equal(mining.settings.pickups.maxRows, 12);
+  assert.equal(mining.settings.xp.window, 3600);
+  assert.equal(mining.tiles.length, 12, "Mining keeps its panels");
+  const flying = next.profiles.find(profile => profile.name === "Flying");
+  assert.equal(flying.id, "fly");
+  assert.deepEqual(plain(next.profiles.map(profile => profile.id)), ["keep", "mine", "fly"], "others stay unless replacing");
+  assert.equal(next.rules[0].then[0].profile, "fly", "Switch profile can name a profile the rule set defines");
+  assert.deepEqual(plain(result.warnings), [
+    "Profile \"default\", panel \"xp\": placed at x 8, y 4, 4 × 4 instead of x 8, y 9, 4 × 4 (panels move up to the highest free row, can't overlap, keep their minimum size and stay within 12 columns)",
+    "Profile \"mining\": ignored settings \"pickups.colour\"",
+    "Profile \"Flying\": ignored \"layout\"",
+    "Profile \"Flying\", panel \"map\": ignored \"size\""]);
+  // Replace removes profiles the rule set doesn't define, but only if it defines some.
+  const replaced = R.importRuleSet(next, set, { replace: true }).layout;
+  assert.deepEqual(plain(replaced.profiles.map(profile => profile.name)), ["mining", "Flying"]);
+  const rulesOnly = R.importRuleSet(next, { version: 1, rules: set.rules }, { replace: true }).layout;
+  assert.deepEqual(plain(rulesOnly.profiles), plain(next.profiles));
+  // Export and import with replace gives the whole arrangement back.
+  const again = R.importRuleSet(next, JSON.parse(JSON.stringify(R.exportRuleSet(next))), { replace: true });
+  assert.deepEqual(plain(again.layout), plain(next));
+  assert.deepEqual(plain(again.warnings), []);
+  for (const [profiles, message] of [[[{ name: "X", panels: { radar: "off" } }], /Profile "X": unknown panel "radar"/],
+    [[{ name: "X", panels: { map: { x: 0, y: 0 } } }], /Profile "X", panel "map": needs x, y, w and h/],
+    [[{ name: "X", panels: { map: { x: 0, y: 0, w: 4, h: 4, mode: "auto" } } }], /mode must be/],
+    [[{ name: "X", panels: {} }, { name: "x", panels: {} }], /defined twice/],
+    [[{ panels: {} }], /Profile 1: needs a name/],
+    [[{ name: "X", settings: { xp: { window: 7 } } }], /Profile "X": Invalid xp settings/],
+    [Array.from({ length: 17 }, (_, index) => ({ name: `P${index}`, panels: {} })), /At most 16 profiles/]]) {
+    assert.throws(() => R.importRuleSet(target, { version: 1, profiles, rules: set.rules }), message);
+  }
+});
+
+test("rules v2: the examples in docs/RULE_SETS.md import as described", () => {
+  const R = rulesApi();
+  const doc = fs.readFileSync(path.join(__dirname, "../../../docs/RULE_SETS.md"), "utf8");
+  const examples = [...doc.matchAll(/```json\r?\n([\s\S]*?)```/g)].map(match => JSON.parse(match[1].replace(/^ {3}/gm, "")));
+  assert.equal(examples.length, 2);
+  const empty = R.normalizeLayout({ version: 2, tiles: [] });
+  const quick = R.importRuleSet(empty, examples[0]);
+  assert.deepEqual(plain(quick.warnings), []);
+  assert.equal(quick.layout.rules[0].when[0].for, 3);
+  const full = R.importRuleSet(empty, examples[1]);
+  assert.deepEqual(plain(full.warnings), [], "the example has no warnings");
+  assert.equal(full.layout.rules.length, 4);
+  assert.equal(full.layout.rules[3].then[0].profile, "nether", "Switch profile finds the profile the file defines");
+  assert.deepEqual(plain(full.layout.tiles.filter(tile => tile.enabled).map(tile => tile.id).sort()),
+    ["history", "inventory", "pickups", "player", "xp"]);
+  assert.equal(full.layout.tiles.find(tile => tile.id === "history").rulesOnly, true);
+  assert.equal(full.layout.settings.xp.window, 300);
+  assert.equal(full.layout.profiles[0].tiles.find(tile => tile.id === "map").w, 12);
+});
+
 test("detail fields and item contents are validated", () => {
   const h = harness();
   assert.equal(h.apply(undefined, initial(snapshot({ inventory: { ...inventory(),
@@ -2720,10 +2941,48 @@ test("rules editor: templates, folders, copy and paste, share and import", async
   byKey(detail, "import.text").value = "nonsense";
   buttonNamed(detail, "Import").emit("click");
   assert.ok(findAll(detail, element => element.className === "rules-error").some(element =>
-    element.textContent === "Not a MinePanel share string"));
+    element.textContent === "Not a MinePanel share string or rule set"));
   assert.equal(live().rules.length, 4);
   await h.runTimers(400);
   assert.equal(savedLayout(requests).rules.length, 4, "everything is saved");
+});
+
+test("rules editor: a rule set file is imported, replacing everything when asked, with its warnings listed", async () => {
+  const requests = [];
+  const stored = { version: 2, tiles: [], rules: [{ id: "old", name: "Old", enabled: true, when: [] }] };
+  const h = harness(defaultFetch(stored, requests));
+  await h.flush();
+  h.sockets[0].message(initial(snapshot()));
+  h.get("#rules-open").emit("click");
+  const sidebar = h.get("#rules-sidebar");
+  const detail = h.get("#rules-detail");
+  byKey(sidebar, "nav.import").emit("click");
+  const set = { format: "minepanel-rules", version: 1, rules: [{ name: "Night", when: [{ type: "time", values: ["night"] }],
+    then: [{ do: "focus", panel: "map", fill: "auto" }] }] };
+  const choose = async () => {
+    const file = byKey(detail, "import.file");
+    file.files = [{ text: async () => JSON.stringify(set) }];
+    file.emit("change");
+    await h.flush();
+  };
+  await choose();
+  assert.deepEqual(plain(h.run("layout")).rules.map(rule => rule.name), ["Old", "Night"]);
+  assert.deepEqual(findAll(detail, element => element.tagName === "li").map(element => element.textContent),
+    ["Rule \"Night\": Then action 1: ignored \"fill\""]);
+  setValue(byKey(detail, "import.replace"), true);
+  set.profiles = [{ name: "Default", panels: { map: { x: 0, y: 0, w: 12, h: 8 } } }, { name: "Night", panels: {} }];
+  await choose();
+  assert.deepEqual(plain(h.run("layout")).rules.map(rule => rule.id), ["night"]);
+  const arranged = plain(h.run("layout"));
+  assert.deepEqual(arranged.tiles.filter(tile => tile.enabled).map(tile => tile.id), ["map"], "the dashboard is rearranged");
+  assert.deepEqual(arranged.profiles.map(profile => profile.name), ["Night"]);
+  assert.match(findAll(detail, element => element.tagName === "p").map(element => element.textContent).join(" "),
+    /Arranged 2 profiles\./);
+  assert.match(findAll(detail, element => element.tagName === "p").map(element => element.textContent).join(" "),
+    /Replaced everything with 1 rule\./);
+  assert.equal(byKey(detail, "import.replace").checked, false, "replace has to be ticked again each time");
+  await h.runTimers(400);
+  assert.deepEqual(savedLayout(requests).rules.map(rule => rule.name), ["Night"]);
 });
 
 test("rules editor: an invalid value is reported and not saved until it is fixed", async () => {

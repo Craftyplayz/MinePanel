@@ -112,9 +112,8 @@ button, input, select { font: inherit; }
 .icon-button:hover { color: var(--accent); border-color: #3a4c43; }
 .slot { position: relative; aspect-ratio: 1; min-width: 0; background: #262c31; border: 2px solid; border-color: #14181b #3b4449 #3b4449 #14181b; }
 .slot.selected { outline: 2px solid #f2f2f2; outline-offset: 0; z-index: 1; }
-.slot.floating { background: none; border-color: transparent; border-radius: 4px; }
-#enderchest-open { cursor: pointer; }
-#enderchest-open:hover { background: #262c31; }
+.slot.clickable { cursor: pointer; }
+.slot.clickable:hover { background: #2f373d; }
 .slot .icon { position: absolute; inset: 8%; width: 84%; height: 84%; image-rendering: pixelated; pointer-events: none; }
 .slot .count { position: absolute; right: 2px; bottom: 0; color: #fff; font-size: clamp(9px, 30cqw, 14px); font-weight: 700; line-height: 1.1; text-shadow: 1px 1px 0 #3f3f3f; pointer-events: none; font-variant-numeric: tabular-nums; }
 .slot .durability { position: absolute; left: 12%; right: 12%; bottom: 8%; height: 2px; background: #000; pointer-events: none; }

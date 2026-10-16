@@ -11,6 +11,7 @@
   <script src="/layout.js" defer></script>
   <script src="/rules.js" defer></script>
   <script src="/app.js" defer></script>
+  <script src="/player-links.js" defer></script>
   <script src="/features.js" defer></script>
 </head>
 <body>
@@ -249,6 +250,17 @@
     </article>
   </main>
   <div class="windows" id="windows" aria-label="Item windows"></div>
+  <nav class="player-menu" id="player-menu" aria-label="Look up this player" hidden></nav>
+  <div class="dialog-backdrop" id="player-link-dialog" hidden>
+    <section class="dialog player-link-dialog" role="dialog" aria-modal="true" aria-labelledby="player-link-title">
+      <header class="dialog-head">
+        <h2 id="player-link-title">Pages</h2>
+        <button type="button" class="button" id="player-link-close">Done</button>
+      </header>
+      <p class="dialog-note" id="player-link-note"></p>
+      <div class="dialog-list" id="player-link-pages"></div>
+    </section>
+  </div>
   <div class="advancement-popup" id="advancement-popup" role="status" hidden></div>
   <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
   <div class="rule-toggles" id="rule-toggles" role="group" aria-label="Toggles" hidden></div>

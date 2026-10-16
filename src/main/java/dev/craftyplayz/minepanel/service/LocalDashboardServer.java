@@ -33,6 +33,7 @@ public final class LocalDashboardServer implements AutoCloseable {
             "/protocol.js", new String[] {"web/protocol.js", "text/javascript; charset=utf-8"},
             "/layout.js", new String[] {"web/layout.js", "text/javascript; charset=utf-8"},
             "/rules.js", new String[] {"web/rules.js", "text/javascript; charset=utf-8"},
+            "/player-links.js", new String[] {"web/player-links.js", "text/javascript; charset=utf-8"},
             "/features.js", new String[] {"web/features.js", "text/javascript; charset=utf-8"},
             "/features.css", new String[] {"web/features.css", "text/css; charset=utf-8"},
             "/styles.css", new String[] {"web/styles.css", "text/css; charset=utf-8"});

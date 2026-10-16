@@ -128,6 +128,32 @@
 .trade-stock { color: var(--danger); font-size: 11px; white-space: nowrap; }
 .trade.out { opacity: .55; }
 
+/* Player lookup menu (from the player head) and its page picker */
+.player-menu { position: fixed; z-index: 35; display: grid; align-content: start; gap: 2px; width: 320px; max-width: calc(100vw - 16px); overflow-y: auto; padding: 6px; border: 1px solid #2c363c; border-radius: 10px; background: #11191f; box-shadow: 0 14px 40px #000c; font-size: 12px; }
+.player-menu-header { display: grid; gap: 6px; padding: 6px 8px 8px; margin-bottom: 2px; border-bottom: 1px solid var(--line); }
+.player-menu-who { display: grid; gap: 1px; min-width: 0; }
+.player-menu-who strong { font-size: 13px; }
+.player-menu-uuid { color: var(--muted); font-family: ui-monospace, monospace; font-size: 10px; overflow-wrap: anywhere; }
+.player-menu-tools { display: flex; flex-wrap: wrap; gap: 4px; }
+.player-menu-note { margin: 0; color: #f0b85a; font-size: 11px; line-height: 1.4; }
+.player-menu-label { margin: 6px 8px 2px; color: var(--accent); font-size: 10px; font-weight: 650; text-transform: uppercase; letter-spacing: .08em; }
+.player-menu-item { display: grid; grid-template-columns: 1fr auto; gap: 1px 8px; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: #e6eeed; font-size: 12px; text-align: left; text-decoration: none; cursor: pointer; }
+.player-menu-item:hover, .player-menu-item:focus-visible { background: #ffffff0f; outline: none; }
+.player-menu-item.disabled { cursor: not-allowed; opacity: .45; }
+.player-menu-item.disabled:hover { background: transparent; }
+.player-menu-title { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.player-menu-domain { color: #5f6c72; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.player-menu-description { grid-column: 1; color: var(--muted); font-size: 11px; line-height: 1.35; }
+.player-menu-mark { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: var(--muted); font-size: 14px; }
+.player-menu-back { margin-bottom: 2px; border-bottom: 1px solid var(--line); border-radius: 6px 6px 0 0; }
+.player-menu-back strong { color: var(--accent); }
+.player-link-dialog { width: min(460px, 100%); }
+.player-page { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); }
+.player-page-text { flex: 1; display: grid; gap: 1px; min-width: 0; font-size: 12px; }
+.player-page-text span { color: var(--muted); font-size: 11px; }
+.player-page.disabled { opacity: .45; }
+.player-page a.button { text-decoration: none; }
+
 /* Item windows (shulker boxes, bundles, ender chest) */
 .windows { position: fixed; inset: 0; z-index: 30; pointer-events: none; }
 .float-window { position: absolute; width: 330px; pointer-events: auto; border: 1px solid #3a4c43; border-radius: 10px; background: #11191ff7; box-shadow: 0 14px 40px #000c; }
@@ -288,3 +314,5 @@
 .material-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .material-row.covered { color: var(--muted); }
 .material-row.covered .material-need { color: #7ec850; }
+.import-warnings { margin: 6px 0 0; padding-left: 18px; color: #f0b85a; font-size: 12px; }
+.import-warnings li + li { margin-top: 2px; }

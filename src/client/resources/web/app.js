@@ -181,12 +181,17 @@ const hotbarSlots = Array.from({ length: 9 }, () => createSlot(inventoryGrid));
 const mainSlots = Array.from({ length: 27 }, () => createSlot(inventoryGrid));
 const inventorySlots = [...hotbarSlots, ...mainSlots];
 const equipmentSlots = EQUIPMENT_SLOTS.map(([, label]) => createSlot(inventoryGrid, label));
-// The player head and ender chest float beside the slots, without a slot frame; the ender chest opens its window.
+// The player head and ender chest sit in slots beside the inventory: the head opens the player lookup menu, the ender
+// chest its window. Spare empty slots fill the gaps around them so the side column and equipment row read as whole.
 const headSlot = createSlot(inventoryGrid);
 const enderChestSlot = createSlot(inventoryGrid);
-headSlot.base = enderChestSlot.base = "slot floating";
+headSlot.base = enderChestSlot.base = "slot clickable";
+headSlot.element.id = "player-links-open";
+headSlot.element.title = "Look this player up online";
 enderChestSlot.element.id = "enderchest-open";
 enderChestSlot.element.title = "Ender chest contents, as last seen";
+const spareSlots = Array.from({ length: 6 }, () => createSlot(inventoryGrid));
+for (const slot of spareSlots) slot.element.setAttribute("aria-hidden", "true");
 const inventoryRows = {
   hotbar: hotbarSlots, main1: mainSlots.slice(0, 9), main2: mainSlots.slice(9, 18), main3: mainSlots.slice(18, 27),
   equipment: equipmentSlots
@@ -245,6 +250,10 @@ function layoutInventory() {
     if (!showArmor) return place(slot, 0, 0);
     place(slot, rowOf(arrangement.wide ? armorRows[index] : "equipment"), arrangement.wide ? 1 : 1 + index);
   });
+  // Spare slots take the side column's middle row, or the equipment row's columns between ender chest and head.
+  const spares = arrangement.wide ? [[rowOf("main2"), side]]
+    : Array.from({ length: 7 - offhandColumn }, (_, index) => [rowOf("equipment"), offhandColumn + 2 + index]);
+  spareSlots.forEach((slot, index) => place(slot, ...(spares[index] ?? [0, 0])));
   if (arrangement.wide) {
     place(enderChestSlot, rowOf("main3"), side);
     place(headSlot, rowOf("main1"), side);

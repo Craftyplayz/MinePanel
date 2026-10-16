@@ -4,6 +4,7 @@ import dev.craftyplayz.minepanel.build.BuildProgress;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * Everything beyond the core vitals and inventory: the world around the player, movement, experience, the last
@@ -42,16 +43,32 @@ public record PlayerDetails(WorldInfo world, Motion motion, XpTracker.Experience
 
     /**
      * Items drawn beside the inventory: the player's own head ({@code null} until their skin has loaded, so its icon
-     * never shows the default skin) and an ender chest.
+     * never shows the default skin) and an ender chest. {@code name} and {@code uuid} (lowercase, dashed) identify the
+     * signed-in account whose head it is, for the head's player lookup menu.
      */
-    public record Icons(ItemSnapshot head, ItemSnapshot enderChest) {
+    public record Icons(String name, String uuid, ItemSnapshot head, ItemSnapshot enderChest) {
+        public static final int MAX_NAME_LENGTH = 64;
+
         public Icons {
             Objects.requireNonNull(enderChest, "enderChest");
             if (head != null && head.empty() || enderChest.empty()) throw new IllegalArgumentException("Invalid icons");
+            if (name == null || name.isBlank() || name.length() > MAX_NAME_LENGTH || uuid == null
+                    || !uuid.equals(canonicalUuid(uuid))) {
+                throw new IllegalArgumentException("Invalid player identity");
+            }
+        }
+
+        private static String canonicalUuid(String uuid) {
+            try {
+                return UUID.fromString(uuid).toString();
+            } catch (IllegalArgumentException exception) {
+                return null;
+            }
         }
 
         String toJson() {
-            return "{\"head\":" + (head == null ? "null" : head.toJson()) + ",\"enderChest\":" + enderChest.toJson()
+            return "{\"name\":" + PlayerSnapshot.string(name) + ",\"uuid\":" + PlayerSnapshot.string(uuid)
+                    + ",\"head\":" + (head == null ? "null" : head.toJson()) + ",\"enderChest\":" + enderChest.toJson()
                     + "}";
         }
     }
@@ -92,7 +109,7 @@ public record PlayerDetails(WorldInfo world, Motion motion, XpTracker.Experience
         return new PlayerDetails(new WorldInfo("singleplayer", "World", "minecraft:plains", "Plains", "clear", 0, 0,
                 "survival"), Motion.rounded("ground", 0, 0, 0, 0, 0, boots, null), xp, PortalTracker.State.EMPTY,
                 List.of(), null, List.of(), null, FrameStats.Performance.EMPTY, BuildProgress.MISSING,
-                new Icons(null, enderChest));
+                new Icons("Steve", "8667ba71-b85a-4004-af54-457a9734eed7", null, enderChest));
     }
 
     /** The JSON value of one {@link #FIELDS field}; {@code details} is null while the player is unavailable. */

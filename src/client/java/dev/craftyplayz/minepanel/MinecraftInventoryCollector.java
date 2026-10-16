@@ -64,7 +64,10 @@ final class MinecraftInventoryCollector {
             stack.set(DataComponents.PROFILE, profile);
             head = item(minecraft, stack, icons);
         }
-        return new PlayerDetails.Icons(head, item(minecraft, ENDER_CHEST, icons));
+        // The signed-in account rather than the in-game profile: offline-mode servers hand out stand-in UUIDs.
+        var user = minecraft.getUser();
+        return new PlayerDetails.Icons(user.getName(), user.getProfileId().toString(), head,
+                item(minecraft, ENDER_CHEST, icons));
     }
 
     /** Client thread: the dashboard value of one stack, including the contents of shulker boxes and bundles. */

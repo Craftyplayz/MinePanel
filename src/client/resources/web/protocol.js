@@ -378,10 +378,15 @@ function validateBuild(build) {
   return { available, reason, placement: checked, materials };
 }
 
-/** Items drawn beside the inventory: the player's head (null until their skin has loaded) and an ender chest. */
+/**
+ * Items drawn beside the inventory: the player's head (null until their skin has loaded) and an ender chest, with the
+ * name and UUID of the signed-in account whose head it is.
+ */
 function validateIcons(icons) {
-  requireValid(object(icons));
-  return { head: icons.head === null ? null : filledItem(icons.head), enderChest: filledItem(icons.enderChest) };
+  requireValid(object(icons) && validText(icons.name, 64) && typeof icons.uuid === "string"
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(icons.uuid));
+  return { name: icons.name, uuid: icons.uuid, head: icons.head === null ? null : filledItem(icons.head),
+    enderChest: filledItem(icons.enderChest) };
 }
 
 const SENSOR_FLAGS = ["onFire", "inWater", "inLava", "inRain", "sneaking", "sprinting", "sleeping", "bossBar", "raid"];

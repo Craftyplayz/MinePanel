@@ -1,8 +1,9 @@
 "use strict";
 
 // Feature tiles and tools: movement, experience, recent pickups, Litematica build progress, advancements, villager
-// trades, portal linking, item windows (shulker boxes, bundles, ender chest) and the layout rules editor. Shared
-// helpers come from app.js; game maths and rule evaluation from rules.js.
+// trades, portal linking, item windows (shulker boxes, bundles, ender chest), the player lookup menu and the layout
+// rules editor. Shared helpers come from app.js; game maths and rule evaluation from rules.js; the lookup sites from
+// player-links.js.
 
 const storage = {
   get(key) { try { return window.localStorage?.getItem(key) ?? null; } catch { return null; } },
@@ -1074,9 +1075,189 @@ enderChestSlot.element.addEventListener("click", event => {
   if (enderChestSlot.item && !editing) openItemWindow("enderchest", 0, event);
 });
 
-/** Clicking elsewhere or pressing Escape closes the unpinned window (and the XP and performance window menus). */
+// ----------------------------------------------------------------------------------------------- Player lookup
+
+// The player head opens a menu of websites about the signed-in player (player-links.js). Groups open in place with a
+// Back row, as inventory tiles can be small; sites with several pages open a picker. Sites are only contacted when a
+// link is followed: nothing is fetched or previewed.
+const playerMenu = $("#player-menu");
+const playerLinkDialog = $("#player-link-dialog");
+const playerLinkParts = { title: $("#player-link-title"), note: $("#player-link-note"), pages: $("#player-link-pages") };
+const OFFLINE_NOTE = "Needs a UUID, and this is an offline-mode account";
+/** The open menu's group id, or null at the top level. */
+let playerMenuGroup = null;
+
+const playerIdentity = player => player?.available && player.icons
+  ? { name: player.icons.name, uuid: player.icons.uuid } : null;
+
+function copyButton(label, text) {
+  const copy = create("button", "chip small", label);
+  copy.type = "button";
+  copy.addEventListener("click", () => {
+    window.navigator?.clipboard?.writeText(text)?.catch?.(() => {});
+    writeText(copy, "Copied");
+    window.setTimeout(() => writeText(copy, label), 1200);
+  });
+  return copy;
+}
+
+/** One menu row: a name with its domain, a short description and, for rows that lead on, a trailing mark. */
+function playerMenuRow(tagName, name, domain, description, mark) {
+  const row = create(tagName, "player-menu-item");
+  const title = create("span", "player-menu-title");
+  title.appendChild(create("strong", "", name));
+  if (domain) title.appendChild(create("span", "player-menu-domain", domain));
+  row.appendChild(title);
+  row.appendChild(create("span", "player-menu-description", description));
+  if (mark) row.appendChild(create("span", "player-menu-mark", mark));
+  return row;
+}
+
+/** A link that opens in a new tab and tells the site nothing about the dashboard. */
+function outboundLink(row, url) {
+  row.href = url;
+  row.target = "_blank";
+  row.rel = "noopener noreferrer";
+  return row;
+}
+
+function siteRow(site, identity) {
+  const unavailable = isOfflineUuid(identity.uuid) && needsUuid(site);
+  const row = playerMenuRow(unavailable ? "span" : site.url ? "a" : "button", site.name, site.domain,
+    site.description, site.pages ? "⋯" : undefined);
+  row.dataset.site = site.name;
+  if (unavailable) {
+    row.classList.add("disabled");
+    row.setAttribute("aria-disabled", "true");
+    row.title = OFFLINE_NOTE;
+  } else if (site.url) {
+    outboundLink(row, playerLinkUrl(site.url, identity));
+    row.addEventListener("click", () => closePlayerMenu());
+  } else {
+    row.type = "button";
+    row.addEventListener("click", () => openPlayerPages(site, identity));
+  }
+  return row;
+}
+
+function playerMenuHeader(identity) {
+  const header = create("div", "player-menu-header");
+  const who = create("div", "player-menu-who");
+  who.appendChild(create("strong", "", identity.name));
+  who.appendChild(create("span", "player-menu-uuid", identity.uuid));
+  header.appendChild(who);
+  const tools = create("div", "player-menu-tools");
+  tools.appendChild(copyButton("Copy name", identity.name));
+  tools.appendChild(copyButton("Copy UUID", identity.uuid));
+  header.appendChild(tools);
+  if (isOfflineUuid(identity.uuid)) {
+    header.appendChild(create("p", "player-menu-note",
+      "Offline-mode account: sites that need a UUID are greyed out, and name lookups may show another player."));
+  }
+  return header;
+}
+
+function renderPlayerMenu(identity) {
+  const rows = [];
+  const group = PLAYER_LINK_GROUPS.find(entry => entry.id === playerMenuGroup);
+  if (group) {
+    const back = playerMenuRow("button", `‹ ${group.name}`, "", "Back to all groups");
+    back.type = "button";
+    back.classList.add("player-menu-back");
+    back.addEventListener("click", () => {
+      playerMenuGroup = null;
+      renderPlayerMenu(identity);
+    });
+    rows.push(back, ...group.sites.map(site => siteRow(site, identity)));
+  } else {
+    rows.push(playerMenuHeader(identity));
+    const suggested = suggestedPlayerLinks(currentPlayerState?.world);
+    if (suggested.length) {
+      rows.push(create("p", "player-menu-label", "Suggested for this server"),
+        ...suggested.map(site => siteRow(site, identity)), create("p", "player-menu-label", "All sites"));
+    }
+    for (const entry of PLAYER_LINK_GROUPS) {
+      const row = playerMenuRow("button", entry.name, "", entry.description, "›");
+      row.type = "button";
+      row.dataset.group = entry.id;
+      row.addEventListener("click", () => {
+        playerMenuGroup = entry.id;
+        renderPlayerMenu(identity);
+      });
+      rows.push(row);
+    }
+  }
+  playerMenu.replaceChildren(...rows);
+}
+
+/** Opens the menu under the head, or above it when there is more room there. */
+function openPlayerMenu() {
+  const identity = playerIdentity(currentPlayerState);
+  if (!identity) return;
+  playerMenuGroup = null;
+  renderPlayerMenu(identity);
+  const rect = headSlot.element.getBoundingClientRect();
+  const width = window.innerWidth ?? 1280;
+  const height = window.innerHeight ?? 800;
+  const below = height - rect.top - rect.height;
+  playerMenu.style.left = `${Math.round(Math.max(8, Math.min(width - 328, rect.left)))}px`;
+  if (below >= 320 || below >= rect.top) {
+    playerMenu.style.top = `${Math.round(rect.top + rect.height + 6)}px`;
+    playerMenu.style.bottom = "auto";
+    playerMenu.style.maxHeight = `${Math.round(Math.max(160, below - 14))}px`;
+  } else {
+    playerMenu.style.top = "auto";
+    playerMenu.style.bottom = `${Math.round(height - rect.top + 6)}px`;
+    playerMenu.style.maxHeight = `${Math.round(Math.max(160, rect.top - 14))}px`;
+  }
+  setHidden(playerMenu, false);
+}
+
+function closePlayerMenu() {
+  setHidden(playerMenu, true);
+}
+
+/** The second popup: every page of one site, each with what it shows. */
+function openPlayerPages(site, identity) {
+  writeText(playerLinkParts.title, site.name);
+  writeText(playerLinkParts.note, `${site.description} · ${site.domain}`);
+  playerLinkParts.pages.replaceChildren(...site.pages.map(page => {
+    const unavailable = isOfflineUuid(identity.uuid) && needsUuid(page);
+    const row = create("div", `player-page${unavailable ? " disabled" : ""}`);
+    row.dataset.page = page.name;
+    const text = create("div", "player-page-text");
+    text.appendChild(create("strong", "", page.name));
+    text.appendChild(create("span", "", unavailable ? OFFLINE_NOTE : page.description));
+    row.appendChild(text);
+    if (!unavailable) {
+      const url = playerLinkUrl(page.url, identity);
+      row.appendChild(outboundLink(create("a", "button small", "Open"), url));
+      row.appendChild(copyButton("Copy link", url));
+    }
+    return row;
+  }));
+  setHidden(playerLinkDialog, false);
+}
+
+function closePlayerPages() {
+  setHidden(playerLinkDialog, true);
+}
+
+headSlot.element.addEventListener("click", () => {
+  if (editing) return;
+  if (playerMenu.hidden) openPlayerMenu();
+  else closePlayerMenu();
+});
+$("#player-link-close").addEventListener("click", () => closePlayerPages());
+playerLinkDialog.addEventListener("click", event => { if (event.target === playerLinkDialog) closePlayerPages(); });
+
+/**
+ * Clicking elsewhere or pressing Escape closes the unpinned window (and the player lookup menu and the XP and
+ * performance window menus).
+ */
 function closeTransient(event) {
   const inside = element => element?.contains?.(event?.target);
+  if (!event || !inside(playerMenu) && !inside(headSlot.element) && !inside(playerLinkDialog)) closePlayerMenu();
   if (!event || !openWindows.some(entry => inside(entry.element)) && !event.target?.closest?.(".slot")) {
     if (openWindows.some(entry => !entry.pinned)) {
       openWindows = openWindows.filter(entry => entry.pinned);
@@ -1090,7 +1271,12 @@ function closeTransient(event) {
 }
 
 window.addEventListener("pointerdown", closeTransient);
-window.addEventListener("keyup", event => { if (event.key === "Escape") closeTransient(); });
+window.addEventListener("keyup", event => {
+  if (event.key !== "Escape") return;
+  // The page picker sits over the menu, so Escape closes just the picker first.
+  if (!playerLinkDialog.hidden) closePlayerPages();
+  else closeTransient();
+});
 
 // ---------------------------------------------------------------------------------------------- Rules editor
 
@@ -1194,6 +1380,7 @@ let rowClipboard = null;
 let shareText = null;
 let shownSelection = null;
 let importMessage = null;
+let importReplace = false;
 
 const selectedRule = () => rulesSelection?.kind === "rule"
   ? rulesDraft.rules.find(rule => rule.id === rulesSelection.id) : null;
@@ -2333,35 +2520,67 @@ function templatesDetail() {
   return box;
 }
 
-/** Import: a share string's rules are added (never replacing anything), then listed to open. */
+/**
+ * Import and export: a share string or rule set (pasted, or from a file) is added, or with "Replace" put in place
+ * of every rule, folder, place and toggle; the result lists the rules to open and any warnings. "Download all
+ * rules" saves them as a rule set file (docs/RULE_SETS.md).
+ */
 function importDetail() {
   const box = create("div", "rule-detail");
   const head = create("div", "rule-section-head");
-  head.appendChild(create("h3", "", "Import"));
+  head.appendChild(create("h3", "", "Import and export"));
   head.appendChild(create("span", "rule-muted",
-    "Paste a share string (Share on a rule or folder). Its rules are added at the end; nothing is replaced."));
+    "Paste a share string (Share on a rule or folder) or a rule set file's JSON, or choose a .json file. The format is described in docs/RULE_SETS.md."));
   box.appendChild(head);
   const text = keyed(create("textarea", "rule-input share-input"), "import.text");
-  text.rows = 4;
-  text.placeholder = "minepanel-rules:1:…";
+  text.rows = 6;
+  text.placeholder = "minepanel-rules:1:…  or  { \"format\": \"minepanel-rules\", \"version\": 1, \"rules\": [ … ] }";
   box.appendChild(text);
-  const add = create("div", "rule-add");
-  add.appendChild(button("Import", () => {
+  const replace = checkInput("import.replace", "Replace all rules, folders, places and toggles (and profiles, if the file has any)", importReplace,
+    value => { importReplace = value; });
+  replace.title = "Without this, imported rules are added at the end and nothing is replaced";
+  const run = source => {
     try {
-      const result = importShare({ ...layout, ...rulesDraft }, text.value);
+      const result = importShare({ ...layout, ...rulesDraft }, source, { replace: importReplace });
+      // The whole layout, since a rule set can also arrange profiles.
+      rulesCommitted = result.layout;
       rulesDraft = draftOf(result.layout);
-      commitRules();
-      const names = result.rules.map(id => rulesDraft.rules.find(rule => rule.id === id).name);
-      importMessage = { ok: true, rules: result.rules, text: `Added ${names.length === 1 ? "1 rule" : `${names.length} rules`}`
-        + `${result.folder ? " in a new folder" : ""}.${result.dropped ? ` ${result.dropped} condition(s) or action(s) were left out: they use places, toggles, rules or profiles this dashboard doesn't have.` : ""}` };
+      setHidden(rulesError, true);
+      changeLayout(result.layout);
+      const count = result.rules.length === 1 ? "1 rule" : `${result.rules.length} rules`;
+      const folders = result.folders.length === 1 ? " in a new folder"
+        : result.folders.length > 1 ? ` in ${result.folders.length} new folders` : "";
+      importMessage = { ok: true, rules: result.rules, warnings: result.warnings,
+        text: `${importReplace ? "Replaced everything with" : "Added"} ${count}${folders}.`
+          + (result.profiles ? ` Arranged ${result.profiles === 1 ? "1 profile" : `${result.profiles} profiles`}.` : "") };
+      importReplace = false;
     } catch (error) {
-      importMessage = { ok: false, rules: [], text: error.message };
+      importMessage = { ok: false, rules: [], warnings: [], text: error.message };
     }
     renderRulesEditor();
-  }, "button small"));
-  box.appendChild(add);
+  };
+  const file = keyed(create("input"), "import.file");
+  file.type = "file";
+  file.accept = "application/json,.json";
+  setHidden(file, true);
+  file.addEventListener("change", async () => {
+    const chosen = file.files?.[0];
+    file.value = "";
+    if (chosen) run(await chosen.text());
+  });
+  const tools = create("div", "rule-add");
+  tools.appendChild(button("Import", () => run(text.value), "button small"));
+  tools.appendChild(button("Choose file…", () => file.click(), "button quiet small"));
+  tools.appendChild(replace);
+  tools.appendChild(file);
+  box.appendChild(tools);
   if (importMessage) {
     box.appendChild(create("p", importMessage.ok ? "" : "rules-error", importMessage.text));
+    if (importMessage.warnings.length) {
+      const list = create("ul", "import-warnings");
+      for (const warning of importMessage.warnings) list.appendChild(create("li", "", warning));
+      box.appendChild(list);
+    }
     for (const id of importMessage.rules) {
       const rule = rulesDraft.rules.find(entry => entry.id === id);
       if (rule) box.appendChild(button(rule.name, () => {
@@ -2370,6 +2589,20 @@ function importDetail() {
       }, "rules-nav-name inline block"));
     }
   }
+  const exportHead = create("div", "rule-section-head rule-section");
+  exportHead.appendChild(create("h3", "", "Export"));
+  exportHead.appendChild(create("span", "rule-muted",
+    "Every profile's panel arrangement, and every rule, folder, place and toggle, as a rule set file to keep, edit, or import on another dashboard."));
+  box.appendChild(exportHead);
+  const download = keyed(button("Download all rules", () => {
+    const link = create("a");
+    link.href = URL.createObjectURL(new Blob([JSON.stringify(exportRuleSet(layout), null, 2)], { type: "application/json" }));
+    link.download = "minepanel-rules.json";
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  }, "button small"), "export.download");
+  download.disabled = layout.rules.length === 0;
+  box.appendChild(download);
   return box;
 }
 
@@ -2535,7 +2768,7 @@ function renderRuleList() {
   }), "button quiet small");
   addFolder.disabled = rulesDraft.folders.length >= MAX_FOLDERS;
   more.appendChild(addFolder);
-  for (const [kind, label] of [["templates", "From template"], ["import", "Import"]]) {
+  for (const [kind, label] of [["templates", "From template"], ["import", "Import / export"]]) {
     more.appendChild(keyed(button(label, () => {
       rulesSelection = { kind };
       renderRulesEditor();
@@ -2856,7 +3089,7 @@ featureHooks.tick.push(() => {
 
 // Panels that only appear on demand start hidden (the markup says so too).
 for (const element of [xpParts.menu, performanceParts.menu, xpParts.form, pickupParts.form, advancementParts.form, advancementParts.popup, portalBox,
-  villagerParts.nav, rulesDialog, portalLink]) {
+  villagerParts.nav, rulesDialog, portalLink, playerMenu, playerLinkDialog]) {
   setHidden(element, true);
 }
 featureHooks.layout.forEach(hook => hook());
