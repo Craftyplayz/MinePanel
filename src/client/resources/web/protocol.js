@@ -211,11 +211,14 @@ function applyHistory(previous, patch) {
 
 // ------------------------------------------------------------------------------- World, motion and other details
 
-const DETAIL_FIELDS = ["world", "motion", "xp", "portal", "pickups", "advancements", "villagers", "enderChest"];
+const DETAIL_FIELDS = ["world", "motion", "xp", "portal", "pickups", "advancements", "villagers", "enderChest",
+  "performance"];
 const WEATHER = ["clear", "rain", "thunder"];
 const GAME_MODES = ["survival", "creative", "adventure", "spectator"];
 const MOTION_MODES = ["ground", "elytra", "swimming", "riding", "flying", "falling"];
 const XP_WINDOWS = [10, 30, 60, 300, 600, 3600];
+const PERFORMANCE_WINDOWS = [10, 30, 60, 600];
+const PERFORMANCE_HISTORY = 600;
 const whole = value => Number.isSafeInteger(value);
 const filledItem = value => { const item = validateItem(value); requireValid(!item.empty); return item; };
 
@@ -331,6 +334,20 @@ function validateEnderChest(chest) {
   return { seenAt: chest.seenAt, slots: chest.slots.map(slot => validateItem(slot)) };
 }
 
+/** Frames rendered in each of the last (up to) 600 seconds, newest last, and each window's average and 1% low. */
+function validatePerformance(performance) {
+  requireValid(object(performance) && Array.isArray(performance.fps) && performance.fps.length <= PERFORMANCE_HISTORY
+    && performance.fps.every(integer) && object(performance.windows));
+  const windows = Object.fromEntries(PERFORMANCE_WINDOWS.map(window => {
+    const value = performance.windows[window];
+    if (value === null) return [window, null];
+    requireValid(object(value) && integer(value.seconds) && value.seconds >= 1 && value.seconds <= window
+      && integer(value.average) && integer(value.low) && value.low <= value.average);
+    return [window, { seconds: value.seconds, average: value.average, low: value.low }];
+  }));
+  return { fps: [...performance.fps], windows };
+}
+
 /** Validates the detail fields: required while in a world (advancements and ender chest may be null), else null. */
 function validateDetails(state) {
   requireValid(DETAIL_FIELDS.every(key => has(state, key)));
@@ -340,7 +357,7 @@ function validateDetails(state) {
   }
   const validators = { world: validateWorld, motion: validateMotion, xp: validateXp, portal: validatePortal,
     pickups: validatePickups, advancements: validateAdvancements, villagers: validateVillagers,
-    enderChest: validateEnderChest };
+    enderChest: validateEnderChest, performance: validatePerformance };
   return Object.fromEntries(DETAIL_FIELDS.map(key => {
     const value = state[key];
     // Deltas carry over unchanged fields from the previous state, which were validated when they arrived.

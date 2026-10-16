@@ -11,6 +11,7 @@ public final class WorldFeaturesTest {
         testPickups();
         testWorldLogging();
         testContentsAndDetails();
+        testFrameStats();
         System.out.println("MinePanel world feature unit tests passed.");
     }
 
@@ -123,7 +124,8 @@ public final class WorldFeaturesTest {
         String json = snapshot.toJson();
         for (String field : PlayerDetails.FIELDS) check(json.contains("\"" + field + "\":"), field + " is serialized");
         var moved = new PlayerDetails(details.world(), Motion.rounded("elytra", 30.04, 29.96, -1.2, 359.6, 12.3,
-                details.motion().icon(), null), details.xp(), details.portal(), details.pickups(), null, List.of(), null);
+                details.motion().icon(), null), details.xp(), details.portal(), details.pickups(), null, List.of(), null,
+                details.performance());
         var next = new PlayerSnapshot(2, 2, true, 0L, "minecraft:overworld", 0.0, 0.0, 0.0, 20.0, 20.0, 0.0,
                 InventorySnapshot.empty(), null, GameplayHistory.empty(), 20, 5.0, List.of(), moved);
         String delta = next.toDeltaJson(snapshot);
@@ -133,6 +135,50 @@ public final class WorldFeaturesTest {
         invalid(() -> new WorldInfo("server", "x", "minecraft:plains", "Plains", "snow", 0, 0, "survival"));
         invalid(() -> new VillagerSnapshot("not-a-uuid", "minecraft:librarian", "Librarian", 1, null,
                 "minecraft:overworld", 0, 0, 0, 0, 0, List.of()));
+    }
+
+    private static void testFrameStats() {
+        check(FrameStats.Performance.EMPTY.toJson().equals(
+                "{\"fps\":[],\"windows\":{\"10\":null,\"30\":null,\"60\":null,\"600\":null}}"), "nothing measured yet");
+        long ms = 1_000_000L;
+        long start = 5_000 * ms;
+        FrameStats steady = new FrameStats();
+        steady.frame(start);
+        for (int frame = 1; frame <= 2000; frame++) steady.frame(start + frame * 10 * ms);
+        var performance = steady.snapshot();
+        check(performance == steady.snapshot(), "the snapshot is reused until another second closes");
+        check(performance.fps().size() == 20 && performance.fps().get(0) == 99
+                && performance.fps().subList(1, 20).stream().allMatch(fps -> fps == 100),
+                "frames are counted in the second they ended: " + performance.fps());
+        var ten = performance.windows().get(10);
+        check(ten.seconds() == 10 && ten.average() == 100 && ten.low() >= 98 && ten.low() <= 100,
+                "a steady 100 fps: " + ten);
+        check(performance.windows().get(60).seconds() == 20 && performance.windows().get(600).seconds() == 20,
+                "longer windows hold what has been measured so far");
+
+        // A 3.5 s stall: the second it began in has one frame, the next two have none.
+        steady.frame(start + 23_500 * ms);
+        var stalled = steady.snapshot().fps();
+        check(stalled.size() == 23 && stalled.subList(20, 23).equals(List.of(1, 0, 0)), "a stall shows as 0 fps: " + stalled);
+
+        FrameStats stutter = new FrameStats();
+        long now = start;
+        stutter.frame(now);
+        for (int frame = 1; now < start + 12_000 * ms; frame++) {
+            now += (frame % 50 == 0 ? 50 : 10) * ms;
+            stutter.frame(now);
+        }
+        var stutters = stutter.snapshot().windows().get(10);
+        check(stutters.low() >= 19 && stutters.low() <= 21 && stutters.average() > 85 && stutters.average() < 100,
+                "the 1% low is the slowest frames' rate, not the average: " + stutters);
+
+        steady.frame(start + 800_000 * ms);
+        var idle = steady.snapshot();
+        check(idle.fps().size() == FrameStats.HISTORY_SECONDS && idle.fps().stream().allMatch(fps -> fps == 0)
+                && idle.windows().values().stream().allMatch(window -> window.average() == 0 && window.low() == 0),
+                "a stall longer than the history empties every window");
+        check(idle.windows().get(600).seconds() == 600, "the longest window is full");
+        invalid(() -> new FrameStats.Window(10, 50, 60));
     }
 
     private static ItemSnapshot item(String id, String name) {

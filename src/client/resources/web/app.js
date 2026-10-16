@@ -56,7 +56,7 @@ const layoutFile = $("#layout-file");
 
 const TILE_LABELS = { player: "Player", inventory: "Inventory", statistics: "Statistics",
   history: "Activity log", map: "JourneyMap", build: "Build progress", movement: "Movement", xp: "Experience",
-  pickups: "Recent pickups", advancements: "Advancements", villagers: "Villager trades" };
+  pickups: "Recent pickups", advancements: "Advancements", villagers: "Villager trades", performance: "Performance" };
 const CATEGORY_LABELS = { lifecycle: "Session", death: "Death", dimension: "Dimension", kill: "Kill",
   mine: "Mined", place: "Placed", container: "Opened", inventory: "Inventory", drop: "Dropped",
   damage: "Damage", heal: "Healed", advancement: "Advancement", biome: "Biome", weather: "Weather", time: "Day" };
@@ -79,7 +79,6 @@ let historySessionId;
 let historyNodes = new Map();
 let historyViewKey;
 let hoveredSlot;
-let glintEpoch;
 
 function writeText(element, text) {
   if (element.textContent !== text) element.textContent = text;
@@ -104,8 +103,6 @@ function createSlot(container, label) {
   const icon = create("img", "icon");
   icon.alt = "";
   icon.hidden = true;
-  const glint = create("span", "glint");
-  glint.hidden = true;
   const fallback = create("span", "fallback");
   fallback.hidden = true;
   const count = create("span", "count");
@@ -113,9 +110,9 @@ function createSlot(container, label) {
   const bar = create("span");
   durability.appendChild(bar);
   durability.hidden = true;
-  for (const child of [placeholder, icon, glint, fallback, count, durability]) element.appendChild(child);
+  for (const child of [placeholder, icon, fallback, count, durability]) element.appendChild(child);
   container.appendChild(element);
-  const slot = { element, placeholder, icon, glint, fallback, count, durability, bar, item: null, iconKey: null };
+  const slot = { element, placeholder, icon, fallback, count, durability, bar, item: null, iconKey: null };
   icon.addEventListener("error", () => {
     // Icons render on the game thread; a missing one is retried once before showing initials.
     if (!slot.iconKey || slot.retried) return showFallback(slot);
@@ -132,20 +129,12 @@ const iconUrl = key => `/icon/${key}.png`;
 
 function showFallback(slot) {
   setHidden(slot.icon, true);
-  setHidden(slot.glint, true);
   setHidden(slot.fallback, false);
 }
 
 function initials(name) {
   const words = name.split(/\s+/).filter(Boolean);
   return (words.length > 1 ? words[0][0] + words[1][0] : name.slice(0, 2)).toUpperCase();
-}
-
-function updateGlintTexture(key) {
-  const epoch = /^e(\d+)-/.exec(key)?.[1];
-  if (epoch === undefined || epoch === glintEpoch) return;
-  glintEpoch = epoch;
-  document.documentElement?.style?.setProperty("--glint", `url("/glint.png?v=${epoch}")`);
 }
 
 function renderSlot(slot, item, selected) {
@@ -156,7 +145,7 @@ function renderSlot(slot, item, selected) {
   if (!item || item.empty) {
     slot.iconKey = null;
     setHidden(slot.placeholder, false);
-    for (const part of [slot.icon, slot.glint, slot.fallback, slot.durability]) setHidden(part, true);
+    for (const part of [slot.icon, slot.fallback, slot.durability]) setHidden(part, true);
     writeText(slot.count, "");
     slot.element.setAttribute?.("aria-label", "Empty");
   } else {
@@ -169,14 +158,10 @@ function renderSlot(slot, item, selected) {
     } else if (item.icon !== slot.iconKey) {
       slot.iconKey = item.icon;
       slot.retried = false;
-      updateGlintTexture(item.icon);
       slot.icon.src = iconUrl(item.icon);
-      slot.glint.style.maskImage = `url("${iconUrl(item.icon)}")`;
-      slot.glint.style.webkitMaskImage = `url("${iconUrl(item.icon)}")`;
       setHidden(slot.icon, false);
       setHidden(slot.fallback, true);
     }
-    if (slot.iconKey) setHidden(slot.glint, !item.foil);
     writeText(slot.count, item.count > 1 ? String(item.count) : "");
     const damaged = item.maxDamage !== null && item.damage > 0;
     setHidden(slot.durability, !damaged);
@@ -312,6 +297,7 @@ function hideTooltip() {
 function setConnection(online) {
   connection.textContent = online ? "Connected" : "Disconnected · retrying every 5 s";
   dot.className = online ? "dot online" : "dot offline";
+  editToggle.title = `Customize · ${connection.textContent}`;
 }
 
 function formatDuration(seconds) {

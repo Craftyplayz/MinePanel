@@ -6,6 +6,7 @@
     "AdvancementEventsMixin",
     "BlockPlaceMixin",
     "CombatEventsMixin",
+    "FrameTimingMixin",
     "ClientAdvancementsAccessor",
     "ItemDropMixin",
     "ItemPickupMixin",

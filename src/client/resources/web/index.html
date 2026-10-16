@@ -14,15 +14,11 @@
   <script src="/features.js" defer></script>
 </head>
 <body>
-  <header class="topbar">
-    <span class="brand"><span class="brand-mark" aria-hidden="true">M</span>MinePanel</span>
-    <span class="connection"><span id="connection-dot" class="dot" aria-hidden="true"></span><span id="connection-status" role="status">Connecting</span></span>
-    <span class="game-state" id="state-message">Waiting for MinePanel.</span>
-    <span class="spacer"></span>
-    <span class="version" id="version">·</span>
-    <button type="button" class="button" id="edit-toggle" aria-pressed="false">Customize</button>
-  </header>
+  <button type="button" class="brand-toggle" id="edit-toggle" aria-pressed="false" aria-label="Customize" title="Customize">M<span id="connection-dot" class="dot" aria-hidden="true"></span></button>
   <section class="toolbar" id="edit-toolbar" hidden aria-label="Layout editing">
+    <span class="connection"><span id="connection-status" role="status">Connecting</span></span>
+    <span class="game-state" id="state-message">Waiting for MinePanel.</span>
+    <span class="version" id="version">·</span>
     <span class="toolbar-label">Profile</span>
     <span class="profile-tools">
       <select id="profile-select" aria-label="Profile to edit"></select>
@@ -169,6 +165,23 @@
           <dl class="facts" id="xp-goals" aria-label="Level goals" hidden></dl>
         </div>
         <div class="popover" id="xp-window-menu" role="menu" hidden></div>
+      </div>
+    </article>
+    <article class="tile" id="tile-performance" data-tile="performance" aria-labelledby="performance-title">
+      <header class="tile-head" id="head-performance"><h2 id="performance-title">Performance</h2>
+        <span class="head-actions"><button type="button" class="chip small" id="performance-window" aria-haspopup="true" title="Choose how much history to show">1 min</button><span class="badge muted" id="performance-status">Unavailable</span></span></header>
+      <div class="tile-body column performance-body">
+        <dl class="performance-figures prio-1">
+          <div><dt>Average</dt><dd id="performance-average">—</dd></div>
+          <div><dt title="The frame rate 99% of frames beat: how bad the worst stutters get">1% low</dt><dd id="performance-low">—</dd></div>
+          <div class="performance-scale prio-2"><dt>Graph peak</dt><dd id="performance-peak">—</dd></div>
+        </dl>
+        <svg class="performance-graph" id="performance-graph" viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true">
+          <path class="performance-area" id="performance-area" d=""></path>
+          <line class="performance-low-line" id="performance-low-line" x1="0" x2="1000" y1="100" y2="100" hidden></line>
+          <path class="performance-line" id="performance-line" d=""></path>
+        </svg>
+        <div class="popover" id="performance-window-menu" role="menu" hidden></div>
       </div>
     </article>
     <article class="tile" id="tile-pickups" data-tile="pickups" aria-labelledby="pickups-title">

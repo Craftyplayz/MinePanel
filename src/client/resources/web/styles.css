@@ -12,7 +12,6 @@
   --danger: #eb7380;
   --row: 40px;
   --gap: 10px;
-  --glint: url("/glint.png");
 }
 
 * { box-sizing: border-box; }
@@ -20,10 +19,12 @@
 body { margin: 0; min-width: 320px; min-height: 100vh; background: #0b1015; }
 button, input, select { font: inherit; }
 
-/* Top bar and layout toolbar */
-.topbar { position: sticky; top: 0; z-index: 20; height: 44px; display: flex; align-items: center; gap: 14px; padding: 0 14px; border-bottom: 1px solid var(--line); background: #0b1015f2; backdrop-filter: blur(6px); font-size: 12px; }
-.brand { display: inline-flex; gap: 8px; align-items: center; font-weight: 700; font-size: 13px; }
-.brand-mark { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; color: #06130d; background: var(--accent); font-size: 12px; }
+/* M button (opens the layout toolbar) and layout toolbar */
+.brand-toggle { position: fixed; top: 8px; left: 14px; z-index: 21; display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 7px; color: #06130d; background: var(--accent); font-weight: 700; font-size: 13px; cursor: pointer; box-shadow: 0 2px 10px #0008; }
+.brand-toggle:hover { filter: brightness(1.1); }
+.brand-toggle[aria-pressed="true"] { outline: 2px solid #e8f5ef; outline-offset: 1px; }
+.brand-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.brand-toggle .dot { position: absolute; right: -3px; bottom: -3px; width: 10px; height: 10px; border: 2px solid #0b1015; }
 .connection { display: inline-flex; align-items: center; gap: 7px; color: #b0beb8; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: #f0b85a; box-shadow: 0 0 9px #f0b85a80; }
 .dot.online { background: var(--accent); box-shadow: 0 0 9px #73e0b180; }
@@ -36,8 +37,10 @@ button, input, select { font: inherit; }
 .button.quiet { border-color: #2c363c; background: transparent; color: #c5cfce; }
 .button[aria-pressed="true"] { background: var(--accent); color: #06130d; }
 .button:focus-visible, .chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.toolbar { position: sticky; top: 44px; z-index: 19; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: #0e151af2; font-size: 12px; }
+.toolbar { position: sticky; top: 0; z-index: 19; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 42px; padding: 8px 14px 8px 52px; border-bottom: 1px solid var(--line); background: #0e151af2; font-size: 12px; }
 .toolbar-label { color: var(--muted); }
+.toolbar .version { margin-right: 6px; }
+.toolbar:not([hidden]) + .grid { padding-top: 12px; }
 .tile-toggles { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { border: 1px solid #2c363c; border-radius: 20px; padding: 4px 10px; background: transparent; color: #8b989f; cursor: pointer; font-size: 12px; }
 .chip[aria-pressed="true"] { border-color: #3a4c43; background: #73e0b118; color: var(--accent); }
@@ -45,7 +48,7 @@ button, input, select { font: inherit; }
 .save-status.error { color: var(--danger); }
 
 /* Grid */
-.grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); grid-auto-rows: var(--row); gap: var(--gap); padding: 12px 14px 24px; }
+.grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); grid-auto-rows: var(--row); gap: var(--gap); padding: 42px 14px 24px; }
 .tile { grid-column: var(--grid-column, auto / span 4); grid-row: var(--grid-row, auto / span 4); position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; background: linear-gradient(145deg, #131c22, #10171c); border: 1px solid #202b31; border-radius: 10px; }
 .tile-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; height: 34px; padding: 0 12px; border-bottom: 1px solid #1a2329; user-select: none; }
 .tile-head h2 { margin: 0; font-size: 13px; font-weight: 620; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -107,10 +110,6 @@ button, input, select { font: inherit; }
 .slot { position: relative; aspect-ratio: 1; min-width: 0; background: #262c31; border: 2px solid; border-color: #14181b #3b4449 #3b4449 #14181b; }
 .slot.selected { outline: 2px solid #f2f2f2; outline-offset: 0; z-index: 1; }
 .slot .icon { position: absolute; inset: 8%; width: 84%; height: 84%; image-rendering: pixelated; pointer-events: none; }
-.slot .glint { position: absolute; inset: 8%; overflow: hidden; pointer-events: none; mask-size: 100% 100%; -webkit-mask-size: 100% 100%; mix-blend-mode: plus-lighter; opacity: .75; }
-.slot .glint::before { content: ""; position: absolute; inset: -50%; background-image: var(--glint); background-size: 12.5% 12.5%; image-rendering: pixelated; transform: rotate(10deg); animation: glint-u 27.5s linear infinite, glint-v 7.5s linear infinite; }
-@keyframes glint-u { from { background-position-x: 0; } to { background-position-x: -12.5%; } }
-@keyframes glint-v { from { background-position-y: 0; } to { background-position-y: 12.5%; } }
 .slot .count { position: absolute; right: 2px; bottom: 0; color: #fff; font-size: clamp(9px, 30cqw, 14px); font-weight: 700; line-height: 1.1; text-shadow: 1px 1px 0 #3f3f3f; pointer-events: none; font-variant-numeric: tabular-nums; }
 .slot .durability { position: absolute; left: 12%; right: 12%; bottom: 8%; height: 2px; background: #000; pointer-events: none; }
 .slot .durability span { display: block; height: 100%; }
@@ -200,10 +199,8 @@ button, input, select { font: inherit; }
 .tooltip .o { filter: blur(2px); }
 
 @media (max-width: 720px) {
-  .topbar { gap: 10px; padding: 0 10px; }
-  .game-state, .version { display: none; }
-  .grid { grid-template-columns: minmax(0, 1fr); padding: 10px; }
+  .brand-toggle { left: 10px; pointer-events: none; }
+  .grid { grid-template-columns: minmax(0, 1fr); padding: 42px 10px 10px; }
   .tile { grid-column: 1 / -1; grid-row: var(--grid-row-span, span 6); order: var(--order, 0); }
-  #edit-toggle { display: none; }
 }
-@media (prefers-reduced-motion: reduce) { .slot .glint::before { animation: none; } .health-bar span { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .health-bar span { transition: none; } }

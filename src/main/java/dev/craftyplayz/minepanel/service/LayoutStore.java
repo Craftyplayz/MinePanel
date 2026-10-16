@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
+import dev.craftyplayz.minepanel.telemetry.FrameStats;
 import dev.craftyplayz.minepanel.telemetry.StatisticsSnapshot;
 
 import java.io.IOException;
@@ -42,7 +43,7 @@ public final class LayoutStore {
     private static final Pattern ID = Pattern.compile("[a-z0-9-]{1,32}");
     private static final Pattern ITEM_ID = Pattern.compile("[a-z0-9_.-]+:[a-z0-9/._-]+");
     public static final List<String> TILE_IDS = List.of("player", "inventory", "statistics", "history", "map", "build",
-            "movement", "xp", "pickups", "advancements", "villagers");
+            "movement", "xp", "pickups", "advancements", "villagers", "performance");
     public static final List<String> CONDITION_TYPES = List.of("world", "dimension", "biome", "time", "gameMode",
             "health", "food", "saturation", "effect", "movement", "elytra", "advancement", "combat");
     public static final List<Integer> XP_WINDOWS = List.of(10, 30, 60, 300, 600, 3600);
@@ -228,6 +229,16 @@ public final class LayoutStore {
             if (xp.has("goals")) normalized.add("goals", xpGoals(xp.getAsJsonArray("goals")));
             result.add("xp", normalized);
         }
+        if (source.has("performance")) {
+            JsonObject performance = source.getAsJsonObject("performance");
+            JsonObject normalized = new JsonObject();
+            if (performance.has("window")) {
+                int window = integer(performance.get("window"), 1, 600);
+                if (!FrameStats.WINDOWS.contains(window)) throw new IllegalArgumentException("unknown performance window");
+                normalized.addProperty("window", window);
+            }
+            result.add("performance", normalized);
+        }
         if (source.has("pickups")) {
             JsonObject pickups = source.getAsJsonObject("pickups");
             JsonObject normalized = new JsonObject();
@@ -245,6 +256,9 @@ public final class LayoutStore {
             }
             if (advancements.has("hiddenTabs")) {
                 normalized.add("hiddenTabs", itemIds(advancements.getAsJsonArray("hiddenTabs")));
+            }
+            if (advancements.has("pinned")) {
+                normalized.add("pinned", itemIds(advancements.getAsJsonArray("pinned")));
             }
             result.add("advancements", normalized);
         }

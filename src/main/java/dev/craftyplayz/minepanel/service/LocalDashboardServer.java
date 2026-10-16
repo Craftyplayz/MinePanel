@@ -156,7 +156,6 @@ public final class LocalDashboardServer implements AutoCloseable {
                 return;
             }
             switch (path) {
-                case "/glint.png" -> serveGlint(exchange);
                 case "/api/session" -> {
                     if (!isSameOriginBrowserRequest(exchange)) {
                         respond(exchange, 403, "text/plain; charset=utf-8", "Forbidden");
@@ -255,16 +254,6 @@ public final class LocalDashboardServer implements AutoCloseable {
         }
         // Keys change whenever the item or resource packs change, so a cached icon never goes stale.
         exchange.getResponseHeaders().set("Cache-Control", "private, max-age=31536000, immutable");
-        send(exchange, 200, "image/png", png);
-    }
-
-    private void serveGlint(HttpExchange exchange) throws IOException {
-        byte[] png = icons == null ? null : icons.glint();
-        if (png == null) {
-            respond(exchange, 404, "text/plain; charset=utf-8", "Glint unavailable");
-            return;
-        }
-        exchange.getResponseHeaders().set("Cache-Control", "private, max-age=3600");
         send(exchange, 200, "image/png", png);
     }
 

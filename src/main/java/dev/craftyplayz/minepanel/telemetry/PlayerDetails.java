@@ -5,15 +5,16 @@ import java.util.Objects;
 
 /**
  * Everything beyond the core vitals and inventory: the world around the player, movement, experience, the last
- * portal trip, recent pickups, advancements, known villagers and the last-seen ender chest. Each part is sent as a
- * top-level snapshot field and replaced whole when it changes. {@code advancements} is null until the server has
- * sent them; {@code enderChest} is null until the player opens their ender chest in this world.
+ * portal trip, recent pickups, advancements, known villagers, the last-seen ender chest and the client frame rate.
+ * Each part is sent as a top-level snapshot field and replaced whole when it changes. {@code advancements} is null
+ * until the server has sent them; {@code enderChest} is null until the player opens their ender chest in this world.
  */
 public record PlayerDetails(WorldInfo world, Motion motion, XpTracker.Experience xp, PortalTracker.State portal,
                             List<PickupTracker.Pickup> pickups, AdvancementsSnapshot advancements,
-                            List<VillagerSnapshot> villagers, EnderChest enderChest) {
-    public static final List<String> FIELDS =
-            List.of("world", "motion", "xp", "portal", "pickups", "advancements", "villagers", "enderChest");
+                            List<VillagerSnapshot> villagers, EnderChest enderChest,
+                            FrameStats.Performance performance) {
+    public static final List<String> FIELDS = List.of("world", "motion", "xp", "portal", "pickups", "advancements",
+            "villagers", "enderChest", "performance");
 
     /** The 27 slots of the player's ender chest, as of {@code seenAt}. */
     public record EnderChest(long seenAt, List<ItemSnapshot> slots) {
@@ -39,6 +40,7 @@ public record PlayerDetails(WorldInfo world, Motion motion, XpTracker.Experience
         Objects.requireNonNull(motion, "motion");
         Objects.requireNonNull(xp, "xp");
         Objects.requireNonNull(portal, "portal");
+        Objects.requireNonNull(performance, "performance");
         pickups = List.copyOf(pickups);
         villagers = List.copyOf(villagers);
         if (pickups.size() > PickupTracker.MAX_PICKUPS || villagers.size() > VillagerSnapshot.MAX_VILLAGERS) {
@@ -53,7 +55,7 @@ public record PlayerDetails(WorldInfo world, Motion motion, XpTracker.Experience
         var xp = new XpTracker().observe(0, 0, 0);
         return new PlayerDetails(new WorldInfo("singleplayer", "World", "minecraft:plains", "Plains", "clear", 0, 0,
                 "survival"), Motion.rounded("ground", 0, 0, 0, 0, 0, boots, null), xp, PortalTracker.State.EMPTY,
-                List.of(), null, List.of(), null);
+                List.of(), null, List.of(), null, FrameStats.Performance.EMPTY);
     }
 
     /** The JSON value of one {@link #FIELDS field}; {@code details} is null while the player is unavailable. */
@@ -68,6 +70,7 @@ public record PlayerDetails(WorldInfo world, Motion motion, XpTracker.Experience
             case "advancements" -> details.advancements == null ? "null" : details.advancements.toJson();
             case "villagers" -> list(details.villagers.stream().map(VillagerSnapshot::toJson).toList());
             case "enderChest" -> details.enderChest == null ? "null" : details.enderChest.toJson();
+            case "performance" -> details.performance.toJson();
             default -> throw new IllegalArgumentException(field);
         };
     }
@@ -83,6 +86,7 @@ public record PlayerDetails(WorldInfo world, Motion motion, XpTracker.Experience
             case "advancements" -> details.advancements;
             case "villagers" -> details.villagers;
             case "enderChest" -> details.enderChest;
+            case "performance" -> details.performance;
             default -> throw new IllegalArgumentException(field);
         };
     }

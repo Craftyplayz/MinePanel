@@ -388,10 +388,6 @@ public final class LocalDashboardServerTest {
                 return key.equals("e0-abc") ? icon : null;
             }
 
-            public byte[] glint() {
-                return icon;
-            }
-
             public byte[] effectIcon(String id) {
                 return id.equals("minecraft:speed") ? icon : null;
             }
@@ -413,7 +409,6 @@ public final class LocalDashboardServerTest {
                     "rendered icons are served as cacheable PNGs");
             check(get(base.resolve("icon/e0-missing.png")).statusCode() == 404, "unknown icons are not found");
             check(get(base.resolve("icon/..%2Fsecret.png")).statusCode() == 404, "icon keys cannot escape");
-            check(get(base.resolve("glint.png")).statusCode() == 200, "glint texture is served");
             check(get(base.resolve("effect/minecraft/speed.png")).statusCode() == 200, "effect icons are served");
             check(get(base.resolve("effect/minecraft/flight.png")).statusCode() == 404, "unknown effect icons are not found");
             check(get(base.resolve("effect/Minecraft/../speed.png")).statusCode() == 404, "effect paths are strict");
@@ -485,7 +480,7 @@ public final class LocalDashboardServerTest {
         String full = "{\"version\":1,\"tiles\":[{\"id\":\"movement\",\"enabled\":true,\"x\":0,\"y\":0,\"w\":4,"
                 + "\"h\":4,\"rulesOnly\":true}],\"settings\":{\"statistics\":{\"recentLifetime\":0,\"recentRows\":4},"
                 + "\"movement\":{\"showVertical\":false,\"showGlider\":true},"
-                + "\"xp\":{\"window\":300,\"goals\":[30,50]},\"pickups\":{\"lifetime\":0,"
+                + "\"xp\":{\"window\":300,\"goals\":[30,50]},\"performance\":{\"window\":600},\"pickups\":{\"lifetime\":0,"
                 + "\"maxRows\":5,\"showSource\":false,\"ignored\":[\"minecraft:dirt\"]},\"advancements\":{\"popupSeconds\":10}},"
                 + "\"profiles\":[{\"id\":\"nether\",\"name\":\"Nether\",\"tiles\":[],\"settings\":{}}],"
                 + "\"rules\":[{\"id\":\"rule-1\",\"name\":\"Nether flight\",\"enabled\":true,\"groups\":[[{\"type\":"
@@ -501,6 +496,7 @@ public final class LocalDashboardServerTest {
                 full.replace("\"profile\":\"nether\"", "\"profile\":\"missing\""),
                 full.replace("\"type\":\"elytra\"", "\"type\":\"weather\""),
                 full.replace("\"window\":300", "\"window\":45"),
+                full.replace("\"window\":600", "\"window\":300"),
                 full.replace("[30,50]", "[0]"),
                 full.replace("[30,50]", "[10001]"),
                 full.replace("[30,50]", "[1.5]"),

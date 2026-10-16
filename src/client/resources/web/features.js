@@ -329,6 +329,125 @@ function renderXp(player) {
   renderXpGoals(xp, perHour);
 }
 
+// ------------------------------------------------------------------------------------------------- Performance
+
+const performanceParts = { status: $("#performance-status"), window: $("#performance-window"),
+  menu: $("#performance-window-menu"), average: $("#performance-average"), low: $("#performance-low"),
+  peak: $("#performance-peak"), line: $("#performance-line"), area: $("#performance-area"),
+  lowLine: $("#performance-low-line") };
+// The graph is drawn in a 1000 × 100 box stretched to the tile; the line keeps its width (non-scaling stroke).
+const GRAPH_WIDTH = 1000;
+const GRAPH_HEIGHT = 100;
+const MAX_GRAPH_POINTS = 120;
+let performanceKey;
+
+performanceParts.menu.replaceChildren(...PERFORMANCE_WINDOW_CHOICES.map(seconds => {
+  const choice = create("button", "chip small", formatWindow(seconds));
+  choice.type = "button";
+  choice.setAttribute("role", "menuitemradio");
+  choice.dataset.window = String(seconds);
+  stopDrag(choice);
+  choice.addEventListener("click", () => {
+    setHidden(performanceParts.menu, true);
+    changeSettings("performance", { window: seconds });
+  });
+  return choice;
+}));
+stopDrag(performanceParts.window);
+performanceParts.window.addEventListener("click", () => setHidden(performanceParts.menu, !performanceParts.menu.hidden));
+
+/**
+ * The last {@code window} seconds of frames per second as graph points, newest at x = 1. Long windows are averaged
+ * into at most 120 points (10 minutes → one per 5 s), which keeps the line readable rather than a solid band.
+ */
+function performancePoints(fps, window) {
+  const values = fps.slice(-window);
+  const group = Math.ceil(window / MAX_GRAPH_POINTS);
+  const points = [];
+  for (let end = values.length; end > 0; end -= group) {
+    const part = values.slice(Math.max(0, end - group), end);
+    const age = values.length - end;
+    points.unshift({ x: window > 1 ? 1 - age / (window - 1) : 1, y: part.reduce((sum, value) => sum + value, 0) / part.length });
+  }
+  return points;
+}
+
+/** A rounded graph ceiling just above the highest point: 60, 75, 150, 300... so the line rarely touches the top. */
+function graphPeak(points) {
+  const highest = Math.max(10, ...points.map(point => point.y)) * 1.1;
+  const step = 10 ** Math.floor(Math.log10(highest));
+  const nice = [1, 1.5, 2, 3, 5, 7.5, 10].find(factor => factor * step >= highest);
+  return nice * step;
+}
+
+/**
+ * A smooth SVG path through screen points (x increasing) using monotone cubic interpolation: curves between points
+ * but never overshoots them, so the line cannot dip below 0 fps or invent peaks that did not happen.
+ */
+function smoothPath(points) {
+  const f = value => Math.round(value * 10) / 10;
+  if (points.length === 0) return "";
+  if (points.length === 1) return `M${f(points[0].x)},${f(points[0].y)}h0`;
+  const last = points.length - 1;
+  const dx = [];
+  const slope = [];
+  for (let index = 0; index < last; index++) {
+    dx.push(points[index + 1].x - points[index].x);
+    slope.push((points[index + 1].y - points[index].y) / dx[index]);
+  }
+  const tangent = [slope[0]];
+  for (let index = 1; index < last; index++) {
+    const [before, after] = [slope[index - 1], slope[index]];
+    tangent.push(before * after <= 0 ? 0 : 3 * (dx[index - 1] + dx[index])
+      / ((2 * dx[index] + dx[index - 1]) / before + (dx[index] + 2 * dx[index - 1]) / after));
+  }
+  tangent.push(slope[last - 1]);
+  let path = `M${f(points[0].x)},${f(points[0].y)}`;
+  for (let index = 0; index < last; index++) {
+    const third = dx[index] / 3;
+    const [from, to] = [points[index], points[index + 1]];
+    path += `C${f(from.x + third)},${f(from.y + third * tangent[index])},${f(to.x - third)},`
+      + `${f(to.y - third * tangent[index + 1])},${f(to.x)},${f(to.y)}`;
+  }
+  return path;
+}
+
+function renderPerformance(player) {
+  const performance = player?.available ? player.performance : null;
+  const span = displaySettings().performance.window;
+  // Data arrives once a second; skip the redraw for updates that carried other fields.
+  if (performanceKey?.performance === performance && performanceKey.span === span) return;
+  performanceKey = { performance, span };
+  writeText(performanceParts.window, formatWindow(span));
+  for (const choice of performanceParts.menu.children) {
+    choice.setAttribute("aria-checked", String(choice.dataset.window === String(span)));
+  }
+  const stats = performance?.windows[span] ?? null;
+  if (!stats) {
+    writeText(performanceParts.status, performance ? "Measuring" : "Unavailable");
+    for (const part of [performanceParts.average, performanceParts.low, performanceParts.peak]) writeText(part, "—");
+    performanceParts.line.setAttribute("d", "");
+    performanceParts.area.setAttribute("d", "");
+    setHidden(performanceParts.lowLine, true);
+    return;
+  }
+  writeText(performanceParts.status, `${performance.fps.at(-1)} FPS`);
+  writeText(performanceParts.average, `${stats.average} fps`);
+  writeText(performanceParts.low, `${stats.low} fps`);
+  const points = performancePoints(performance.fps, span);
+  const peak = graphPeak(points);
+  writeText(performanceParts.peak, `${formatCount(peak)} fps`);
+  const toScreen = value => GRAPH_HEIGHT - value / peak * GRAPH_HEIGHT;
+  const line = smoothPath(points.map(point => ({ x: point.x * GRAPH_WIDTH, y: toScreen(point.y) })));
+  performanceParts.line.setAttribute("d", line);
+  const start = Math.round(points[0].x * GRAPH_WIDTH * 10) / 10;
+  performanceParts.area.setAttribute("d", `${line}L${GRAPH_WIDTH},${GRAPH_HEIGHT}L${start},${GRAPH_HEIGHT}Z`);
+  const lowY = String(Math.round(toScreen(stats.low) * 10) / 10);
+  performanceParts.lowLine.setAttribute("y1", lowY);
+  performanceParts.lowLine.setAttribute("y2", lowY);
+  setHidden(performanceParts.lowLine, false);
+}
+
 // ---------------------------------------------------------------------------------------------- Pickups
 
 const pickupParts = { list: $("#pickups-list"), empty: $("#pickups-empty"), form: $("#pickups-form"),
@@ -474,10 +593,10 @@ function renderAdvancements(player) {
   const done = advancements.entries.filter(entry => entry.done).length;
   writeText(advancementParts.status, `${done} / ${advancements.entries.length}`);
   const filter = advancementParts.filter.value || "closest";
-  const key = JSON.stringify([filter, advancements]);
+  const key = JSON.stringify([filter, displaySettings().advancements.pinned, advancements]);
   if (key === advancementKey) return;
   advancementKey = key;
-  advancementParts.tabs.replaceChildren(...advancements.tabs.map(tab => {
+  const tabRow = tab => {
     const row = create("div", "advancement-tab");
     row.appendChild(create("span", "label", tab.title));
     const bar = create("span", "progress");
@@ -486,6 +605,13 @@ function renderAdvancements(player) {
     bar.appendChild(fill);
     row.appendChild(bar);
     row.appendChild(create("span", "count", `${tab.done}/${tab.total}`));
+    return row;
+  };
+  const total = tabRow({ title: "All", done: advancements.tabs.reduce((sum, tab) => sum + tab.done, 0),
+    total: advancements.tabs.reduce((sum, tab) => sum + tab.total, 0) });
+  total.classList.add("advancement-total");
+  advancementParts.tabs.replaceChildren(...(advancements.tabs.length ? [total] : []), ...advancements.tabs.map(tab => {
+    const row = tabRow(tab);
     const hide = create("button", "icon-button advancement-tab-hide", "×");
     hide.type = "button";
     hide.setAttribute("aria-label", `Hide the ${tab.title} tab`);
@@ -505,6 +631,10 @@ function renderAdvancements(player) {
     entries = advancements.entries.filter(entry => !entry.done)
       .sort((a, b) => fraction(b) - fraction(a) || b.criteriaDone - a.criteriaDone || a.title.localeCompare(b.title));
   }
+  // Pinned advancements stay at the top whatever the filter, in the order they were pinned.
+  const pinned = displaySettings().advancements.pinned;
+  const byId = new Map(advancements.entries.map(entry => [entry.id, entry]));
+  entries = [...pinned.map(id => byId.get(id)).filter(Boolean), ...entries.filter(entry => !pinned.includes(entry.id))];
   const retained = new Map();
   const rows = entries.slice(0, MAX_ADVANCEMENT_ROWS).map(entry => {
     let node = advancementNodes.get(entry.id);
@@ -514,19 +644,33 @@ function renderAdvancements(player) {
       const slot = createSlot(summary);
       const text = create("span", "advancement-title");
       const progress = create("span", "advancement-progress");
+      const pin = create("button", "icon-button advancement-pin", "📌");
+      pin.type = "button";
+      pin.addEventListener("click", event => {
+        event.preventDefault();
+        const current = displaySettings().advancements.pinned;
+        changeSettings("advancements", { pinned: current.includes(entry.id)
+          ? current.filter(id => id !== entry.id) : [...current, entry.id] });
+      });
       summary.appendChild(text);
       summary.appendChild(progress);
+      summary.appendChild(pin);
       details.appendChild(summary);
       const description = create("p", "advancement-description");
       const remaining = create("div", "advancement-remaining");
       details.appendChild(description);
       details.appendChild(remaining);
-      node = { details, slot, text, progress, description, remaining };
+      node = { details, slot, text, progress, pin, description, remaining };
     }
     retained.set(entry.id, node);
     const secret = entry.hidden && !entry.done;
+    const isPinned = pinned.includes(entry.id);
     node.details.dataset.frame = entry.frame;
     node.details.dataset.done = String(entry.done);
+    node.details.dataset.pinned = String(isPinned);
+    node.pin.setAttribute("aria-pressed", String(isPinned));
+    node.pin.setAttribute("aria-label", isPinned ? "Unpin" : "Pin to the top");
+    node.pin.title = isPinned ? "Unpin" : "Pin to the top";
     renderSlot(node.slot, advancementItem(entry, secret), false);
     writeText(node.text, secret ? "???" : entry.title);
     writeText(node.progress, entry.done ? "Done" : entry.criteriaTotal > 1 ? `${entry.criteriaDone}/${entry.criteriaTotal}` : "");
@@ -811,7 +955,7 @@ function renderWindows(player) {
 stopDrag(enderChestButton);
 enderChestButton.addEventListener("click", event => openItemWindow("enderchest", 0, event));
 
-/** Clicking elsewhere or pressing Escape closes the unpinned window (and the XP window menu). */
+/** Clicking elsewhere or pressing Escape closes the unpinned window (and the XP and performance window menus). */
 function closeTransient(event) {
   const inside = element => element?.contains?.(event?.target);
   if (!event || !openWindows.some(entry => inside(entry.element)) && !event.target?.closest?.(".slot")) {
@@ -821,6 +965,9 @@ function closeTransient(event) {
     }
   }
   if (!event || !inside(xpParts.menu) && event.target !== xpParts.window) setHidden(xpParts.menu, true);
+  if (!event || !inside(performanceParts.menu) && event.target !== performanceParts.window) {
+    setHidden(performanceParts.menu, true);
+  }
 }
 
 window.addEventListener("pointerdown", closeTransient);
@@ -1129,6 +1276,7 @@ featureHooks.render.push(player => {
   renderPortal(player);
   renderMovement(player);
   renderXp(player);
+  renderPerformance(player);
   renderPickups(player);
   renderAdvancements(player);
   checkAdvancementPopup(player);
@@ -1139,6 +1287,7 @@ featureHooks.layout.push(() => {
   renderMovement(currentPlayerState);
   renderXp(currentPlayerState);
   renderXpSettings();
+  renderPerformance(currentPlayerState);
   renderPickups(currentPlayerState);
   renderPickupSettings();
   renderAdvancements(currentPlayerState);
@@ -1150,7 +1299,7 @@ featureHooks.tick.push(() => {
 });
 
 // Panels that only appear on demand start hidden (the markup says so too).
-for (const element of [xpParts.menu, xpParts.form, pickupParts.form, advancementParts.form, advancementParts.popup, portalBox,
+for (const element of [xpParts.menu, performanceParts.menu, xpParts.form, pickupParts.form, advancementParts.form, advancementParts.popup, portalBox,
   villagerParts.nav, rulesDialog, enderChestButton, portalLink]) {
   setHidden(element, true);
 }

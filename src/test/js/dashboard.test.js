@@ -52,8 +52,13 @@ function details() {
       glider: null },
     xp: { level: 5, progress: 0.5, points: 63, gained: { 10: 0, 30: 0, 60: 12, 300: 40, 600: 40, 3600: 90 } },
     portal: { crossing: null, obsidian: [], lit: null },
-    pickups: [], advancements: null, villagers: [], enderChest: null
+    pickups: [], advancements: null, villagers: [], enderChest: null, performance: performance()
   };
+}
+
+function performance(fps = [58, 60, 61, 60, 59, 30, 60, 62, 60, 60, 61, 60]) {
+  return { fps, windows: { 10: { seconds: 10, average: 57, low: 24 }, 30: { seconds: 12, average: 57, low: 24 },
+    60: { seconds: 12, average: 57, low: 24 }, 600: { seconds: 12, average: 57, low: 24 } } };
 }
 
 function snapshot(overrides = {}) {
@@ -77,7 +82,7 @@ function unavailable(overrides = {}) {
     position: { x: null, y: null, z: null }, health: null, maxHealth: null,
     absorption: null, inventory: null, statistics: null, history: history({ active: false }),
     food: null, saturation: null, effects: null, world: null, motion: null, xp: null, portal: null, pickups: null,
-    advancements: null, villagers: null, enderChest: null, ...overrides });
+    advancements: null, villagers: null, enderChest: null, performance: null, ...overrides });
 }
 
 function defaultFetch(storedLayout = null, requests = []) {
@@ -200,8 +205,8 @@ const hotbar = h => h.get("#inventory-grid").children.slice(0, 9);
 const main = h => h.get("#inventory-grid").children.slice(9, 36);
 const equipment = h => h.get("#inventory-grid").children.slice(36, 41);
 const slotParts = slot => {
-  const [placeholder, icon, glint, fallback, count, durability] = slot.children;
-  return { placeholder, icon, glint, fallback, count, durability, bar: durability.children[0] };
+  const [placeholder, icon, fallback, count, durability] = slot.children;
+  return { placeholder, icon, fallback, count, durability, bar: durability.children[0] };
 };
 
 test("complete snapshot preserves telemetry, all 36 slots and equipment", () => {
@@ -1074,7 +1079,7 @@ test("hovering a slot shows the game's tooltip lines with Minecraft colors and f
   assert.equal(tooltip.hidden, true, "empty slots have no tooltip");
 });
 
-test("slots show game-rendered icons, counts, durability bars and an animated glint mask", async () => {
+test("slots show game-rendered icons, counts and durability bars without a glint", async () => {
   const h = harness();
   await h.flush();
   const socket = h.sockets[0];
@@ -1083,12 +1088,10 @@ test("slots show game-rendered icons, counts, durability bars and an animated gl
   assert.equal(stone.icon.src, "/icon/e0-1a2b.png");
   assert.equal(stone.icon.hidden, false);
   assert.equal(stone.count.textContent, "32");
-  assert.equal(stone.glint.hidden, true);
   assert.equal(stone.durability.hidden, true);
   assert.equal(stone.placeholder.hidden, true);
   assert.equal(hotbar(h)[0].className, "slot selected");
   assert.equal(hotbar(h)[0].attributes["aria-label"], "Stone × 32");
-  assert.equal(h.documentElement.style.getPropertyValue("--glint"), 'url("/glint.png?v=0")');
   const empty = slotParts(hotbar(h)[1]);
   assert.equal(empty.icon.hidden, true);
   assert.equal(empty.placeholder.hidden, false);
@@ -1098,13 +1101,12 @@ test("slots show game-rendered icons, counts, durability bars and an animated gl
     equipment: { mainhand: tool, head: tool } } }));
   const pickaxe = slotParts(hotbar(h)[1]);
   assert.equal(pickaxe.count.textContent, "");
-  assert.equal(pickaxe.glint.hidden, false);
-  assert.equal(pickaxe.glint.style.maskImage, 'url("/icon/e3-ff.png")');
+  assert.equal(pickaxe.icon.src, "/icon/e3-ff.png");
+  assert.equal(hotbar(h)[1].children.some(child => child.className === "glint"), false,
+    "enchanted items get no glint overlay");
   assert.equal(pickaxe.durability.hidden, false);
   assert.equal(pickaxe.bar.style.width, "75%");
   assert.equal(pickaxe.bar.style.background, "hsl(90, 100%, 50%)");
-  assert.equal(h.documentElement.style.getPropertyValue("--glint"), 'url("/glint.png?v=3")',
-    "a resource-pack reload refreshes the glint texture");
   assert.equal(hotbar(h)[0].className, "slot");
   assert.equal(h.get("#held-value").textContent, "Holding Diamond Pickaxe");
   assert.equal(slotParts(equipment(h)[0]).icon.src, "/icon/e3-ff.png");
@@ -1161,7 +1163,7 @@ test("imported or stored layouts are validated and completed", () => {
   const normalize = value => h.run(`normalizeLayout(${JSON.stringify(value)})`);
   const partial = normalize({ version: 1, tiles: [{ id: "history", enabled: true, x: 0, y: 5, w: 12, h: 2 }] });
   assert.deepEqual(plain(partial.tiles[0]), { id: "history", enabled: true, x: 0, y: 0, w: 12, h: 3 });
-  assert.equal(partial.tiles.length, 11);
+  assert.equal(partial.tiles.length, 12);
   assert.equal(partial.tiles.filter(tile => tile.enabled).length, 1, "missing tiles are added disabled");
   for (const bad of [null, [], { version: 2, tiles: [] }, { version: 1 },
     { version: 1, tiles: [{ id: "chat", enabled: true, x: 0, y: 0, w: 1, h: 1 }] },
@@ -1190,7 +1192,7 @@ test("the saved layout is loaded after the session and applied to tile grid plac
   assert.deepEqual(toggles.map(chip => [chip.textContent, chip.attributes["aria-pressed"]]),
     [["Player", "false"], ["Inventory", "true"], ["Statistics", "false"], ["Activity log", "false"],
       ["JourneyMap", "false"], ["Build progress", "false"], ["Movement", "false"], ["Experience", "false"],
-      ["Recent pickups", "false"], ["Advancements", "false"], ["Villager trades", "false"]]);
+      ["Recent pickups", "false"], ["Advancements", "false"], ["Villager trades", "false"], ["Performance", "false"]]);
   h.sockets[0].emit("close");
   await h.reconnect();
   assert.equal(requests.filter(request => request.url === "/api/layout").length, 1, "layout loads once");
@@ -1570,7 +1572,7 @@ test("layouts keep profiles, rules and pinned windows, and reject malformed ones
   const layout = normalize(value);
   assert.deepEqual(plain(layout.rules), [rule]);
   assert.equal(layout.tiles.find(tile => tile.id === "movement").rulesOnly, true);
-  assert.equal(layout.profiles[0].tiles.length, 11);
+  assert.equal(layout.profiles[0].tiles.length, 12);
   assert.equal(layout.profiles[0].settings.xp.window, 60, "profile settings are completed with defaults");
   assert.deepEqual(plain(layout.pinned), value.pinned);
   for (const bad of [{ ...value, rules: [{ ...rule, profile: "missing" }] },
@@ -1596,6 +1598,9 @@ test("detail fields and item contents are validated", () => {
       obsidian: [], lit: null } },
     { pickups: [{ id: 1, at: 1, source: "", item: item(), count: 1 }] },
     { villagers: [villager({ uuid: "nope" })] }, { enderChest: { seenAt: 1, slots: [] } },
+    { performance: performance([-1]) }, { performance: performance(Array(601).fill(60)) },
+    { performance: { ...performance(), windows: { ...performance().windows, 10: { seconds: 10, average: 50, low: 51 } } } },
+    { performance: { ...performance(), windows: { 10: null, 30: null, 60: null } } },
     { inventory: { ...inventory(), slots: [shulker({ contents: [shulker()] }), ...inventory().slots.slice(1)] } }]) {
     assert.throws(() => h.apply(undefined, initial(snapshot(bad))), JSON.stringify(bad).slice(0, 100));
   }
@@ -1676,6 +1681,63 @@ test("experience shows XP/h for the chosen window and the time to the next level
   assert.equal(h.get("#xp-window").textContent, "1 h");
   await h.runTimers(400);
   assert.equal(JSON.parse(requests.filter(request => request.method === "PUT").at(-1).body).settings.xp.window, 3600);
+});
+
+test("performance shows the average and 1% low with a graph over the chosen window, and saves the window", async () => {
+  const requests = [];
+  const h = harness(defaultFetch(null, requests));
+  await h.flush();
+  h.sockets[0].message(initial(snapshot()));
+  assert.equal(h.get("#performance-status").textContent, "60 FPS", "the badge shows the newest second");
+  assert.equal(h.get("#performance-average").textContent, "57 fps");
+  assert.equal(h.get("#performance-low").textContent, "24 fps");
+  assert.equal(h.get("#performance-peak").textContent, "75 fps", "a rounded ceiling above the highest second");
+  assert.equal(h.get("#performance-window").textContent, "1 min");
+  const line = h.get("#performance-line").attributes.d;
+  assert.match(line, /^M[\d.]+,[\d.]+(C[\d.,]+)+$/, "a smooth curve");
+  assert.ok(line.endsWith(",1000,20"), `the newest point, 60 of 75 fps, is at the right edge: ${line.slice(-40)}`);
+  assert.ok(h.get("#performance-area").attributes.d.endsWith("L1000,100L813.6,100Z"),
+    "12 of 60 seconds fill the right fifth of the graph");
+  assert.equal(h.get("#performance-low-line").hidden, false);
+  assert.equal(h.get("#performance-low-line").attributes.y1, "68");
+
+  const writes = h.get("#performance-line").attributes.d;
+  h.sockets[0].message(update({ revision: 5, baseRevision: 4, motion: { ...details().motion, yaw: 90 } }));
+  assert.equal(h.get("#performance-line").attributes.d, writes, "updates without new frame data keep the graph");
+
+  h.get("#performance-window").emit("click");
+  const choices = h.get("#performance-window-menu").children;
+  assert.deepEqual(choices.map(choice => choice.textContent), ["10 s", "30 s", "1 min", "10 min"]);
+  choices[0].emit("click");
+  assert.equal(h.get("#performance-window-menu").hidden, true);
+  assert.equal(h.get("#performance-window").textContent, "10 s");
+  assert.ok(h.get("#performance-area").attributes.d.endsWith("L1000,100L0,100Z"), "10 s fills the graph");
+  await h.runTimers(400);
+  assert.equal(JSON.parse(requests.filter(request => request.method === "PUT").at(-1).body).settings.performance.window, 10);
+
+  h.sockets[0].message(update({ revision: 6, baseRevision: 5, performance: { fps: [], windows:
+    { 10: null, 30: null, 60: null, 600: null } } }));
+  assert.equal(h.get("#performance-status").textContent, "Measuring");
+  assert.equal(h.get("#performance-average").textContent, "—");
+  assert.equal(h.get("#performance-line").attributes.d, "");
+  h.sockets[0].message(update({ revision: 7, baseRevision: 6, ...unavailable() }));
+  assert.equal(h.get("#performance-status").textContent, "Unavailable");
+});
+
+test("the performance graph averages long windows and its curve never overshoots the data", () => {
+  const h = harness();
+  const points = h.run(`performancePoints(Array.from({ length: 600 }, (_, i) => i % 2 ? 50 : 70), 600)`);
+  assert.equal(points.length, 120, "10 minutes become one point per 5 seconds");
+  assert.equal(points.at(-1).x, 1);
+  assert.ok(points.every(point => point.y > 50 && point.y < 70), "noise is averaged out");
+  assert.equal(JSON.stringify(h.run("performancePoints([30, 60], 10)")), '[{"x":0.8888888888888888,"y":30},{"x":1,"y":60}]');
+  // A spike between flat runs: a plain cubic would dip below the flat part; the monotone curve stays within it.
+  const path = h.run(`smoothPath([{ x: 0, y: 90 }, { x: 10, y: 90 }, { x: 20, y: 10 }, { x: 30, y: 90 }, { x: 40, y: 90 }])`);
+  const ys = path.slice(1).split(/[MC]/).join(",").split(",").filter((_, index) => index % 2).map(Number);
+  assert.ok(ys.every(y => y >= 10 && y <= 90), `control points stay inside the data range: ${path}`);
+  assert.equal(h.run("smoothPath([])"), "");
+  assert.equal(h.run("graphPeak([{ x: 1, y: 144 }])"), 200);
+  assert.equal(h.run("graphPeak([{ x: 1, y: 0 }])"), 15);
 });
 
 test("experience goals take a custom level and show the XP and time still needed", async () => {
@@ -1812,6 +1874,28 @@ test("advancements list shows tab progress, closest first, and hides secrets as 
   assert.deepEqual(rows.map(row => row.children[0].children[1].textContent), ["adventuring_time", "monster_hunter", "???"]);
   assert.equal(rows[0].children[2].textContent, "BadlandsCherry grove");
   assert.equal(rows[2].children[1].textContent, "Hidden advancement: keep playing to reveal it.");
+});
+
+test("advancements show an All total above the tabs, and pinned ones go to the top of the list", async () => {
+  const h = harness();
+  await h.flush();
+  const entry = (tab, id, overrides) => ({ id: `minecraft:${tab}/${id}`, tab: `minecraft:${tab}/root`, title: id,
+    description: "", frame: "task", icon: "e0-aa", foil: false, hidden: false, done: false, doneAt: null,
+    criteriaDone: 0, criteriaTotal: 1, remaining: [], ...overrides });
+  h.sockets[0].message(initial(snapshot({ advancements: { tabs: [
+    { id: "minecraft:adventure/root", title: "Adventure", icon: "e0-aa", foil: false, done: 1, total: 2 },
+    { id: "minecraft:nether/root", title: "Nether", icon: "e0-aa", foil: false, done: 0, total: 2 }], entries: [
+    entry("adventure", "done", { done: true, criteriaDone: 1 }), entry("adventure", "close", { criteriaDone: 3, criteriaTotal: 4 }),
+    entry("nether", "far", { criteriaDone: 1, criteriaTotal: 10 }), entry("nether", "start")] } })));
+  const tabs = h.get("#advancement-tabs").children;
+  assert.equal(tabs.length, 3);
+  assert.match(tabs[0].textContent, /^All1\/4$/);
+  const titles = () => h.get("#advancement-list").children.map(row => row.children[0].children[1].textContent);
+  assert.deepEqual(titles(), ["close", "far", "start"]);
+  h.get("#advancement-list").children[2].children[0].children[3].emit("click");
+  await h.flush();
+  assert.deepEqual(titles(), ["start", "close", "far"]);
+  assert.equal(h.get("#advancement-list").children[0].dataset.pinned, "true");
 });
 
 test("a rules-only tile keeps its space and appears when a rule made in the editor matches", async () => {

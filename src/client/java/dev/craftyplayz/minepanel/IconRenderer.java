@@ -37,7 +37,7 @@ import java.util.logging.Logger;
 /**
  * Renders inventory items exactly as the GUI does (same model resolution, lighting and resource packs) into an
  * off-screen texture and reads them back as PNGs. Rendering happens on the render thread; HTTP threads only wait
- * on the resulting futures. The enchantment glint is left out of the image and animated by the dashboard instead.
+ * on the resulting futures. The enchantment glint is left out of the image.
  */
 final class IconRenderer implements IconSource {
     static final int SIZE = 64;
@@ -45,7 +45,6 @@ final class IconRenderer implements IconSource {
     private static final int MAX_ICONS = 4096;
     private static final int RENDERS_PER_TICK = 16;
     private static final long WAIT_MILLIS = 3_000;
-    private static final Identifier GLINT = Identifier.withDefaultNamespace("textures/misc/enchanted_glint_item.png");
 
     private final Map<String, CompletableFuture<byte[]>> icons = new ConcurrentHashMap<>();
     private final ArrayDeque<Pending> pending = new ArrayDeque<>();
@@ -53,8 +52,6 @@ final class IconRenderer implements IconSource {
     private final PoseStack poseStack = new PoseStack();
     private final Projection projection = new Projection();
     private volatile int epoch;
-    private volatile byte[] glint;
-    private boolean glintMissing;
     private GpuTexture colorTexture;
     private GpuTextureView colorView;
     private GpuTexture depthTexture;
@@ -88,15 +85,13 @@ final class IconRenderer implements IconSource {
         pending.addLast(new Pending(key, copy, future));
     }
 
-    /** Resource packs changed: every icon and the glint texture must be rendered again under new keys. */
+    /** Resource packs changed: every icon must be rendered again under new keys. */
     void reset() {
         epoch++;
         icons.values().forEach(future -> future.complete(null));
         icons.clear();
         pending.clear();
         effectIcons.clear();
-        glint = null;
-        glintMissing = false;
     }
 
     @Override
@@ -108,11 +103,6 @@ final class IconRenderer implements IconSource {
         } catch (ExecutionException | TimeoutException unavailable) {
             return null;
         }
-    }
-
-    @Override
-    public byte[] glint() {
-        return glint;
     }
 
     /** Effect icons are plain textures, so they are read from the active resource packs rather than rendered. */
@@ -138,7 +128,6 @@ final class IconRenderer implements IconSource {
 
     /** Render thread, between frames. */
     void renderPending(Minecraft minecraft) {
-        if (glint == null && !glintMissing) loadGlint(minecraft);
         if (pending.isEmpty()) return;
         ensureTargets();
         GpuDevice device = RenderSystem.getDevice();
@@ -223,18 +212,5 @@ final class IconRenderer implements IconSource {
                 GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_RENDER_ATTACHMENT, TextureFormat.DEPTH32, SIZE, SIZE, 1, 1);
         depthView = device.createTextureView(depthTexture);
         projectionBuffer = new ProjectionMatrixBuffer("MinePanel icons");
-    }
-
-    private void loadGlint(Minecraft minecraft) {
-        var resource = minecraft.getResourceManager().getResource(GLINT);
-        if (resource.isEmpty()) {
-            glintMissing = true;
-            return;
-        }
-        try (InputStream input = resource.get().open()) {
-            glint = input.readNBytes(4 * 1024 * 1024);
-        } catch (IOException failure) {
-            glintMissing = true;
-        }
     }
 }

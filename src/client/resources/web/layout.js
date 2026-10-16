@@ -11,16 +11,17 @@ const LAYOUT_COLUMNS = 12;
 const LAYOUT_MAX_Y = 1000;
 const LAYOUT_MAX_H = 60;
 const TILE_IDS = ["player", "inventory", "statistics", "history", "map", "build",
-  "movement", "xp", "pickups", "advancements", "villagers"];
+  "movement", "xp", "pickups", "advancements", "villagers", "performance"];
 const TILE_MINIMUMS = {
   player: { w: 2, h: 2 }, inventory: { w: 3, h: 2 }, statistics: { w: 2, h: 3 },
   history: { w: 3, h: 3 }, map: { w: 2, h: 2 }, build: { w: 2, h: 2 },
   movement: { w: 2, h: 2 }, xp: { w: 2, h: 2 }, pickups: { w: 2, h: 2 }, advancements: { w: 3, h: 3 },
-  villagers: { w: 3, h: 3 }
+  villagers: { w: 3, h: 3 }, performance: { w: 2, h: 2 }
 };
 const MAX_STATISTIC_SETTINGS = 512;
 const DEFAULT_MAP_URL = "http://127.0.0.1:8080/";
 const XP_WINDOW_CHOICES = [10, 30, 60, 300, 600, 3600];
+const PERFORMANCE_WINDOW_CHOICES = [10, 30, 60, 600];
 const MAX_XP_GOALS = 8;
 const MAX_XP_GOAL_LEVEL = 10000;
 const MAX_PROFILES = 16;
@@ -57,9 +58,12 @@ function defaultSettings() {
     movement: { showVertical: true, showGlider: true },
     // Custom target levels, each shown with the XP and time still needed.
     xp: { window: 60, goals: [] },
+    // Seconds of frame-rate history the graph, average and 1% low cover.
+    performance: { window: 60 },
     pickups: { lifetime: 30, maxRows: 8, showSource: true, ignored: [] },
-    // Tabs (advancement roots) left out, e.g. ones datapacks only use to list themselves.
-    advancements: { popupSeconds: 10, hiddenTabs: [] }
+    // Tabs (advancement roots) left out, e.g. ones datapacks only use to list themselves;
+    // pinned advancements are listed first, in the order they were pinned.
+    advancements: { popupSeconds: 10, hiddenTabs: [], pinned: [] }
   };
 }
 
@@ -86,12 +90,14 @@ const SETTING_RULES = [
   ["xp", "window", value => XP_WINDOW_CHOICES.includes(value)],
   ["xp", "goals", value => Array.isArray(value) && value.length <= MAX_XP_GOALS
     && value.every(level => wholeIn(level, 1, MAX_XP_GOAL_LEVEL))],
+  ["performance", "window", value => PERFORMANCE_WINDOW_CHOICES.includes(value)],
   ["pickups", "lifetime", value => wholeIn(value, 0, 3600)],
   ["pickups", "maxRows", value => wholeIn(value, 1, 32)],
   ["pickups", "showSource", value => typeof value === "boolean"],
   ["pickups", "ignored", validItemIds],
   ["advancements", "popupSeconds", value => wholeIn(value, 0, 300)],
-  ["advancements", "hiddenTabs", validItemIds]
+  ["advancements", "hiddenTabs", validItemIds],
+  ["advancements", "pinned", validItemIds]
 ];
 
 /** Copies only known, valid settings out of {@code value}; rejects present-but-malformed ones. */
@@ -129,6 +135,7 @@ function defaultLayout() {
     { id: "history", enabled: true, x: 4, y: 8, w: 8, h: 9 },
     { id: "movement", enabled: true, x: 0, y: 13, w: 4, h: 4 },
     { id: "xp", enabled: true, x: 0, y: 17, w: 4, h: 4 },
+    { id: "performance", enabled: true, x: 0, y: 21, w: 4, h: 4 },
     { id: "pickups", enabled: true, x: 4, y: 17, w: 4, h: 6 },
     { id: "advancements", enabled: true, x: 8, y: 17, w: 4, h: 8 },
     { id: "villagers", enabled: true, x: 0, y: 25, w: 8, h: 8 },
