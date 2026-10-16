@@ -24,7 +24,7 @@ MinePanel exposes no slot-click, equip, consume, item-move, or inventory-changin
 
 Applied and stored/book enchantment components are merged by registry ID with the higher level and sorted for stable comparisons. Readable text is bounded to 256 UTF-16 units without splitting surrogate pairs; controls are replaced and malformed Unicode is repaired. Metadata exceeding the bounded protocol invariants makes the sample unavailable rather than crashing gameplay or publishing partially copied inventory; a generic warning is logged once, without item contents.
 
-JourneyMap is the only map source; MinePanel does not render terrain. Litematica completion is based on verified placement state, never carried inventory. Their compatible versions, APIs, and iframe behavior remain unverified until tested against Minecraft 26.1.2.
+JourneyMap is the only map source; MinePanel does not render terrain. Litematica completion is based on the compared world state, never carried inventory (see below). JourneyMap's compatible versions and iframe behavior remain unverified until tested against Minecraft 26.1.2.
 
 ## Extraction, statistics and session events
 
@@ -47,3 +47,24 @@ Statistics and history deltas replace their whole bounded objects only when chan
 `FrameTimingMixin` calls `FrameCollector` at every return from `Minecraft.runTick`, which renders one frame, so frame time is measured end to end, including menus, loading screens and framerate-limiter waits. `FrameStats` runs on the render thread and allocates nothing per frame. It counts each frame into the second it ended in and into a log-spaced frame-time histogram with buckets 2% wide (0.1 ms to 10 s). Each closed second keeps only its non-empty buckets, in a 600-second ring. Running merges for the 10 s, 30 s, 60 s and 600 s windows add the new second and subtract the one leaving. A window's average is frames divided by their total duration. Its 1% low is the frame rate at the 99th-percentile frame time, accurate to the bucket width. A stall shows as seconds with zero frames.
 
 The snapshot is the `performance` detail field. It holds frames per second for up to 600 seconds (newest last) and `{seconds, average, low}` per window, or null until the first second closes. It is rebuilt and resent only when a second closes. The browser averages long windows into at most 120 points and draws them with monotone cubic interpolation, so the curve never overshoots the data. The chosen window is saved as `settings.performance.window`. The mixin's injection into 26.1.2's `runTick` is unverified until the client compiles.
+
+## Litematica build progress
+
+Schema version 4 adds the `build` detail field, replaced whole when it changes:
+`{ available, reason, placement: { id, name, total, placed, wrong, extra, uncheckedChunks, scanComplete, checkedAt } | null, materials: [ { itemId, name, icon, left, have } ] }` (at most 128 materials). `reason` is `missing`, `version` or `error` when unavailable, `none` when no placement is selected and `counting` while the schematic's blocks are counted; it is null when a placement is shown.
+
+Code is split in three so Litematica's absence can never break class loading:
+
+- `dev.craftyplayz.minepanel.build` (main source set, pure Java, no Minecraft): `BuildTracker` (counting, chunk scanning, per-chunk cache, materials), `BuildRules` (per-position classification), `ChunkCounts`, the `BuildSource` interface it reads through, and the `BuildProgress` snapshot. Tested by `BuildProgressTest` with fake placements.
+- `dev.craftyplayz.minepanel.litematica` (client): `LitematicaBuildSource`, the **only** code that imports Litematica/MaLiLib (`litematicaIsolation`, part of `check`, enforces this). Compiled against Litematica 0.27.14 / MaLiLib 0.28.12 as `compileOnly`; never bundled (`releaseBuild` rejects `fi/dy/masa/` entries).
+- `BuildProgressCollector` (client): on the first in-world tick, checks that Litematica is loaded and that its version satisfies MinePanel's own `suggests` range, then creates the adapter. Any `LinkageError` or `RuntimeException` from the adapter disables the tile for the game session with one logged warning.
+
+Every Litematica and world read happens on the client thread at END_CLIENT_TICK, within a 2 ms budget per tick and at most 256 chunk readiness checks per tick. Only the immutable `BuildProgress` leaves that thread.
+
+- **Total** is the count of non-air states in the containers of the placement's enabled sub-regions (as `MaterialListUtils.createMaterialListFor`), counted incrementally without loaded chunks.
+- **Scanning** works per chunk of `getTouchedChunks(PLACEMENT_ENABLED)`, comparing every position in `getBoxesWithinChunk`, and only when Litematica's verifier would: the 3×3 client chunks are loaded and the schematic world has the chunk. Each position is classified as Litematica's `checkBlockStates` does (honouring `ignoreCropAge`, `ignoreExistingFluids`, the ignore-existing-blocks list and the placement verifier's ignored mismatches, if that verifier exists). Wrong blocks, wrong states and "different block" matches all count as *wrong*, i.e. not placed. An ignored mismatch is accepted (placed, or nothing for schematic air). Schematic air with a world block is *extra*, shown only as "N to clear". Litematica's render-layer verifier range is not applied: the whole placement is compared.
+- **Cache:** results per chunk, for the last four placements by hash ID; a fingerprint change (schematic, origin, rotation, mirror, enabled sub-regions and their placement) starts that placement over. `ClientLevel.setServerVerifiedBlockState` (`BlockChangeMixin`, the hook Litematica uses) and Fabric chunk loads mark already-scanned chunks for a rescan; a marked chunk keeps its last result until it is ready again. Leaving the world clears the cache.
+- **Materials:** for each state, (schematic count − placed count) converted to items with `MaterialCache` as `MaterialListUtils.convertStatesToStacks` does (waterlogged blocks add a water bucket; flower pots and cauldrons need several items). *Have* sums MinePanel's own inventory snapshot (36 slots and offhand, plus shulker box and bundle contents); it never affects placed/total.
+- A selected but disabled placement is treated as no placement. Litematica's own verifier and material-list tasks are never started, so MinePanel adds no HUD renderers or chat messages.
+
+Porting to a new Minecraft version: bump `litematica_version`/`malilib_version` in `gradle.properties`, compare `LitematicaBuildSource` against the new `LTS/<version>` branch using the API table in [the plan](IMPLEMENTATION_PLAN.md), fix compile errors and re-run the manual checks.

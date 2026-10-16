@@ -63,11 +63,13 @@ More tiles: **Movement** (an icon for how you are moving, 3D speed in blocks/s a
 
 **Customize** also manages profiles (complete layouts) and **Rules**: a rule's conditions (server/world, dimension, biome, time of day, game mode, health, hunger, saturation, status effects, movement, wearing elytra, an advancement in the last N seconds, combat) combine as AND groups of OR choices, and an active rule can switch profile, show or hide tiles and change tile settings. A tile set to *Rules only* keeps its place and appears only when a rule shows it, so nothing else moves.
 
-Tiles can be rearranged, resized on a 12-column grid, and shown or hidden with **Customize**. The layout is saved to `config/minepanel/layout.json` and can be exported or imported as JSON. Each tile compacts itself as it shrinks, hiding lower-priority details first (for example the inventory falls back to the hotbar only). The Litematica tile is a placeholder; it and the JourneyMap tile are hidden by default.
+Tiles can be rearranged, resized on a 12-column grid, and shown or hidden with **Customize**. The layout is saved to `config/minepanel/layout.json` and can be exported or imported as JSON. Each tile compacts itself as it shrinks, hiding lower-priority details first (for example the inventory falls back to the hotbar only). The **Build progress** and JourneyMap tiles are hidden by default.
+
+**Build progress** (needs Litematica 0.27.14+ and MaLiLib 0.28.12+, both optional) follows the placement selected in Litematica: blocks placed / total blocks with a bar, how many are wrong, how many chunks have not been checked yet (they must be loaded once) and a separate "N to clear" count of blocks standing where the schematic has air. Its material list shows, per item, how many are *Left* to place, how many you *Have* (inventory and offhand, including shulker box and bundle contents) and how many you *Still need*. Carried items never count as placed. Progress is remembered for the last four placements while you stay in the world. This integration compiles against Litematica 0.27.14 but has **not yet been tested in game**.
 
 Pure Java service/protocol tests and browser-state tests are distinct from Minecraft verification. Full game compilation and in-game compatibility remain unverified in this environment; see [testing](docs/TESTING.md) for exact commands and build blockers.
 
-JourneyMap plus its separate Webmap addon and Litematica/Malilib are optional, but their MinePanel integrations are not yet implemented. Current compatibility and known limitations are documented in [installation](docs/INSTALLATION.md), [architecture](docs/ARCHITECTURE.md), and [troubleshooting](docs/TROUBLESHOOTING.md).
+JourneyMap plus its separate Webmap addon and Litematica/MaLiLib are optional; neither integration has been verified in game yet. Current compatibility and known limitations are documented in [installation](docs/INSTALLATION.md), [architecture](docs/ARCHITECTURE.md), and [troubleshooting](docs/TROUBLESHOOTING.md).
 
 ## Privacy
 

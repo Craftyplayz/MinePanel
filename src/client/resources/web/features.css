@@ -156,3 +156,22 @@
 .rule-field { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
 .rule-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 4px 10px; width: 100%; }
 .rule-tiles .rule-field { justify-content: space-between; }
+
+/* Build progress */
+.build-name { margin: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.build-progress { display: flex; align-items: center; gap: 10px; }
+.build-progress strong { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.build-bar { flex: 1; height: 6px; border-radius: 4px; background: #1d2a12; overflow: hidden; }
+#build-fill { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #4fa3e0, #7ec850); transition: width .25s; }
+.build-notes { margin: 0; color: var(--muted); font-size: 12px; }
+.build-notes:empty { display: none; }
+.build-materials { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.material-list { flex: 1; min-height: 0; }
+.material-row { display: grid; grid-template-columns: 30px minmax(0, 1fr) repeat(3, minmax(44px, auto)); align-items: center;
+  gap: 8px; padding: 3px 0; border-top: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.material-row > span:nth-child(n+3) { text-align: right; }
+.material-head { color: var(--muted); font-size: 11px; border-top: 0; }
+.material-row .slot { width: 30px; }
+.material-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.material-row.covered { color: var(--muted); }
+.material-row.covered .material-need { color: #7ec850; }

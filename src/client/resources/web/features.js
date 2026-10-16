@@ -1,8 +1,8 @@
 "use strict";
 
-// Feature tiles and tools: movement, experience, recent pickups, advancements, villager trades, portal linking,
-// item windows (shulker boxes, bundles, ender chest) and the layout rules editor. Shared helpers come from app.js;
-// game maths and rule evaluation from rules.js.
+// Feature tiles and tools: movement, experience, recent pickups, Litematica build progress, advancements, villager
+// trades, portal linking, item windows (shulker boxes, bundles, ender chest) and the layout rules editor. Shared
+// helpers come from app.js; game maths and rule evaluation from rules.js.
 
 const storage = {
   get(key) { try { return window.localStorage?.getItem(key) ?? null; } catch { return null; } },
@@ -526,6 +526,91 @@ function renderPickups(player, now = Date.now()) {
     pickupParts.list.replaceChildren(...rows);
   }
   writeText(pickupParts.empty, rows.length ? "" : "No inventory changes yet.");
+}
+
+// ------------------------------------------------------------------------------------------- Build progress
+
+const buildParts = { status: $("#build-status"), name: $("#build-name"), progress: $("#build-progress"),
+  count: $("#build-count"), bar: $("#build-bar"), fill: $("#build-fill"), notes: $("#build-notes"),
+  message: $("#build-message"), materials: $("#build-materials"), list: $("#build-material-list") };
+const BUILD_MESSAGES = {
+  missing: "Install Litematica to see the progress of a schematic placement.",
+  version: "This Litematica version is not supported; see the game log.",
+  error: "Build progress stopped after an error; see the game log.",
+  none: "No placement selected in Litematica.",
+  counting: "Counting the schematic's blocks…"
+};
+let materialNodes = new Map();
+let materialViewKey;
+
+/** An item-shaped value for the shared slot renderer; kept per row so hovering keeps its tooltip. */
+function materialItem(row, previous) {
+  if (previous && previous.itemId === row.itemId && previous.name === row.name && previous.icon === row.icon) return previous;
+  return { empty: false, itemId: row.itemId, name: row.name, count: 1, maxCount: 1, damage: null, maxDamage: null,
+    remainingDurability: null, enchantments: [], icon: row.icon, foil: false,
+    tooltip: [[{ text: row.name, color: null, format: "" }]], contents: null };
+}
+
+function renderMaterials(rows) {
+  const retained = new Map();
+  const nodes = rows.map(row => {
+    let node = materialNodes.get(row.itemId);
+    if (!node) {
+      const element = create("div", "material-row");
+      const slot = createSlot(element);
+      node = { element, slot, name: create("span", "material-name"), left: create("span"), have: create("span"),
+        need: create("span", "material-need") };
+      for (const part of [node.name, node.left, node.have, node.need]) element.appendChild(part);
+    }
+    retained.set(row.itemId, node);
+    node.item = materialItem(row, node.item);
+    renderSlot(node.slot, node.item, false);
+    const need = Math.max(0, row.left - row.have);
+    writeText(node.name, row.name);
+    writeText(node.left, formatCount(row.left));
+    writeText(node.have, formatCount(row.have));
+    writeText(node.need, need === 0 ? "✓" : formatCount(need));
+    node.element.classList.toggle("covered", need === 0);
+    node.element.setAttribute("aria-label",
+      `${row.name}: ${formatCount(row.left)} left, ${formatCount(row.have)} carried, ${need === 0 ? "covered" : `${formatCount(need)} still needed`}`);
+    return node.element;
+  });
+  materialNodes = retained;
+  const key = rows.map(row => row.itemId).join(",");
+  if (key !== materialViewKey) {
+    materialViewKey = key;
+    buildParts.list.replaceChildren(...nodes);
+  }
+}
+
+function renderBuild(player) {
+  const build = player?.available ? player.build : null;
+  const placement = build?.placement ?? null;
+  setHidden(buildParts.name, placement === null);
+  setHidden(buildParts.progress, placement === null);
+  setHidden(buildParts.materials, placement === null || build.materials.length === 0);
+  if (placement === null) {
+    writeText(buildParts.status, !build ? "Unavailable" : !build.available ? "Unavailable"
+      : build.reason === "counting" ? "Counting" : "Idle");
+    writeText(buildParts.message, build ? BUILD_MESSAGES[build.reason] : "Join a world to see build progress.");
+    writeText(buildParts.notes, "");
+    renderMaterials([]);
+    return;
+  }
+  const { total, placed, wrong, extra, uncheckedChunks, scanComplete } = placement;
+  const percent = total === 0 ? 100 : Math.floor(placed / total * 1000) / 10;
+  writeText(buildParts.status, scanComplete ? (placed === total ? "Complete" : "Up to date") : "Scanning");
+  writeText(buildParts.name, placement.name);
+  writeText(buildParts.count, `${formatCount(placed)} / ${formatCount(total)} blocks · ${percent}%`);
+  buildParts.fill.style.width = `${percent}%`;
+  buildParts.bar.setAttribute("aria-valuenow", String(percent));
+  const notes = [];
+  if (wrong > 0) notes.push(`${formatCount(wrong)} wrong`);
+  if (uncheckedChunks > 0) notes.push(`${formatCount(uncheckedChunks)} ${uncheckedChunks === 1 ? "chunk" : "chunks"} not checked yet (out of range)`);
+  if (extra > 0) notes.push(`${formatCount(extra)} to clear`);
+  writeText(buildParts.notes, notes.join(" · "));
+  writeText(buildParts.message, placed === total ? "Nothing left to place." : "");
+  renderMaterials(build.materials);
 }
 
 // --------------------------------------------------------------------------------------------- Advancements
@@ -1278,6 +1363,7 @@ featureHooks.render.push(player => {
   renderXp(player);
   renderPerformance(player);
   renderPickups(player);
+  renderBuild(player);
   renderAdvancements(player);
   checkAdvancementPopup(player);
   renderVillagers(player);
@@ -1290,6 +1376,7 @@ featureHooks.layout.push(() => {
   renderPerformance(currentPlayerState);
   renderPickups(currentPlayerState);
   renderPickupSettings();
+  renderBuild(currentPlayerState);
   renderAdvancements(currentPlayerState);
   renderAdvancementSettings();
   syncPinnedWindows();

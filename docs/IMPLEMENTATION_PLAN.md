@@ -46,7 +46,7 @@ Every displayed value must identify unavailable data honestly. Server-only facts
 ## Integration limitations to resolve
 
 - Confirm a published JourneyMap/Webmap 26.1.2 artifact and test endpoint/iframe behavior with it; source branch compatibility alone is not runtime verification.
-- Confirm `masa.dy.fi` is reachable from CI, then compile the Litematica adapter against 0.27.14 and test it in game. No reflection-based guesswork.
+- ✅ `masa.dy.fi` is reachable from CI and the Litematica adapter compiles against 0.27.14 without reflection. It still has to be tested in game.
 - Exercise the actual client APIs and test singleplayer/multiplayer; compilation alone cannot establish game behavior.
 
 ## Milestones, tests, acceptance
@@ -56,14 +56,14 @@ Every displayed value must identify unavailable data honestly. Server-only facts
 3. **Dashboard:** responsive movable/resizable widgets, named layouts, accessibility, filters, and preference persistence (no history). Test layout recovery and filters.
 4. **JourneyMap:** verified endpoint/status, direct-open fallback, iframe only after real compatibility testing.
 5. **Containers:** read-only visible contents, last snapshot, and session-only pins; test stale/open distinction.
-6. **Litematica:** isolated optional adapter, actual placement-based progress and controlled progress tests, with scheduled/incremental calculation.
+6. **Litematica:** isolated optional adapter, actual placement-based progress and controlled progress tests, with scheduled/incremental calculation. *Implemented and building; in-game checks outstanding.*
 7. **Release/reliability:** lifecycle/security/integration tests, full manual checklist where runtime dependencies exist, valid production JAR, and reproducible `releaseBuild`.
 
 Each milestone must build and its docs must distinguish tested behavior from unverified behavior. Manual checks are not claimed unless performed.
 
 ## Litematica build progress
 
-Status: planned, not started. Target: Minecraft 26.1.2, Litematica 0.27.14, MaLiLib 0.28.12.
+Status: steps 1–4 implemented and building (2026-10-15); step 5's manual in-game checks not yet run. Target: Minecraft 26.1.2, Litematica 0.27.14, MaLiLib 0.28.12. Implementation details: [architecture](ARCHITECTURE.md#litematica-build-progress); test record: [testing](TESTING.md#litematica-build-progress-2026-10-15).
 
 ### What the tile shows
 
@@ -117,8 +117,21 @@ build: { available, reason,
 
 ### Steps
 
-1. Add the Maven repository, `compileOnly` dependencies and version properties; check CI can reach `masa.dy.fi`.
-2. Pure-Java scanner, per-chunk cache, totals and material counting, with `serviceTest` coverage (each classification, readiness rule, budget/cursor resume, cache invalidation, bounds, JSON/deltas).
-3. Adapter package, block-change mixin, wiring in `MinePanelClient`.
-4. `build` field in `PlayerDetails`/`protocol.js`, tile UI, JS tests; `releaseBuild` checks the adapter is present and no Litematica classes are bundled.
-5. Docs (ARCHITECTURE, INSTALLATION, TESTING, README) and manual checks: singleplayer and server, selection changes, walking away and back, building outside render range, Litematica absent, counts matching Litematica's verifier.
+1. ✅ Add the Maven repository, `compileOnly` dependencies and version properties; check CI can reach `masa.dy.fi` (CI run 17 passed).
+2. ✅ Pure-Java scanner, per-chunk cache, totals and material counting, with `serviceTest` coverage (each classification, readiness rule, budget/cursor resume, cache invalidation, bounds, JSON/deltas).
+3. ✅ Adapter package, block-change mixin, wiring in `MinePanelClient` (compiled against the real jars; not run in game).
+4. ✅ `build` field in `PlayerDetails`/`protocol.js`, tile UI, JS tests; `releaseBuild` checks the adapter is present and no Litematica classes are bundled.
+5. Docs ✅ (ARCHITECTURE, INSTALLATION, TESTING, README, TROUBLESHOOTING). Manual checks ⏳ (listed in [testing](TESTING.md#litematica-manual-checklist-not-performed)): singleplayer and server, selection changes, walking away and back, building outside render range, Litematica absent, counts matching Litematica's verifier.
+
+### Choices made during implementation
+
+These fill gaps the plan left open; none changes an agreed decision.
+
+- An ignored mismatch (from the placement's verifier, read only if it already exists) counts as placed, so placed = total − (missing + wrong + different block + unchecked), matching the verifier's error counts.
+- `enableDifferentBlocks` does not change the numbers: both of Litematica's outcomes ("different block" and wrong block) are *wrong*, i.e. not placed, as decision 2 requires.
+- The tick budget is MinePanel's own 2 ms per END_CLIENT_TICK (plus at most 256 readiness checks), not `DataManager.getClientTickStartTime()`.
+- Litematica's render-layer verifier range is not applied; the whole placement is compared.
+- A selected placement that is disabled in Litematica is treated as no placement.
+- Materials whose items are all placed are omitted; the list is sorted by Still need, then Left, then name, and cut at 128 rows.
+- The installed Litematica version is checked against MinePanel's own `suggests` entry in `fabric.mod.json`, so `litematica_version` stays the single source.
+- `.gitignore` now ignores only the root `/build/` so the `dev.craftyplayz.minepanel.build` package is tracked.

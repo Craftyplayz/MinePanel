@@ -125,7 +125,7 @@ public final class WorldFeaturesTest {
         for (String field : PlayerDetails.FIELDS) check(json.contains("\"" + field + "\":"), field + " is serialized");
         var moved = new PlayerDetails(details.world(), Motion.rounded("elytra", 30.04, 29.96, -1.2, 359.6, 12.3,
                 details.motion().icon(), null), details.xp(), details.portal(), details.pickups(), null, List.of(), null,
-                details.performance());
+                details.performance(), details.build());
         var next = new PlayerSnapshot(2, 2, true, 0L, "minecraft:overworld", 0.0, 0.0, 0.0, 20.0, 20.0, 0.0,
                 InventorySnapshot.empty(), null, GameplayHistory.empty(), 20, 5.0, List.of(), moved);
         String delta = next.toDeltaJson(snapshot);

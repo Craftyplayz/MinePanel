@@ -6,21 +6,26 @@ is the source of truth. Do not redesign it; ask the maintainer before changing a
 
 ## Current state
 
-- **Litematica support: planned, not started.** No Litematica code, dependency, mixin, protocol field or tile change
-  exists yet. The **Build progress** tile is still the placeholder in `src/client/resources/web/index.html`, and the
-  `build` tile ID already exists in `layout.js` (hidden by default).
-- **Done:** research against the Litematica/MaLiLib source and the written plan in `IMPLEMENTATION_PLAN.md` (committed
-  together with this handover).
-- **Maintainer's priority:** they are fixing other issues first and asked that the Litematica feature **not be
-  implemented yet**. Do not start the steps below until they say so.
+Updated 2026-10-15 by the web session on branch `ccr-c833f2be-mqcc2v` (see [TESTING.md](TESTING.md#litematica-build-progress-2026-10-15)).
 
-### Uncommitted local work that is NOT on GitHub
+- **Litematica support: steps 1–4 implemented, step 5 docs done; in-game checks not run.** The maintainer's
+  local work was pushed as `86a36bf` before this started, and the session was asked to continue the plan.
+  - Core (pure Java, `dev.craftyplayz.minepanel.build`), adapter (`dev.craftyplayz.minepanel.litematica`, the only
+    package importing Litematica), `BuildProgressCollector`, `BlockChangeMixin`, the schema-4 `build` field and
+    the Build progress tile all exist. Choices that filled gaps in the plan are listed under "Choices made during
+    implementation" in `IMPLEMENTATION_PLAN.md`.
+  - `./gradlew releaseBuild` passed here (full Loom build + all tests), and GitHub Actions passed with the
+    masa.dy.fi dependencies.
+- **Next:** run the Litematica manual checklist in `TESTING.md` on a real 26.1.2 client and fix what it finds.
+  Mixin application, the version check and real counts against Litematica's verifier are untested.
 
-When this handover was committed, the maintainer's local checkout had uncommitted changes to 14 other files
-(`ClientActivity.java`, `PickupTracker.java`, `MinePanelClient.java`, `LayoutStore.java`, the web assets, both test
-suites and `README.md`). They appear to rework inventory-change tracking (net gains/losses with sources, losses into
-containers) and some Experience tile markup. They were deliberately **left out** of this commit. A web session cloned
-from GitHub will not see them: ask the maintainer to push them before touching those files, or expect conflicts.
+### Build environment notes for web sessions
+
+- Java 25 is not preinstalled; download Temurin 25 (api.adoptium.net works) into the scratchpad and set `JAVA_HOME`.
+- `maven.fabricmc.net` and `masa.dy.fi` are reachable. Maven Central returned **429** through the egress proxy,
+  so builds used a scratchpad Gradle init script (`-I mirror.gradle`) that rewrites `repo.maven.apache.org` and
+  `plugins.gradle.org` repositories to `https://maven-central.storage-download.googleapis.com/maven2/`. It is
+  not committed; CI does not need it.
 
 ## Agreed decisions
 
@@ -64,16 +69,15 @@ from GitHub will not see them: ask the maintainer to push them before touching t
 
 ## Outstanding milestones
 
-From `IMPLEMENTATION_PLAN.md`: JourneyMap verification (4), containers (5), **Litematica (6, planned as above)**,
-release/reliability (7). Full mod compilation and in-game behaviour remain unverified.
+From `IMPLEMENTATION_PLAN.md`: JourneyMap verification (4), containers (5), **Litematica (6: implemented, in-game
+checks outstanding)**, release/reliability (7). The full mod now compiles and packages; in-game behaviour remains
+unverified.
 
-## Next steps (once the maintainer gives the go-ahead)
+## Next steps
 
-1. Add the Maven repository, `compileOnly` dependencies and `litematica_version`/`malilib_version` properties;
-   confirm CI can resolve them.
-2. Pure-Java scanner, per-chunk cache, totals and material counting, with `serviceTest` coverage.
-3. Adapter package, `ClientLevel.setServerVerifiedBlockState` mixin, wiring in `MinePanelClient`.
-4. `build` detail field (`PlayerDetails`, `protocol.js`), tile UI, JS tests, `releaseBuild` checks.
-5. Update ARCHITECTURE, INSTALLATION, TESTING and README; run the manual checks listed in the plan.
+1. ✅ Steps 1–4 and the docs of step 5 (see `IMPLEMENTATION_PLAN.md`).
+2. Run the Litematica manual checklist in `TESTING.md` in game; record results there without claiming unrun checks.
+3. Fix anything the checks reveal; then continue with the other outstanding milestones.
 
-Checks: `./gradlew check` (runs `serviceTest`, frontend syntax and `node --test src/test/js/dashboard.test.js`).
+Checks: `./gradlew check` (runs `serviceTest`, frontend syntax, `node --test src/test/js/dashboard.test.js` and
+`litematicaIsolation`); `./gradlew releaseBuild` also validates the JAR.

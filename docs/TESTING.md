@@ -45,7 +45,7 @@ No Minecraft runtime/manual integration checks have been performed.
 - [ ] Minecraft 26.1.2 + Fabric Java 25: client startup and shutdown.
 - [ ] Singleplayer and multiplayer without server-side MinePanel.
 - [ ] JourneyMap and compatible Webmap: endpoint, embedding policy, and direct-open fallback.
-- [ ] Litematica and Malilib compatible versions; placement progress.
+- [ ] Litematica build progress (Litematica 0.27.14 / MaLiLib 0.28.12): see the Litematica checklist below.
 - [ ] Sodium and REI each present and absent.
 - [ ] Inventory: move/split/consume, selected slot, custom names, enchantments, durability, armour and offhand in real Minecraft.
 - [ ] Container open/close/pinning and warnings (future features).
@@ -146,3 +146,28 @@ Statistics responses are sparse; `StatsCounter.getValue` alone returns zero even
 8. Trigger more than 100 supported events during a disposable session (for example dimension transitions), confirm oldest eviction and consistent newest-first display. Close client and relaunch: no history survives, no chat/database archive appears, and local services stop.
 
 Record actual game version, commands, log errors and observed results before marking any manual/runtime check passed.
+
+## Litematica build progress (2026-10-15)
+
+Run in a Claude Code on the web container on branch `ccr-c833f2be-mqcc2v`, with Temurin 25.0.4.1+1 and Node 22.22.0:
+
+- `./gradlew releaseBuild` **passed**: Loom, Minecraft 26.1.2 and Fabric API resolved, main and client sources compiled (the Litematica adapter against the real Litematica 0.27.14 and MaLiLib 0.28.12 jars from `https://masa.dy.fi/maven/sakura-ryoko`), `serviceTest` (including `BuildProgressTest`), `frontendSyntax`, `frontendTest` (68 tests) and `litematicaIsolation` passed, and the release JAR was validated: adapter, mixin and core classes present, no `fi/dy/masa/` classes, `suggests.litematica` = `>=0.27.14`. This is the first full Loom build recorded for this project. In this container Maven Central answered 429 (rate limited) through the egress proxy, so the build ran with a Gradle init script (not committed) that points Maven Central and Plugin Portal at Google's Central mirror `https://maven-central.storage-download.googleapis.com/maven2/`; no repository file depends on it.
+- `javap` on the Loom-provided 26.1.2 client jar confirmed the mixin target `ClientLevel.setServerVerifiedBlockState(BlockPos, BlockState, int)`. Mixin application itself was not exercised.
+- GitHub Actions run 17 (`Build MinePanel`, commit `f9dd3cd`) **succeeded** with the Litematica/MaLiLib dependencies, so CI can reach `masa.dy.fi`.
+- Mutation checks: breaking a tile message made the JS suite fail, and adding a Litematica import outside the adapter package made `litematicaIsolation` fail.
+
+`BuildProgressTest` covers each classification (placed, missing, wrong, extra, ignorable fluids, crop age, ignored mismatches), total counting resumed across ticks, the readiness rule (unchecked chunks), the per-tick readiness cap and deadline with cursor resume, rescans after block changes and chunk loads, results kept while unloaded, fingerprint invalidation, the four-placement cache, materials (multi-item states, shulker contents, offhand, sorting, bound of 128) and JSON/deltas. These use fake placements, **not Minecraft**.
+
+### Litematica manual checklist (not performed)
+
+Nothing below has been run in game. With Litematica 0.27.14 and MaLiLib 0.28.12 installed and the Build progress tile enabled:
+
+- [ ] Client starts with and without Litematica; without it the tile says to install Litematica and no errors are logged.
+- [ ] Singleplayer: load a schematic, select its placement; the tile shows "Counting" briefly, then placed / total. Place, break and replace blocks; counts follow within a sample.
+- [ ] Compare placed / total and wrong with Litematica's own Schematic Verifier for the same placement (missing + wrong + different blocks should equal total − placed when every chunk is checked; extra matches "N to clear").
+- [ ] Toggle `ignoreCropAge`, `ignoreExistingFluids` and `enableDifferentBlocks`, and ignore a mismatch in Litematica's verifier; counts change as described in [architecture](ARCHITECTURE.md).
+- [ ] Select another placement and back; move/rotate a placement (counts restart); disable a sub-region.
+- [ ] Walk away until chunks unload: counts stay. Build outside render range from another player (multiplayer), return: the reloaded chunks are rescanned.
+- [ ] Material list: Left/Have/Still need with items in the hotbar, offhand, a shulker box and a bundle; waterlogged blocks need a water bucket.
+- [ ] Multiplayer server without MinePanel or Litematica server-side.
+- [ ] Frame time with a large placement (for example 500 × 500 × 100) stays smooth while scanning.

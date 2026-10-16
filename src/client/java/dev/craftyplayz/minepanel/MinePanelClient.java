@@ -12,6 +12,7 @@ import dev.craftyplayz.minepanel.telemetry.StatisticsTracker;
 import dev.craftyplayz.minepanel.telemetry.GameplayTracker;
 import dev.craftyplayz.minepanel.telemetry.GameplayHistory;
 import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
@@ -65,6 +66,7 @@ public final class MinePanelClient implements ClientModInitializer {
     private final LayoutStore layouts = new LayoutStore(
             FabricLoader.getInstance().getConfigDir().resolve("minepanel").resolve("layout.json"));
     private final ClientActivity activity = new ClientActivity(history, portals, this::pickedUp);
+    private final BuildProgressCollector build = new BuildProgressCollector();
     private static final int SAVE_INTERVAL_TICKS = 100;
     private int saveTicks;
     private int portalScans;
@@ -134,6 +136,7 @@ public final class MinePanelClient implements ClientModInitializer {
                 telemetry.markUnavailable(System.currentTimeMillis(), history.snapshot());
             });
         });
+        ClientChunkEvents.CHUNK_LOAD.register((level, chunk) -> build.chunkLoaded(chunk.getPos().x(), chunk.getPos().z()));
         ClientPlayerBlockBreakEvents.AFTER.register((level, player, pos, state) -> activity.blockMined(pos, state));
         AttackEntityCallback.EVENT.register((player, level, hand, entity, hit) -> {
             if (level.isClientSide() && player == Minecraft.getInstance().player) activity.attackedEntity(entity);
@@ -168,6 +171,7 @@ public final class MinePanelClient implements ClientModInitializer {
         motion.reset();
         advancements.reset();
         worldData.reset();
+        build.reset();
     }
 
     /** Client thread: items were added to (positive count) or removed from (negative count) the inventory. */
@@ -201,6 +205,7 @@ public final class MinePanelClient implements ClientModInitializer {
                     WorldCollector.inNetherPortal(client.level, client.player));
             motion.tick(client.player);
             worldData.tick(client, client.level);
+            build.tick();
             if (++saveTicks % SAVE_INTERVAL_TICKS == 0) lifecycleExecutor.execute(worldStore::save);
         }
         // Counted in ticks, not nanoseconds: tick spacing jitters around 50 ms, so a 50 ms clock check would skip ticks.
@@ -244,7 +249,7 @@ public final class MinePanelClient implements ClientModInitializer {
                     experience.observe(millis, player.experienceLevel, player.experienceProgress), portals.state(),
                     pickups.pickups(), advancements.collect(client.getConnection(), icons),
                     worldData.villagers(client, level, icons), worldData.enderChest(client, level, icons),
-                    FrameCollector.snapshot());
+                    FrameCollector.snapshot(), build.snapshot(client, snapshot, icons));
             telemetry.updatePlayer(
                     millis,
                     (now - sessionStartedNanos) / 1_000_000_000L,
