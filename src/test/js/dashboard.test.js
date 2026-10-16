@@ -139,6 +139,9 @@ function harness(fetchImpl = defaultFetch()) {
     replaceChildren(...children) { this.children = children; this.text = ""; this.replacements++; }
     setAttribute(key, value) { this.attributes[key] = String(value); }
     getBoundingClientRect() { return this.rect; }
+    // Layout size; `layoutSize` stands in for a box whose on-screen rect a transform has scaled.
+    get clientWidth() { return (this.layoutSize ?? this.rect).width; }
+    get clientHeight() { return (this.layoutSize ?? this.rect).height; }
     setPointerCapture() {}
     click() { this.clicks = (this.clicks ?? 0) + 1; }
     addEventListener(type, listener) { (this.listeners[type] ||= []).push(listener); }
@@ -1438,6 +1441,20 @@ test("inventory grid places rows and armor, toggles armor and drops rows as the 
     "the main row next to the hotbar appears first");
 });
 
+test("inventory sizes slots from the layout box, not a rect a tile animation has scaled", async () => {
+  const h = harness(defaultFetch(null, []));
+  await h.flush();
+  h.sockets[0].message(initial());
+  const body = h.get("#inventory-body");
+  const grid = h.get("#inventory-grid");
+  // Mid-animation the tile is still scaled to its old, wider size; the layout box is already the new one.
+  body.rect = { left: 0, top: 0, width: 728, height: 280 };
+  body.layoutSize = { width: 436, height: 280 };
+  h.events.resize();
+  assert.equal(grid.style.gridTemplateColumns, "repeat(9, var(--slot))");
+  assert.equal(grid.style.getPropertyValue("--slot"), "42px", "nine columns across the 408px content box");
+});
+
 test("the player head opens a lookup menu with groups, links and a page picker, contacting nothing until clicked", async () => {
   const requests = [];
   const h = harness(defaultFetch(null, requests));
@@ -1469,19 +1486,23 @@ test("the player head opens a lookup menu with groups, links and a page picker, 
   assert.equal(menu.children.length, 7, "Back returns to the groups");
 
   menu.children.find(row => row.dataset.group === "renders").emit("click");
-  const minotar = menu.children.find(row => row.dataset.site === "Minotar");
-  assert.equal(minotar.tagName, "button", "sites with several pages open the picker instead of a link");
-  minotar.emit("click");
+  const face = menu.children.find(row => row.dataset.site === "2D face");
+  assert.deepEqual([face.tagName, face.href], ["a", "https://mc-heads.net/avatar/8667ba71b85a4004af54457a9734eed7"],
+    "each MC Heads render is its own row, using the undashed UUID");
+  assert.equal(menu.children.length, 12, "Back plus every MC Heads render");
+  menu.children[0].emit("click");
+
+  menu.children.find(row => row.dataset.group === "data").emit("click");
+  const mojang = menu.children.find(row => row.dataset.site === "Mojang API");
+  assert.equal(mojang.tagName, "button", "sites with several pages open the picker instead of a link");
+  mojang.emit("click");
   assert.equal(dialog.hidden, false);
-  assert.equal(h.get("#player-link-title").textContent, "Minotar");
+  assert.equal(h.get("#player-link-title").textContent, "Mojang API");
   const pages = h.get("#player-link-pages").children;
-  assert.deepEqual(pages.map(page => page.dataset.page).slice(0, 3), ["2D face", "2D face with hat", "3D head"]);
+  assert.deepEqual(pages.map(page => page.dataset.page), ["Name → UUID", "Profile and skin"]);
   assert.deepEqual([pages[0].children[1].href, pages[0].children[1].rel],
-    ["https://minotar.net/avatar/Steve", "noopener noreferrer"]);
+    ["https://api.mojang.com/users/profiles/minecraft/Steve", "noopener noreferrer"]);
   assert.ok(pages.every(page => page.children[0].children[1].textContent.length > 0), "every page is described");
-  menu.children.find(row => row.dataset.site === "Crafatar").emit("click");
-  assert.equal(h.get("#player-link-pages").children[0].children[1].href,
-    "https://crafatar.com/avatars/8667ba71b85a4004af54457a9734eed7?overlay", "UUID pages use the undashed UUID");
 
   h.events.keyup({ key: "Escape" });
   assert.deepEqual([dialog.hidden, menu.hidden], [true, false], "Escape closes the picker first");
@@ -1498,10 +1519,15 @@ test("the player head opens a lookup menu with groups, links and a page picker, 
   h.run(`renderPlayerMenu({ name: "Alex", uuid: "0f2a4c1e-9b3d-3c5e-8f7a-1b2c3d4e5f60" }); undefined`);
   assert.match(menu.children[0].textContent, /Offline-mode account/);
   h.run(`playerMenuGroup = "renders"; renderPlayerMenu({ name: "Alex", uuid: "0f2a4c1e-9b3d-3c5e-8f7a-1b2c3d4e5f60" }); undefined`);
-  const crafatar = menu.children.find(row => row.dataset.site === "Crafatar");
-  assert.deepEqual([crafatar.tagName, crafatar.attributes["aria-disabled"]], ["span", "true"],
+  const offlineFace = menu.children.find(row => row.dataset.site === "2D face");
+  assert.deepEqual([offlineFace.tagName, offlineFace.attributes["aria-disabled"]], ["span", "true"],
     "UUID-only sites are greyed out for offline accounts");
-  assert.equal(menu.children.find(row => row.dataset.site === "Minotar").tagName, "button", "name lookups still work");
+  h.run(`playerMenuGroup = "profile"; renderPlayerMenu({ name: "Alex", uuid: "0f2a4c1e-9b3d-3c5e-8f7a-1b2c3d4e5f60" }); undefined`);
+  assert.equal(menu.children.find(row => row.dataset.site === "Minecraft-Statistic").href,
+    "https://minecraft-statistic.net/en/player/Alex.html", "name lookups still work");
+  h.run(`openPlayerPages(PLAYER_LINK_GROUPS.find(group => group.id === "data").sites[0], { name: "Alex", uuid: "0f2a4c1e-9b3d-3c5e-8f7a-1b2c3d4e5f60" })`);
+  assert.deepEqual(h.get("#player-link-pages").children.map(page => page.className), ["player-page", "player-page disabled"],
+    "in the picker, only the pages that need a UUID are greyed out");
 
   assert.equal(h.run(`playerLinkUrl("https://x.test/{name}/{uuid}/{uuidDashed}", { name: "a b&c", uuid: "8667ba71-b85a-4004-af54-457a9734eed7" })`),
     "https://x.test/a%20b%26c/8667ba71b85a4004af54457a9734eed7/8667ba71-b85a-4004-af54-457a9734eed7");
@@ -2579,7 +2605,8 @@ test("performance shows the average and 1% low with a graph over the chosen wind
   choices[0].emit("click");
   assert.equal(h.get("#performance-window-menu").hidden, true);
   assert.equal(h.get("#performance-window").textContent, "10 s");
-  assert.ok(h.get("#performance-area").attributes.d.endsWith("L1000,100L0,100Z"), "10 s fills the graph");
+  assert.ok(h.get("#performance-area").attributes.d.endsWith("L1000,100L-111.1,100Z"),
+    "10 s fills the graph, with one clipped second past the left edge to slide in from");
   await h.runTimers(400);
   assert.equal(JSON.parse(requests.filter(request => request.method === "PUT").at(-1).body).settings.performance.window, 10);
 
@@ -2599,6 +2626,16 @@ test("the performance graph averages long windows and its curve never overshoots
   assert.equal(points.at(-1).x, 1);
   assert.ok(points.every(point => point.y > 50 && point.y < 70), "noise is averaged out");
   assert.equal(JSON.stringify(h.run("performancePoints([30, 60], 10)")), '[{"x":0.8888888888888888,"y":30},{"x":1,"y":60}]');
+  // Groups are cut at fixed sample numbers, so one more sample only changes the newest point.
+  const before = h.run(`performancePoints(Array.from({ length: 600 }, (_, i) => i * 7 % 13), 600, 1000)`);
+  const after = h.run(`performancePoints(Array.from({ length: 600 }, (_, i) => (i + 1) * 7 % 13), 600, 1001)`);
+  assert.deepEqual(after.slice(-2, -1).map(point => point.y), before.slice(-1).map(point => point.y),
+    "the finished group keeps its average as the graph scrolls");
+  assert.equal(after.at(-1).y, 600 * 7 % 13, "the newest group starts afresh with just the newest sample");
+  assert.equal(h.run("newSamples([1, 2, 3], [2, 3, 4])"), 1);
+  assert.equal(h.run("newSamples([1, 2], [1, 2, 3, 4])"), 2);
+  assert.equal(h.run("newSamples([1, 2, 3], [1, 2, 3])"), 0);
+  assert.equal(h.run("newSamples([1, 2, 3], [9])"), 1, "nothing in common reads as all new");
   // A spike between flat runs: a plain cubic would dip below the flat part; the monotone curve stays within it.
   const path = h.run(`smoothPath([{ x: 0, y: 90 }, { x: 10, y: 90 }, { x: 20, y: 10 }, { x: 30, y: 90 }, { x: 40, y: 90 }])`);
   const ys = path.slice(1).split(/[MC]/).join(",").split(",").filter((_, index) => index % 2).map(Number);

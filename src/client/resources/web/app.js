@@ -198,12 +198,13 @@ const inventoryRows = {
 };
 let inventoryArrangementKey;
 
+// Measures the layout box, not getBoundingClientRect: tile move animations scale the tile with a transform, which
+// would report the old size, and their end changes no layout size, so the ResizeObserver would never correct it.
 function bodySize(element) {
-  const box = element.getBoundingClientRect();
   const style = window.getComputedStyle?.(element) ?? {};
   const horizontal = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
   const vertical = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
-  return { width: Math.max(0, box.width - horizontal), height: Math.max(0, box.height - vertical) };
+  return { width: Math.max(0, element.clientWidth - horizontal), height: Math.max(0, element.clientHeight - vertical) };
 }
 
 /** Places slots on the grid so only rows that fully fit are shown; see inventoryArrangement in layout.js. */

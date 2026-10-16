@@ -58,6 +58,7 @@ The **match** turns into the rule being **active** through the rule's `timing`:
 
 - `delayMs` (default 0): how long the rule must match before it becomes active.
 - `lingerMs` (default 2000, minimum 500): how long it stays active after it stops matching. This stops panels blinking when a value hovers around a threshold.
+  - For rules that detect a farm from a kill rate (or another amount), use `"lingerMs": 20000`, so the layout stays up through short gaps in the farm.
 
 While a rule is enabled and active, its **Then** actions apply. While it is enabled and not active, its **Else** actions apply. A disabled rule, or a rule in a disabled folder, does nothing.
 
@@ -540,7 +541,7 @@ Tips for agents:
 - Arrange panels row by row from the top with no gaps, and keep each panel at least its minimum size, so nothing gets moved when it settles. List every panel you want; the rest are off.
 - Use a separate profile for a very different arrangement (for example a "Nether" or "Phone" layout), and a Switch profile action to use it. Use Place, Swap and Hide for small changes on top of a profile.
 - Remember Focus shows a panel even if it is Off or hidden, so a panel that is only ever focused can be `"off"`.
-- Use `for` or the rule's `delayMs` against flickering on noisy values. Use `within` or `lingerMs` to keep a panel up for a while after something happens.
+- Use `for` or the rule's `delayMs` against flickering on noisy values. Use `within` or `lingerMs` to keep a panel up for a while after something happens. For farm detection rules (a kill rate or another amount), use `"lingerMs": 20000`.
 - `"="` on decimal values (speed, distance, light combined with others) rarely matches. Use `"between"`.
 - Places are tied to one world and dimension, and the world name must match exactly as the Player panel shows it.
 

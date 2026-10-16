@@ -9,7 +9,7 @@
 
 const PLAYER_LINK_GROUPS = [
   {
-    id: "profile", name: "Profile & history", description: "Who the account is, past names and skins",
+    id: "profile", name: "Profile & history", description: "Who the account is, past names, skins and servers",
     sites: [
       { name: "NameMC", domain: "namemc.com", url: "https://namemc.com/profile/{name}",
         description: "Name history, skins, capes and favourite servers" },
@@ -19,53 +19,38 @@ const PLAYER_LINK_GROUPS = [
         description: "UUID, 3D skin viewer and name history" },
       { name: "MinecraftCapes", domain: "minecraftcapes.net", url: "https://minecraftcapes.net/profile/{name}",
         description: "Capes and ears from the MinecraftCapes mod" },
+      { name: "Minecraft-Statistic", domain: "minecraft-statistic.net",
+        url: "https://minecraft-statistic.net/en/player/{name}.html",
+        description: "Servers the player has recently logged into, with play time" },
       { name: "MCUUID", domain: "mcuuid.net", url: "https://mcuuid.net/?q={name}",
         description: "Converts the name to its UUID and back" }
     ]
   },
   {
-    id: "renders", name: "Skins & renders", description: "Pictures of the skin: faces, heads, bodies and skin files",
+    id: "renders", name: "Skins & renders", description: "Pictures of the skin from mc-heads.net",
     sites: [
-      { name: "Minotar", domain: "minotar.net", description: "Face, head and body pictures of the skin", pages: [
-        { name: "2D face", url: "https://minotar.net/avatar/{name}", description: "The flat front of the face" },
-        { name: "2D face with hat", url: "https://minotar.net/helm/{name}",
-          description: "The face with the hat layer on top" },
-        { name: "3D head", url: "https://minotar.net/cube/{name}", description: "The head as a turned cube" },
-        { name: "Body", url: "https://minotar.net/body/{name}", description: "Front view of the whole body" },
-        { name: "Body with armor", url: "https://minotar.net/armor/body/{name}",
-          description: "Front view of the body with the outer skin layer" },
-        { name: "Bust", url: "https://minotar.net/bust/{name}", description: "Head and shoulders" },
-        { name: "Bust with armor", url: "https://minotar.net/armor/bust/{name}",
-          description: "Head and shoulders with the outer skin layer" },
-        { name: "Skin file", url: "https://minotar.net/skin/{name}", description: "The raw 64×64 skin texture" },
-        { name: "Download skin", url: "https://minotar.net/download/{name}",
-          description: "Saves the skin texture as a file" }
-      ] },
-      { name: "MC Heads", domain: "mc-heads.net", description: "Face, head and body pictures of the skin", pages: [
-        { name: "2D face", url: "https://mc-heads.net/avatar/{uuid}", description: "The flat front of the face" },
-        { name: "3D head", url: "https://mc-heads.net/head/{uuid}", description: "The head as a turned cube" },
-        { name: "3D body", url: "https://mc-heads.net/body/{uuid}", description: "The whole body, turned" },
-        { name: "2D full body", url: "https://mc-heads.net/player/{uuid}", description: "Flat front view of the body" },
-        { name: "Skin file", url: "https://mc-heads.net/skin/{uuid}", description: "The raw 64×64 skin texture" }
-      ] },
-      { name: "Crafatar", domain: "crafatar.com", description: "Renders by UUID, including the cape", pages: [
-        { name: "2D face", url: "https://crafatar.com/avatars/{uuid}?overlay", description: "The face with its hat layer" },
-        { name: "3D head", url: "https://crafatar.com/renders/head/{uuid}?overlay", description: "The head, turned" },
-        { name: "3D body", url: "https://crafatar.com/renders/body/{uuid}?overlay", description: "The whole body, turned" },
-        { name: "Skin file", url: "https://crafatar.com/skins/{uuid}", description: "The raw 64×64 skin texture" },
-        { name: "Cape file", url: "https://crafatar.com/capes/{uuid}",
-          description: "The official cape texture (not found if there is none)" }
-      ] },
-      { name: "Crafthead", domain: "crafthead.net", description: "Fast renders, including the cape", pages: [
-        { name: "2D face", url: "https://crafthead.net/avatar/{uuid}", description: "The flat front of the face" },
-        { name: "2D face with hat", url: "https://crafthead.net/helm/{uuid}",
-          description: "The face with the hat layer on top" },
-        { name: "3D head", url: "https://crafthead.net/cube/{uuid}", description: "The head as a turned cube" },
-        { name: "Body", url: "https://crafthead.net/body/{uuid}", description: "Front view of the whole body" },
-        { name: "Bust", url: "https://crafthead.net/bust/{uuid}", description: "Head and shoulders" },
-        { name: "Skin file", url: "https://crafthead.net/skin/{uuid}", description: "The raw 64×64 skin texture" },
-        { name: "Cape file", url: "https://crafthead.net/cape/{uuid}", description: "The official cape texture" }
-      ] }
+      { name: "2D face", domain: "mc-heads.net", url: "https://mc-heads.net/avatar/{uuid}",
+        description: "The flat front of the face, with the hat layer" },
+      { name: "2D face without hat", domain: "mc-heads.net", url: "https://mc-heads.net/avatar/{uuid}/nohelm",
+        description: "The bare face, without the hat layer" },
+      { name: "3D head", domain: "mc-heads.net", url: "https://mc-heads.net/head/{uuid}",
+        description: "The head as a cube, turned to the right" },
+      { name: "3D head (left)", domain: "mc-heads.net", url: "https://mc-heads.net/head/{uuid}/left",
+        description: "The head as a cube, turned to the left" },
+      { name: "3D body", domain: "mc-heads.net", url: "https://mc-heads.net/body/{uuid}",
+        description: "The whole body, turned to the right" },
+      { name: "3D body (left)", domain: "mc-heads.net", url: "https://mc-heads.net/body/{uuid}/left",
+        description: "The whole body, turned to the left" },
+      { name: "2D full body", domain: "mc-heads.net", url: "https://mc-heads.net/player/{uuid}",
+        description: "Flat front view of the whole body" },
+      { name: "2D full body without hat", domain: "mc-heads.net", url: "https://mc-heads.net/player/{uuid}/nohelm",
+        description: "Flat front view of the body, without the outer skin layer" },
+      { name: "Face and body", domain: "mc-heads.net", url: "https://mc-heads.net/combo/{uuid}",
+        description: "A large face with a small full body in the corner" },
+      { name: "Skin file", domain: "mc-heads.net", url: "https://mc-heads.net/skin/{uuid}",
+        description: "The raw 64×64 skin texture" },
+      { name: "Download skin", domain: "mc-heads.net", url: "https://mc-heads.net/download/{uuid}",
+        description: "Saves the skin texture as a PNG file" }
     ]
   },
   {
@@ -87,7 +72,7 @@ const PLAYER_LINK_GROUPS = [
   {
     id: "pvp", name: "PvP & other servers", description: "Rankings and stats on other servers",
     sites: [
-      { name: "EloTiers", domain: "elotiers.com", url: "https://elotiers.com/player/{name}",
+      { name: "EloTiers", domain: "elotiers.com", url: "https://elotiers.com/profile/{name}",
         description: "PvP rating, clan and match records" },
       { name: "2B2Tiers", domain: "2b2tiers.org", url: "https://2b2tiers.org/player/{name}",
         description: "2b2t PvP: kills, deaths, streaks and ELO", servers: ["2b2t.org"] },

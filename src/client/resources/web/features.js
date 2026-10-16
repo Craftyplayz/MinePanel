@@ -341,6 +341,9 @@ const GRAPH_WIDTH = 1000;
 const GRAPH_HEIGHT = 100;
 const MAX_GRAPH_POINTS = 120;
 let performanceKey;
+// What the graph shows and how far it still has to slide; animated with requestAnimationFrame where available.
+let performanceGraph = null;
+let performanceFrame = null;
 
 performanceParts.menu.replaceChildren(...PERFORMANCE_WINDOW_CHOICES.map(seconds => {
   const choice = create("button", "chip small", formatWindow(seconds));
@@ -360,17 +363,38 @@ performanceParts.window.addEventListener("click", () => setHidden(performancePar
 /**
  * The last {@code window} seconds of frames per second as graph points, newest at x = 1. Long windows are averaged
  * into at most 120 points (10 minutes → one per 5 s), which keeps the line readable rather than a solid band.
+ * Groups are cut at fixed sample numbers ({@code total} counts every sample ever received), so as the graph scrolls
+ * finished groups keep their value and only the newest one changes. One extra group left of the window is kept so
+ * the line still reaches the left edge while it slides.
  */
-function performancePoints(fps, window) {
-  const values = fps.slice(-window);
+function performancePoints(fps, window, total = fps.length) {
   const group = Math.ceil(window / MAX_GRAPH_POINTS);
+  const values = fps.slice(-(window + group));
+  const first = total - values.length;
   const points = [];
-  for (let end = values.length; end > 0; end -= group) {
-    const part = values.slice(Math.max(0, end - group), end);
+  for (let end = values.length; end > 0;) {
+    const start = Math.max(0, Math.floor((first + end - 1) / group) * group - first);
+    const part = values.slice(start, end);
     const age = values.length - end;
     points.unshift({ x: window > 1 ? 1 - age / (window - 1) : 1, y: part.reduce((sum, value) => sum + value, 0) / part.length });
+    end = start;
   }
   return points;
+}
+
+/**
+ * How many samples {@code next} added after {@code previous}: the history is a sliding window, so find how far
+ * {@code previous} shifted to line up with the start of {@code next}. With nothing in common, all of it is new.
+ */
+function newSamples(previous, next) {
+  for (let shift = 0; shift <= previous.length; shift++) {
+    const kept = previous.length - shift;
+    if (kept > next.length) continue;
+    let same = true;
+    for (let index = 0; same && index < kept; index++) same = previous[shift + index] === next[index];
+    if (same) return next.length - kept;
+  }
+  return null;
 }
 
 /** A rounded graph ceiling just above the highest point: 60, 75, 150, 300... so the line rarely touches the top. */
@@ -430,20 +454,80 @@ function renderPerformance(player) {
     performanceParts.line.setAttribute("d", "");
     performanceParts.area.setAttribute("d", "");
     setHidden(performanceParts.lowLine, true);
+    performanceGraph = null;
     return;
   }
   writeText(performanceParts.status, `${performance.fps.at(-1)} FPS`);
   writeText(performanceParts.average, `${stats.average} fps`);
   writeText(performanceParts.low, `${stats.low} fps`);
-  const points = performancePoints(performance.fps, span);
-  const peak = graphPeak(points);
-  writeText(performanceParts.peak, `${formatCount(peak)} fps`);
-  const toScreen = value => GRAPH_HEIGHT - value / peak * GRAPH_HEIGHT;
-  const line = smoothPath(points.map(point => ({ x: point.x * GRAPH_WIDTH, y: toScreen(point.y) })));
+
+  const now = Date.now();
+  const previous = performanceGraph;
+  const added = previous?.span === span ? newSamples(previous.fps, performance.fps) : null;
+  // A reset, a new window or the first data: draw it in place rather than sliding from an unrelated graph.
+  const graph = added === null
+    ? { offset: 0, interval: 1000, arrived: now, total: performance.fps.length }
+    : { offset: previous.offset, interval: previous.interval, arrived: previous.arrived, total: previous.total + added,
+      peak: previous.peak, low: previous.low, drawn: previous.drawn };
+  if (added > 0) {
+    // Draw the new samples one step to the right, then slide left over about the time until the next arrives.
+    graph.offset = Math.min(2, graph.offset + added);
+    graph.interval = Math.min(3000, Math.max(250, (graph.interval * 3 + (now - graph.arrived) / added) / 4));
+    graph.arrived = now;
+  }
+  graph.fps = performance.fps;
+  graph.span = span;
+  graph.points = performancePoints(performance.fps, span, graph.total);
+  graph.targetPeak = graphPeak(graph.points.filter(point => point.x >= 0));
+  graph.targetLow = stats.low;
+  graph.peak ??= graph.targetPeak;
+  graph.low ??= graph.targetLow;
+  graph.drawn ??= now;
+  performanceGraph = graph;
+  writeText(performanceParts.peak, `${formatCount(graph.targetPeak)} fps`);
+  if (reducedMotion?.matches || typeof window.requestAnimationFrame !== "function") {
+    Object.assign(graph, { offset: 0, peak: graph.targetPeak, low: graph.targetLow });
+    drawPerformance(graph);
+  } else {
+    drawPerformance(graph);
+    if (performanceFrame === null) {
+      graph.drawn = now;
+      performanceFrame = window.requestAnimationFrame(animatePerformance);
+    }
+  }
+}
+
+/** Moves the graph one animation frame along: scrolls at a steady speed and eases the scale toward its target. */
+function animatePerformance() {
+  performanceFrame = null;
+  const graph = performanceGraph;
+  if (!graph?.points) return;
+  const now = Date.now();
+  const elapsed = Math.min(100, Math.max(0, now - graph.drawn));
+  graph.drawn = now;
+  // Constant speed reads as smooth; catch up a little faster if samples arrived quicker than the slide.
+  graph.offset = Math.max(0, graph.offset - elapsed / graph.interval * Math.max(1, graph.offset));
+  const ease = 1 - Math.exp(-elapsed / 250);
+  graph.peak += (graph.targetPeak - graph.peak) * ease;
+  graph.low += (graph.targetLow - graph.low) * ease;
+  if (Math.abs(graph.targetPeak - graph.peak) < graph.targetPeak / 1000) graph.peak = graph.targetPeak;
+  if (Math.abs(graph.targetLow - graph.low) < 0.05) graph.low = graph.targetLow;
+  drawPerformance(graph);
+  if (graph.offset > 0 || graph.peak !== graph.targetPeak || graph.low !== graph.targetLow) {
+    performanceFrame = window.requestAnimationFrame(animatePerformance);
+  }
+}
+
+function drawPerformance(graph) {
+  const toScreen = value => GRAPH_HEIGHT - value / graph.peak * GRAPH_HEIGHT;
+  const shift = graph.span > 1 ? graph.offset / (graph.span - 1) : 0;
+  const screen = graph.points.map(point => ({ x: (point.x + shift) * GRAPH_WIDTH, y: toScreen(point.y) }));
+  const line = smoothPath(screen);
   performanceParts.line.setAttribute("d", line);
-  const start = Math.round(points[0].x * GRAPH_WIDTH * 10) / 10;
-  performanceParts.area.setAttribute("d", `${line}L${GRAPH_WIDTH},${GRAPH_HEIGHT}L${start},${GRAPH_HEIGHT}Z`);
-  const lowY = String(Math.round(toScreen(stats.low) * 10) / 10);
+  const f = value => Math.round(value * 10) / 10;
+  performanceParts.area.setAttribute("d",
+    `${line}L${f(screen.at(-1).x)},${GRAPH_HEIGHT}L${f(screen[0].x)},${GRAPH_HEIGHT}Z`);
+  const lowY = String(f(toScreen(graph.low)));
   performanceParts.lowLine.setAttribute("y1", lowY);
   performanceParts.lowLine.setAttribute("y2", lowY);
   setHidden(performanceParts.lowLine, false);

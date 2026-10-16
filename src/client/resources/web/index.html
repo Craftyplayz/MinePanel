@@ -188,9 +188,10 @@
           <div class="performance-scale prio-2"><dt>Graph peak</dt><dd id="performance-peak">—</dd></div>
         </dl>
         <svg class="performance-graph" id="performance-graph" viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true">
-          <path class="performance-area" id="performance-area" d=""></path>
+          <defs><clipPath id="performance-clip"><rect x="0" y="-50" width="1000" height="200"></rect></clipPath></defs>
+          <path class="performance-area" id="performance-area" d="" clip-path="url(#performance-clip)"></path>
           <line class="performance-low-line" id="performance-low-line" x1="0" x2="1000" y1="100" y2="100" hidden></line>
-          <path class="performance-line" id="performance-line" d=""></path>
+          <path class="performance-line" id="performance-line" d="" clip-path="url(#performance-clip)"></path>
         </svg>
         <div class="popover" id="performance-window-menu" role="menu" hidden></div>
       </div>
