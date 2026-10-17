@@ -11,7 +11,9 @@
   <script src="/layout.js" defer></script>
   <script src="/rules.js" defer></script>
   <script src="/app.js" defer></script>
+  <script src="/player-links.js" defer></script>
   <script src="/features.js" defer></script>
+  <script src="/model.js" defer></script>
 </head>
 <body>
   <button type="button" class="brand-toggle" id="edit-toggle" aria-pressed="false" aria-label="Customize" title="Customize">M<span id="connection-dot" class="dot" aria-hidden="true"></span></button>
@@ -64,7 +66,7 @@
     </article>
     <article class="tile" id="tile-inventory" data-tile="inventory" aria-labelledby="inventory-title">
       <header class="tile-head" id="head-inventory"><h2 id="inventory-title">Inventory</h2>
-        <span class="head-actions"><button type="button" class="chip small" id="enderchest-open" hidden title="Ender chest contents, as last seen">Ender chest</button><button type="button" class="chip small" id="armor-toggle" aria-pressed="true">Armor</button><span class="badge muted" id="inventory-status">Unavailable</span></span></header>
+        <span class="head-actions"><button type="button" class="chip small" id="armor-toggle" aria-pressed="true">Armor</button><span class="badge muted" id="inventory-status">Unavailable</span></span></header>
       <div class="tile-body inventory-body" id="inventory-body">
         <p class="held" id="held-value">Held item unavailable</p>
         <div class="inventory-grid" id="inventory-grid" aria-label="Inventory"></div>
@@ -187,11 +189,19 @@
           <div class="performance-scale prio-2"><dt>Graph peak</dt><dd id="performance-peak">—</dd></div>
         </dl>
         <svg class="performance-graph" id="performance-graph" viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true">
-          <path class="performance-area" id="performance-area" d=""></path>
+          <defs><clipPath id="performance-clip"><rect x="0" y="-50" width="1000" height="200"></rect></clipPath></defs>
+          <path class="performance-area" id="performance-area" d="" clip-path="url(#performance-clip)"></path>
           <line class="performance-low-line" id="performance-low-line" x1="0" x2="1000" y1="100" y2="100" hidden></line>
-          <path class="performance-line" id="performance-line" d=""></path>
+          <path class="performance-line" id="performance-line" d="" clip-path="url(#performance-clip)"></path>
         </svg>
         <div class="popover" id="performance-window-menu" role="menu" hidden></div>
+      </div>
+    </article>
+    <article class="tile" id="tile-afk" data-tile="afk" aria-labelledby="afk-title">
+      <header class="tile-head" id="head-afk"><h2 id="afk-title">AFK</h2><span class="badge muted" id="afk-status">Unavailable</span></header>
+      <div class="tile-body column afk-body">
+        <div class="afk-timer"><span class="afk-timer-label">AFK for</span><strong id="afk-timer">—</strong></div>
+        <div class="afk-crawl" id="afk-crawl" aria-label="Random statistics"></div>
       </div>
     </article>
     <article class="tile" id="tile-pickups" data-tile="pickups" aria-labelledby="pickups-title">
@@ -223,6 +233,7 @@
         </form>
         <div class="advancement-tabs prio-2" id="advancement-tabs"></div>
         <div class="history-filters prio-3">
+          <label>Search <input id="advancement-search" type="search" placeholder="Title or description" maxlength="100"></label>
           <label>Show
             <select id="advancement-filter">
               <option value="closest">Closest to done</option>
@@ -246,22 +257,50 @@
         <div class="villager-list scroll" id="villager-list" aria-label="Villagers"></div>
       </div>
     </article>
+    <article class="tile" id="tile-model" data-tile="model" aria-labelledby="model-title">
+      <header class="tile-head" id="head-model"><h2 id="model-title">3D render</h2>
+        <span class="head-actions"><span class="badge muted" id="model-status">Unavailable</span><button type="button" class="icon-button" id="model-settings" aria-label="3D render settings" title="3D render settings">⚙</button></span></header>
+      <div class="tile-body column model-body">
+        <form class="tile-settings" id="model-form" hidden>
+          <label class="option-toggle"><input id="model-spin" type="checkbox"> <span>Spin automatically</span></label>
+          <label>Around <select id="model-axis"></select></label>
+          <label>Speed <select id="model-speed"></select></label>
+        </form>
+        <div class="model-stage" id="model-stage">
+          <canvas class="model-canvas" id="model-canvas" aria-label="Your player in 3D. Drag to turn, scroll to zoom, double-click to reset." role="img"></canvas>
+          <p class="empty-note model-message" id="model-message">Join a world to see your player.</p>
+        </div>
+      </div>
+    </article>
   </main>
   <div class="windows" id="windows" aria-label="Item windows"></div>
+  <nav class="player-menu" id="player-menu" aria-label="Look up this player" hidden></nav>
+  <div class="dialog-backdrop" id="player-link-dialog" hidden>
+    <section class="dialog player-link-dialog" role="dialog" aria-modal="true" aria-labelledby="player-link-title">
+      <header class="dialog-head">
+        <h2 id="player-link-title">Pages</h2>
+        <button type="button" class="button" id="player-link-close">Done</button>
+      </header>
+      <p class="dialog-note" id="player-link-note"></p>
+      <div class="dialog-list" id="player-link-pages"></div>
+    </section>
+  </div>
   <div class="advancement-popup" id="advancement-popup" role="status" hidden></div>
   <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+  <div class="rule-toggles" id="rule-toggles" role="group" aria-label="Toggles" hidden></div>
+  <div class="rule-toasts" id="rule-toasts" aria-live="polite"></div>
   <div class="dialog-backdrop" id="rules-dialog" hidden>
-    <section class="dialog wide" role="dialog" aria-modal="true" aria-labelledby="rules-dialog-title">
+    <section class="dialog rules-editor" role="dialog" aria-modal="true" aria-labelledby="rules-dialog-title">
       <header class="dialog-head">
         <h2 id="rules-dialog-title">Rules</h2>
+        <span class="rules-error" id="rules-error" role="alert" hidden></span>
+        <button type="button" class="button quiet" id="rules-dock" aria-pressed="false" title="Dock the editor beside the live dashboard to preview rules, inspect panels and place panels on the grid">Side panel</button>
         <button type="button" class="button" id="rules-dialog-close">Done</button>
       </header>
-      <p class="dialog-note">A rule applies while its conditions match: every <strong>AND</strong> group needs at least one of its conditions (so “in the Nether” AND “wearing elytra or swimming”). The first active rule that switches profile wins; show/hide and settings from all active rules apply in order. Rules pause while you customize.</p>
-      <div class="dialog-tools">
-        <button type="button" class="button" id="rule-add">Add rule</button>
-        <span class="save-status" id="rules-status" role="status"></span>
+      <div class="rules-body">
+        <nav class="rules-sidebar" id="rules-sidebar" aria-label="Rules"></nav>
+        <div class="rules-main" id="rules-detail"></div>
       </div>
-      <div class="dialog-list" id="rules-list"></div>
     </section>
   </div>
   <div class="dialog-backdrop" id="statistics-dialog" hidden>

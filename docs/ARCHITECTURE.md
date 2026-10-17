@@ -4,11 +4,29 @@ MinePanel is a client-only Fabric mod, a loopback-only local service, and a stat
 
 The client adapter owns lifecycle and reads Minecraft state on the client thread. It copies state into immutable snapshots before publishing to bounded background service workers. The service serves only bundled resources and narrowly scoped authenticated read-only data. Optional integrations are separate adapters; absence or failure is reported as unavailable and does not prevent startup.
 
-Gameplay history is session-only and bounded to 100 immutable events. Open/last-viewed containers and pins remain unimplemented. Chat is not retained. Configurable layouts/preferences remain outstanding.
+Gameplay history is session-only and bounded to 100 immutable events. Open/last-viewed containers and pins remain unimplemented. Chat is not retained. Layouts, preferences and rules are configurable (see [Layout and rules](#layout-and-rules)).
 
 Client tick sampling is capped at four samples per second, suppresses unchanged values, and writes immutable versioned position/dimension/health snapshots into an atomic store. The browser WebSocket receives a full initial snapshot followed by changed-field deltas and reconnects after disconnect. HTTP state access uses a bearer token; the browser session endpoint sets the same random per-server token as an HttpOnly cookie for WebSocket authentication, never in a URL. Both listeners bind to IPv4 loopback; Host and Origin are checked, WebSocket handshakes and frames are bounded, and only read-only paths/frames are supported. No network, disk, or expensive calculation belongs on the Minecraft tick/render thread.
 
 Current player fields include position, dimension ID, health, maximum health, absorption, active-session duration, inventory/equipment, vanilla statistics and session history. The target client has not been compiled or run in Minecraft in this environment.
+
+## Layout and rules
+
+The dashboard layout (tiles, settings, profiles, pinned windows, update rate and rules) is stored by the mod as `config/minepanel/layout.json`. It is read and written through the authenticated `/api/layout` endpoint and validated on both sides: `normalizeLayout` in `layout.js`, and `LayoutStore` with `LayoutRules` in Java. Both must accept and reject the same layouts, and the shared cases in `src/test/fixtures/layouts-v2.json` are checked by both test suites. Rules are evaluated only in the browser (`rules.js`), against the snapshots it already receives. They never cause gameplay actions.
+
+Layout version 2 (rules v2, see [RULES_V2.md](RULES_V2.md)) is current.
+
+- **Version 1** is still read, and the browser converts it. On the first version 2 save over a version 1 file, the mod copies the old file to `layout.v1-backup.json` and never overwrites that copy.
+- **Saving** accepts only version 2.
+- **A stored file that fails validation** loads as nothing. It is first copied to `layout.rejected.json`, so a later save can't lose it.
+- **A version 1 file the browser can't convert** stays untouched: the dashboard shows the error and doesn't save until a layout is imported.
+
+Schema version 5 adds two detail fields for rules (phase 4), each replaced whole when it changes:
+
+- **`sensors`**: `moonPhase`, `spawnDistance`, `air`, `maxAir`, `armor`, the flags `onFire`, `inWater`, `inLava`, `inRain`, `sneaking`, `sprinting`, `sleeping`, `bossBar` and `raid`, plus `riding`, `using`, `light`, `look`, `nearby` and `screen`. `light`, `look`, `nearby` (living entities, at most 128, nearest first) and `screen` are null unless an enabled rule reads them. The mod works that out from the saved layout (`LayoutRules.needs`). The entity scan runs at most twice a second, within the largest radius asked for, capped at 64 blocks and at the render distance. Everything is read on the client thread at sampling time. Boss bars are read through a read-only accessor mixin.
+- **`registries`**: items, blocks, entity types, effects, biomes and general statistics as `{ id, name, icon }`, at most 4096 per kind, for the rule editor's pickers. They are listed once per connection (and after a resource reload), so they travel with the initial snapshot and almost never in an update. Their icons are rendered only when the dashboard first requests one.
+
+See [RULES_V2.md](RULES_V2.md#phase-4-2026-10-16) for the conditions that read them.
 
 ## Inventory and equipment protocol
 
@@ -47,6 +65,20 @@ Statistics and history deltas replace their whole bounded objects only when chan
 `FrameTimingMixin` calls `FrameCollector` at every return from `Minecraft.runTick`, which renders one frame, so frame time is measured end to end, including menus, loading screens and framerate-limiter waits. `FrameStats` runs on the render thread and allocates nothing per frame. It counts each frame into the second it ended in and into a log-spaced frame-time histogram with buckets 2% wide (0.1 ms to 10 s). Each closed second keeps only its non-empty buckets, in a 600-second ring. Running merges for the 10 s, 30 s, 60 s and 600 s windows add the new second and subtract the one leaving. A window's average is frames divided by their total duration. Its 1% low is the frame rate at the 99th-percentile frame time, accurate to the bucket width. A stall shows as seconds with zero frames.
 
 The snapshot is the `performance` detail field. It holds frames per second for up to 600 seconds (newest last) and `{seconds, average, low}` per window, or null until the first second closes. It is rebuilt and resent only when a second closes. The browser averages long windows into at most 120 points and draws them with monotone cubic interpolation, so the curve never overshoots the data. The chosen window is saved as `settings.performance.window`. The mixin's injection into 26.1.2's `runTick` is unverified until the client compiles.
+
+## 3D render
+
+The `appearance` detail field (added within schema version 5; the dashboard and mod ship together) is `{ skin, slim, armor: [ { slot, model, texture, color } ], rightHand, leftHand }`, replaced whole when it changes. `AppearanceCollector` reads it on the client thread at sampling time and caches everything until the resource packs reload:
+
+- **Skin:** a downloaded skin is copied out of the `DynamicTexture` the game already holds (already converted from legacy 64×32 skins) and encoded to PNG once per skin. A default skin is read from the resource packs. Either is served at `/texture/<key>.png`; keys hash the contents or the resource path and the icon epoch, so they are cached as immutable. `skin` is null while the skin can't be read.
+- **Armor:** for each worn item's `equippable` asset, the layers of `assets/<ns>/equipment/<path>.json` (decoded with `EquipmentClientInfo.CODEC`, as `EquipmentAssetManager` loads them) for `humanoid`, `humanoid_leggings` (legs) and `wings` (chest). Colours follow `EquipmentLayerRenderer.getColorForLayer` (dyed leather, and undyed dyeable layers without a default are skipped). Elytra layers that use the player's texture take the skin's elytra or cape when there is one. Trims and the enchantment glint are left out.
+- **Held items:** the inventory icon key, whether the icon is a flat sprite (`!usesBlockLight`), and the item model's third-person transform for that hand, read through the `ItemRenderStateAccessor` and `ItemLayerRenderStateAccessor` mixins and mirrored for the left hand as `ItemTransform.apply` does. Arms follow `getMainArm()`.
+
+Any failure here (including a mixin that no longer applies) logs one warning and sends an empty appearance; the rest of the sample is unaffected.
+
+`model.js` draws it with plain WebGL (the page's CSP allows no outside scripts). Parts are built as `ModelPart.Cube` builds them: the same texture net, pivots and armor deformations (outer armor 1, leggings 0.5, legs 0.1 less, left limbs mirrored), with the wide or slim arms. Held items are the icon extruded as the item model generator does (a one-pixel slab with walls at opaque edges, at the sprite's own resolution), placed as `ItemInHandLayer` places them; block icons are drawings rather than sprites, so they are held as an upright card. Arms take the item-holding pose and the idle bob. Lighting is entity-like: 40% ambient plus two fixed lights, with cut-out transparency.
+
+The orientation is a swing (any tilt) times a twist about the spin axis. Dragging turns it about the screen's axes. While spinning, a released model waits 0.8 s, then speeds up over 2 s while the swing eases back to none, so it rights itself without changing which way it faces. With spinning off it stays where it was left. The model is redrawn with `requestAnimationFrame` only while its tile is visible; with reduced motion it doesn't spin or bob.
 
 ## Litematica build progress
 

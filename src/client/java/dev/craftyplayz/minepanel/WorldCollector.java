@@ -57,7 +57,7 @@ final class WorldCollector {
                 (int) Math.floorMod(ticks, 24_000L), gameMode);
     }
 
-    private static String biomeName(Identifier biome) {
+    static String biomeName(Identifier biome) {
         String key = Util.makeDescriptionId("biome", biome);
         String name = Component.translatable(key).getString();
         if (name.isBlank() || name.equals(key)) {

@@ -12,6 +12,8 @@ public final class WorldFeaturesTest {
         testWorldLogging();
         testContentsAndDetails();
         testFrameStats();
+        testSensorsAndRegistries();
+        testAppearance();
         System.out.println("MinePanel world feature unit tests passed.");
     }
 
@@ -125,13 +127,19 @@ public final class WorldFeaturesTest {
         for (String field : PlayerDetails.FIELDS) check(json.contains("\"" + field + "\":"), field + " is serialized");
         var moved = new PlayerDetails(details.world(), Motion.rounded("elytra", 30.04, 29.96, -1.2, 359.6, 12.3,
                 details.motion().icon(), null), details.xp(), details.portal(), details.pickups(), null, List.of(), null,
-                details.performance(), details.build());
+                details.performance(), details.build(), details.icons());
         var next = new PlayerSnapshot(2, 2, true, 0L, "minecraft:overworld", 0.0, 0.0, 0.0, 20.0, 20.0, 0.0,
                 InventorySnapshot.empty(), null, GameplayHistory.empty(), 20, 5.0, List.of(), moved);
         String delta = next.toDeltaJson(snapshot);
         check(delta.contains("\"motion\":{\"mode\":\"elytra\",\"speed\":30.0,\"horizontalSpeed\":30.0,"
                         + "\"verticalSpeed\":-1.2,\"yaw\":0.0,\"pitch\":12.0") && !delta.contains("\"world\""),
                 "only changed detail fields are sent, rounded: " + delta);
+        check(json.contains("\"icons\":{\"name\":\"Steve\",\"uuid\":\"8667ba71-b85a-4004-af54-457a9734eed7\",\"head\":null,"),
+                "the head's owner is sent with the icons: " + json);
+        var chest = details.icons().enderChest();
+        invalid(() -> new PlayerDetails.Icons("", "8667ba71-b85a-4004-af54-457a9734eed7", null, chest));
+        invalid(() -> new PlayerDetails.Icons("Steve", "8667BA71-B85A-4004-AF54-457A9734EED7", null, chest));
+        invalid(() -> new PlayerDetails.Icons("Steve", "8667ba71b85a4004af54457a9734eed7", null, chest));
         invalid(() -> new WorldInfo("server", "x", "minecraft:plains", "Plains", "snow", 0, 0, "survival"));
         invalid(() -> new VillagerSnapshot("not-a-uuid", "minecraft:librarian", "Librarian", 1, null,
                 "minecraft:overworld", 0, 0, 0, 0, 0, List.of()));
@@ -185,8 +193,98 @@ public final class WorldFeaturesTest {
         return new ItemSnapshot(false, id, name, 1, 64, null, null, List.of());
     }
 
+    private static void testSensorsAndRegistries() {
+        var nearby = new Sensors.Nearby(16, List.of(new Sensors.Entity("minecraft:zombie", true, Sensors.tenths(3.04))));
+        var sensors = new Sensors(4, 120, 280, 300, 12, true, false, false, true, false, false, false, "minecraft:boat",
+                "fishing", false, true, new Sensors.Light(3, 15, 12), new Sensors.Look("none", null, null), nearby, "chest");
+        check(sensors.toJson().equals("{\"moonPhase\":4,\"spawnDistance\":120,\"air\":280,\"maxAir\":300,\"armor\":12,"
+                + "\"onFire\":true,\"inWater\":false,\"inLava\":false,\"inRain\":true,\"sneaking\":false,"
+                + "\"sprinting\":false,\"sleeping\":false,\"riding\":\"minecraft:boat\",\"using\":\"fishing\","
+                + "\"bossBar\":false,\"raid\":true,\"light\":{\"block\":3,\"sky\":15,\"combined\":12},"
+                + "\"look\":{\"kind\":\"none\",\"id\":null,\"distance\":null},\"nearby\":{\"radius\":16,"
+                + "\"entities\":[{\"type\":\"minecraft:zombie\",\"hostile\":true,\"distance\":3.0}]},"
+                + "\"screen\":\"chest\"}"), "sensors serialize every field: " + sensors.toJson());
+        check(Sensors.EMPTY.toJson().contains("\"light\":null,\"look\":null,\"nearby\":null,\"screen\":null"),
+                "costly sensors are null until a rule reads them");
+        invalid(() -> new Sensors(8, null, 300, 300, 0, false, false, false, false, false, false, false, null, null,
+                false, false, null, null, null, null));
+        invalid(() -> new Sensors(0, null, 300, 300, 0, false, false, false, false, false, false, false, null, "napping",
+                false, false, null, null, null, null));
+        invalid(() -> new Sensors(0, null, 300, 300, 0, false, false, false, false, false, false, false, null, null,
+                false, false, null, null, null, "chat"));
+        invalid(() -> new Sensors.Light(16, 0, 0));
+        invalid(() -> new Sensors.Look("block", null, 2.0));
+        invalid(() -> new Sensors.Look("none", "minecraft:stone", null));
+        invalid(() -> new Sensors.Nearby(65, List.of()));
+        invalid(() -> new Sensors.Entity("Zombie", true, 1));
+        invalid(() -> new SensorNeeds(false, 65, 0, false));
+
+        var registries = new Registries(List.of(new Registries.Entry("minecraft:stone", "Stone", "e0-1a")), List.of(),
+                List.of(), List.of(), List.of(), List.of(new Registries.Entry("minecraft:custom/minecraft:jump", "Jumps", null)));
+        check(registries.toJson().equals("{\"items\":[{\"id\":\"minecraft:stone\",\"name\":\"Stone\",\"icon\":\"e0-1a\"}],"
+                + "\"blocks\":[],\"entities\":[],\"effects\":[],\"biomes\":[],\"stats\":[{\"id\":"
+                + "\"minecraft:custom/minecraft:jump\",\"name\":\"Jumps\",\"icon\":null}]}"), "registries serialize: "
+                + registries.toJson());
+        invalid(() -> new Registries.Entry("Stone", "Stone", null));
+        invalid(() -> new Registries.Entry("minecraft:stone", "", null));
+        invalid(() -> new Registries.Entry("minecraft:stone", "Stone", "Bad Icon"));
+
+        var details = PlayerDetails.placeholder();
+        var before = new PlayerSnapshot(1, 1, true, 0L, "minecraft:overworld", 0.0, 0.0, 0.0, 20.0, 20.0, 0.0,
+                InventorySnapshot.empty(), null, GameplayHistory.empty(), 20, 5.0, List.of(), details);
+        var withSensors = new PlayerDetails(details.world(), details.motion(), details.xp(), details.portal(),
+                details.pickups(), null, List.of(), null, details.performance(), details.build(), details.icons(), sensors,
+                registries);
+        var after = new PlayerSnapshot(2, 2, true, 0L, "minecraft:overworld", 0.0, 0.0, 0.0, 20.0, 20.0, 0.0,
+                InventorySnapshot.empty(), null, GameplayHistory.empty(), 20, 5.0, List.of(), withSensors);
+        String delta = after.toDeltaJson(before);
+        check(delta.contains(",\"sensors\":" + sensors.toJson()) && delta.contains(",\"registries\":" + registries.toJson())
+                && !delta.contains("\"motion\""), "sensors and registries are sent whole when they change: " + delta);
+        var resent = new PlayerSnapshot(3, 3, true, 0L, "minecraft:overworld", 0.0, 0.0, 0.0, 20.0, 20.0, 0.0,
+                InventorySnapshot.empty(), null, GameplayHistory.empty(), 20, 5.0, List.of(), withSensors);
+        check(!resent.toDeltaJson(after).contains("\"registries\""), "unchanged registries are not resent");
+    }
+
     private static void check(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);
+    }
+
+    private static void testAppearance() {
+        var sword = Appearance.Held.rounded("e0-sword", true, new double[] {0, -90.00001, 55},
+                new double[] {0, 4.0000002, 0.5}, new double[] {0.85, 0.85, 0.85});
+        var appearance = new Appearance("p0-skin", true,
+                List.of(new Appearance.ArmorLayer("legs", "humanoid_leggings", "r0-legs", "#a06540"),
+                        new Appearance.ArmorLayer("chest", "wings", "r0-elytra", null)), sword, null);
+        check(appearance.toJson().equals("{\"skin\":\"p0-skin\",\"slim\":true,\"armor\":["
+                + "{\"slot\":\"legs\",\"model\":\"humanoid_leggings\",\"texture\":\"r0-legs\",\"color\":\"#a06540\"},"
+                + "{\"slot\":\"chest\",\"model\":\"wings\",\"texture\":\"r0-elytra\",\"color\":null}],"
+                + "\"rightHand\":{\"icon\":\"e0-sword\",\"flat\":true,\"rotation\":[0.0,-90.0,55.0],"
+                + "\"translation\":[0.0,4.0,0.5],\"scale\":[0.85,0.85,0.85]},\"leftHand\":null}"),
+                "appearance serializes, with float noise rounded away: " + appearance.toJson());
+        check(Appearance.Held.rounded("e0-sword", true, new double[] {0, -89.99999, 55}, new double[] {0, 4, 0.5},
+                new double[] {0.85, 0.85, 0.85}).equals(sword), "rounded transforms compare equal, so they aren't resent");
+        check(Appearance.EMPTY.toJson().equals("{\"skin\":null,\"slim\":false,\"armor\":[],\"rightHand\":null,"
+                + "\"leftHand\":null}"), "an unreadable appearance is empty");
+        invalid(() -> new Appearance("Skin.png", false, List.of(), null, null));
+        invalid(() -> new Appearance.ArmorLayer("offhand", "humanoid", "r0-a", null));
+        invalid(() -> new Appearance.ArmorLayer("head", "horse_body", "r0-a", null));
+        invalid(() -> new Appearance.ArmorLayer("head", "humanoid", "r0-a", "#ABCDEF"));
+        invalid(() -> new Appearance(null, false, java.util.Collections.nCopies(17,
+                new Appearance.ArmorLayer("head", "humanoid", "r0-a", null)), null, null));
+        invalid(() -> new Appearance.Held("e0-sword", true, Double.NaN, 0, 0, 0, 0, 0, 1, 1, 1));
+
+        var details = PlayerDetails.placeholder();
+        check(details.appearance().equals(Appearance.EMPTY), "details without an appearance carry the empty one");
+        var dressed = new PlayerDetails(details.world(), details.motion(), details.xp(), details.portal(),
+                details.pickups(), null, List.of(), null, details.performance(), details.build(), details.icons(),
+                details.sensors(), details.registries(), appearance);
+        var before = new PlayerSnapshot(1, 1, true, 0L, "minecraft:overworld", 0.0, 0.0, 0.0, 20.0, 20.0, 0.0,
+                InventorySnapshot.empty(), null, GameplayHistory.empty(), 20, 5.0, List.of(), details);
+        var after = new PlayerSnapshot(2, 2, true, 0L, "minecraft:overworld", 0.0, 0.0, 0.0, 20.0, 20.0, 0.0,
+                InventorySnapshot.empty(), null, GameplayHistory.empty(), 20, 5.0, List.of(), dressed);
+        check(before.toJson().contains(",\"appearance\":" + Appearance.EMPTY.toJson() + "}"),
+                "full snapshots end with the appearance");
+        check(after.toDeltaJson(before).contains(",\"appearance\":" + appearance.toJson()), "a changed appearance is sent");
     }
 
     private static void invalid(Runnable action) {

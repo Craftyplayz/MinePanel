@@ -6,7 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const web = path.join(__dirname, "../../client/resources/web");
-const sources = ["protocol.js", "layout.js", "rules.js", "app.js", "features.js"].map(name => fs.readFileSync(path.join(web, name), "utf8"));
+const sources = ["protocol.js", "layout.js", "rules.js", "app.js", "player-links.js", "features.js", "model.js"].map(name => fs.readFileSync(path.join(web, name), "utf8"));
 
 function empty() {
   return { empty: true, itemId: null, name: null, count: 0, maxCount: 0,
@@ -49,12 +49,37 @@ function details() {
       weather: "clear", day: 3, time: 6000, gameMode: "survival" },
     motion: { mode: "ground", speed: 4.3, horizontalSpeed: 4.3, verticalSpeed: 0, yaw: 180, pitch: 0,
       icon: item({ itemId: "minecraft:netherite_boots", name: "Netherite Boots", count: 1, maxCount: 1 }),
-      glider: null },
+      glider: null, idleSince: null },
     xp: { level: 5, progress: 0.5, points: 63, gained: { 10: 0, 30: 0, 60: 12, 300: 40, 600: 40, 3600: 90 } },
     portal: { crossing: null, obsidian: [], lit: null },
     pickups: [], advancements: null, villagers: [], enderChest: null, performance: performance(),
-    build: { available: false, reason: "missing", placement: null, materials: [] }
+    build: { available: false, reason: "missing", placement: null, materials: [] },
+    icons: { name: "Steve", uuid: "8667ba71-b85a-4004-af54-457a9734eed7",
+      head: item({ itemId: "minecraft:player_head", name: "Steve's Head", count: 1, icon: "e0-head" }),
+      enderChest: item({ itemId: "minecraft:ender_chest", name: "Ender Chest", count: 1, icon: "e0-ender" }) },
+    sensors: sensors(), registries: registries(), appearance: appearance()
   };
+}
+
+function sensors(overrides = {}) {
+  return { moonPhase: 0, spawnDistance: 120, air: 300, maxAir: 300, armor: 0, onFire: false, inWater: false,
+    inLava: false, inRain: false, sneaking: false, sprinting: false, sleeping: false, riding: null, using: null,
+    bossBar: false, raid: false, light: null, look: null, nearby: null, screen: null, ...overrides };
+}
+
+function appearance(overrides = {}) {
+  return { skin: "p0-0a1b2c3d4e5f60718293", slim: false,
+    armor: [{ slot: "chest", model: "humanoid", texture: "r0-1a2b3c4d5e6f70819203", color: null },
+      { slot: "legs", model: "humanoid_leggings", texture: "r0-2b3c4d5e6f7081920314", color: "#a06540" }],
+    rightHand: { icon: "e0-sword", flat: true, rotation: [0, -90, 55], translation: [0, 4, 0.5], scale: [0.85, 0.85, 0.85] },
+    leftHand: null, ...overrides };
+}
+
+function registries(overrides = {}) {
+  return { items: [{ id: "minecraft:stone", name: "Stone", icon: "e0-1a2b" }],
+    blocks: [{ id: "minecraft:stone", name: "Stone", icon: "e0-1a2b" }, { id: "minecraft:water", name: "Water", icon: null }],
+    entities: [{ id: "minecraft:creeper", name: "Creeper", icon: "e0-egg" }], effects: [], biomes: [],
+    stats: [{ id: "minecraft:custom/minecraft:jump", name: "Jumps", icon: null }], ...overrides };
 }
 
 function performance(fps = [58, 60, 61, 60, 59, 30, 60, 62, 60, 60, 61, 60]) {
@@ -63,19 +88,19 @@ function performance(fps = [58, 60, 61, 60, 59, 30, 60, 62, 60, 60, 61, 60]) {
 }
 
 function snapshot(overrides = {}) {
-  return { schemaVersion: 4, revision: 4, capturedAt: 100, available: true,
+  return { schemaVersion: 5, revision: 4, capturedAt: 100, available: true,
     sessionSeconds: 3665, dimension: "minecraft:overworld", position: { x: 1, y: 64, z: -3 },
     health: 18, maxHealth: 20, absorption: 2, inventory: inventory(),
     statistics: statistics(), history: history(), food: 18, saturation: 5.5, effects: [], ...details(), ...overrides };
 }
 
 function initial(state = snapshot()) {
-  return { schemaVersion: 4, type: "initial", modVersion: "0.1.0", state };
+  return { schemaVersion: 5, type: "initial", modVersion: "0.1.0", state };
 }
 
 function update(state = {}) {
-  return { schemaVersion: 4, type: "update",
-    state: { schemaVersion: 4, baseRevision: 4, revision: 7, capturedAt: 101, ...state } };
+  return { schemaVersion: 5, type: "update",
+    state: { schemaVersion: 5, baseRevision: 4, revision: 7, capturedAt: 101, ...state } };
 }
 
 function unavailable(overrides = {}) {
@@ -83,7 +108,8 @@ function unavailable(overrides = {}) {
     position: { x: null, y: null, z: null }, health: null, maxHealth: null,
     absorption: null, inventory: null, statistics: null, history: history({ active: false }),
     food: null, saturation: null, effects: null, world: null, motion: null, xp: null, portal: null, pickups: null,
-    advancements: null, villagers: null, enderChest: null, performance: null, build: null, ...overrides });
+    advancements: null, villagers: null, enderChest: null, performance: null, build: null, icons: null, sensors: null,
+    registries: null, appearance: null, ...overrides });
 }
 
 function defaultFetch(storedLayout = null, requests = []) {
@@ -121,6 +147,9 @@ function harness(fetchImpl = defaultFetch()) {
     replaceChildren(...children) { this.children = children; this.text = ""; this.replacements++; }
     setAttribute(key, value) { this.attributes[key] = String(value); }
     getBoundingClientRect() { return this.rect; }
+    // Layout size; `layoutSize` stands in for a box whose on-screen rect a transform has scaled.
+    get clientWidth() { return (this.layoutSize ?? this.rect).width; }
+    get clientHeight() { return (this.layoutSize ?? this.rect).height; }
     setPointerCapture() {}
     click() { this.clicks = (this.clicks ?? 0) + 1; }
     addEventListener(type, listener) { (this.listeners[type] ||= []).push(listener); }
@@ -202,9 +231,24 @@ function harness(fetchImpl = defaultFetch()) {
 }
 
 const plain = value => JSON.parse(JSON.stringify(value));
+const findAll = (element, match, found = []) => {
+  if (match(element)) found.push(element);
+  for (const child of element.children) findAll(child, match, found);
+  return found;
+};
+const byKey = (element, key) => findAll(element, child => child.dataset.key === key)[0];
+const savedLayout = requests => JSON.parse(requests.filter(request => request.method === "PUT").at(-1).body);
+/** Sets a control's value (or checked state) and fires its change event, as a person would. */
+const setValue = (element, value) => {
+  if (typeof value === "boolean") element.checked = value;
+  else element.value = value;
+  element.emit("change");
+};
 const hotbar = h => h.get("#inventory-grid").children.slice(0, 9);
 const main = h => h.get("#inventory-grid").children.slice(9, 36);
 const equipment = h => h.get("#inventory-grid").children.slice(36, 41);
+const extras = h => h.get("#inventory-grid").children.slice(41, 43);
+const spares = h => h.get("#inventory-grid").children.slice(43, 49);
 const slotParts = slot => {
   const [placeholder, icon, fallback, count, durability] = slot.children;
   return { placeholder, icon, fallback, count, durability, bar: durability.children[0] };
@@ -330,7 +374,7 @@ test("availability transitions require full snapshots and baseline", () => {
   assert.equal(back.inventory.slots.length, 36);
   assert.throws(() => h.apply(snapshot(), update({ available: false, inventory: null })));
   const missing = unavailable({ revision: 7 });
-  assert.throws(() => h.apply(snapshot(), { schemaVersion: 4, type: "update", state: missing }));
+  assert.throws(() => h.apply(snapshot(), { schemaVersion: 5, type: "update", state: missing }));
   assert.throws(() => h.apply(snapshot(), update({ inventory: null })));
   assert.throws(() => h.apply(undefined, initial(snapshot({ inventory: null }))));
 });
@@ -1164,9 +1208,9 @@ test("imported or stored layouts are validated and completed", () => {
   const normalize = value => h.run(`normalizeLayout(${JSON.stringify(value)})`);
   const partial = normalize({ version: 1, tiles: [{ id: "history", enabled: true, x: 0, y: 5, w: 12, h: 2 }] });
   assert.deepEqual(plain(partial.tiles[0]), { id: "history", enabled: true, x: 0, y: 0, w: 12, h: 3 });
-  assert.equal(partial.tiles.length, 12);
+  assert.equal(partial.tiles.length, 14);
   assert.equal(partial.tiles.filter(tile => tile.enabled).length, 1, "missing tiles are added disabled");
-  for (const bad of [null, [], { version: 2, tiles: [] }, { version: 1 },
+  for (const bad of [null, [], { version: 3, tiles: [] }, { version: 1 }, { version: 2 },
     { version: 1, tiles: [{ id: "chat", enabled: true, x: 0, y: 0, w: 1, h: 1 }] },
     { version: 1, tiles: [{ id: "player", enabled: 1, x: 0, y: 0, w: 4, h: 4 }] },
     { version: 1, tiles: [{ id: "player", enabled: true, x: 0.5, y: 0, w: 4, h: 4 }] },
@@ -1193,10 +1237,15 @@ test("the saved layout is loaded after the session and applied to tile grid plac
   assert.deepEqual(toggles.map(chip => [chip.textContent, chip.attributes["aria-pressed"]]),
     [["Player", "false"], ["Inventory", "true"], ["Statistics", "false"], ["Activity log", "false"],
       ["JourneyMap", "false"], ["Build progress", "false"], ["Movement", "false"], ["Experience", "false"],
-      ["Recent pickups", "false"], ["Advancements", "false"], ["Villager trades", "false"], ["Performance", "false"]]);
+      ["Recent pickups", "false"], ["Advancements", "false"], ["Villager trades", "false"], ["Performance", "false"],
+      ["AFK", "false"], ["3D render", "false"]]);
+  await h.runTimers(400);
+  const saves = requests.filter(request => request.url === "/api/layout" && request.method === "PUT");
+  assert.equal(saves.length, 1, "a version 1 layout is saved back converted");
+  assert.equal(JSON.parse(saves[0].body).version, 2);
   h.sockets[0].emit("close");
   await h.reconnect();
-  assert.equal(requests.filter(request => request.url === "/api/layout").length, 1, "layout loads once");
+  assert.equal(requests.filter(request => request.url === "/api/layout" && !request.method).length, 1, "layout loads once");
 });
 
 test("customize mode toggles tiles, saves to the config file, resets, exports and imports", async () => {
@@ -1239,7 +1288,7 @@ test("customize mode toggles tiles, saves to the config file, resets, exports an
   file.files = [{ text: async () => "{\"version\":9}" }];
   file.emit("change");
   await h.flush();
-  assert.equal(h.get("#layout-status").textContent, "That file is not a MinePanel layout");
+  assert.equal(h.get("#layout-status").textContent, "That file is not a MinePanel layout (Invalid layout)");
   assert.equal(h.get("#layout-status").className, "save-status error");
   assert.equal(h.get("#tile-statistics").style.getPropertyValue("--grid-column"), "3 / span 10",
     "a rejected import leaves the layout unchanged");
@@ -1320,26 +1369,28 @@ test("tiles move and resize by dragging only in customize mode, snapping to grid
   assert.equal(requests.filter(request => request.method === "PUT").length, 1);
 });
 
-test("inventory arrangement shows only whole rows that fit, preferring rows, then slot size, then armor", () => {
+test("inventory arrangement shows only whole rows that fit, preferring rows, then slot size, then equipment", () => {
   const h = harness();
   const arrange = (width, height, armor) => plain(h.run(`inventoryArrangement(${width}, ${height}, ${armor})`));
   assert.deepEqual(arrange(500, 300, true), { wide: false, slot: 52,
     rows: ["hotbar", "main3", "main2", "main1", "equipment"], height: 272 });
   assert.deepEqual(arrange(700, 250, true), { wide: true, slot: 52, rows: ["hotbar", "main3", "main2", "main1"],
     height: 217 }, "with room for an armor column, armor sits beside the storage rows");
-  assert.equal(arrange(700, 250, false).wide, false);
+  assert.deepEqual(arrange(700, 250, false), { wide: true, slot: 52, rows: ["hotbar", "main3", "main2", "main1"],
+    height: 217 }, "with armor hidden, the offhand, ender chest and head column still sits beside the rows");
   assert.deepEqual(arrange(500, 110, true), { wide: false, slot: 52, rows: ["hotbar", "main3"], height: 107 },
     "too short for everything: keep full-size slots and add only rows that fully fit");
   assert.deepEqual(arrange(500, 60, true).rows, ["hotbar"]);
-  assert.deepEqual(arrange(200, 300, false), { wide: false, slot: 19, rows: ["hotbar", "main3", "main2", "main1"],
-    height: 85 }, "narrow tiles shrink slots instead of dropping rows");
+  assert.deepEqual(arrange(200, 300, false), { wide: false, slot: 19,
+    rows: ["hotbar", "main3", "main2", "main1", "equipment"], height: 107 },
+    "narrow tiles shrink slots instead of dropping rows");
   for (const width of [60, 150, 333, 480, 900]) {
     for (const height of [20, 45, 100, 170, 260, 500]) {
       for (const armor of [true, false]) {
         const result = arrange(width, height, armor);
-        const columns = result.wide ? 11 : 9;
+        const columns = !result.wide ? 9 : armor ? 11 : 10;
         assert.ok(result.height <= height, `fits height ${width}x${height}`);
-        assert.ok(columns * result.slot + (columns - 1) * 3 + (result.wide ? 6 : 0) <= width, `fits width ${width}x${height}`);
+        assert.ok(columns * result.slot + (columns - 1) * 3 + (columns - 9) * 9 <= width, `fits width ${width}x${height}`);
         assert.equal(result.rows[0], "hotbar", "the hotbar is always the first row kept");
       }
     }
@@ -1359,18 +1410,29 @@ test("inventory grid places rows and armor, toggles armor and drops rows as the 
   assert.equal(grid.style.gridTemplateColumns, "repeat(9, var(--slot))");
   assert.deepEqual([hotbar(h)[0].style.gridRow, main(h)[0].style.gridRow, main(h)[26].style.gridRow,
     equipment(h)[4].style.gridRow, equipment(h)[4].style.gridColumn], ["5", "2", "4", "1", "5"]);
+  assert.deepEqual(extras(h).map(slot => [slot.style.gridRow, slot.style.gridColumn]), [["1", "9"], ["1", "6"]],
+    "the ender chest follows the offhand and the head ends the equipment row");
+  assert.deepEqual(spares(h).map(slot => slot.hidden ? null : slot.style.gridColumn), ["7", "8", null, null, null, null],
+    "spare slots fill the equipment row between the ender chest and the head");
   assert.equal(h.get("#held-value").hidden, false);
 
   resize({ left: 0, top: 0, width: 728, height: 280 });
   assert.equal(grid.style.gridTemplateColumns, "var(--slot) 6px repeat(9, var(--slot)) 6px var(--slot)");
   assert.deepEqual(equipment(h).map(slot => [slot.style.gridRow, slot.style.gridColumn]),
     [["1", "1"], ["2", "1"], ["3", "1"], ["4", "1"], ["4", "13"]], "armor column beside rows, offhand by the hotbar");
+  assert.deepEqual(extras(h).map(slot => [slot.style.gridRow, slot.style.gridColumn]), [["1", "13"], ["3", "13"]],
+    "the head tops the offhand column with the ender chest above the offhand");
+  assert.deepEqual(spares(h).map(slot => slot.hidden ? null : [slot.style.gridRow, slot.style.gridColumn]),
+    [["2", "13"], null, null, null, null, null], "a spare slot fills the side column between head and ender chest");
   assert.equal(hotbar(h)[0].style.gridColumn, "3");
 
   h.get("#armor-toggle").emit("click");
   assert.equal(h.get("#armor-toggle").attributes["aria-pressed"], "false");
-  assert.equal(equipment(h).every(slot => slot.hidden), true);
-  assert.equal(grid.style.gridTemplateColumns, "repeat(9, var(--slot))");
+  assert.deepEqual(equipment(h).map(slot => slot.hidden), [true, true, true, true, false], "only armor hides");
+  assert.equal(grid.style.gridTemplateColumns, "repeat(9, var(--slot)) 6px var(--slot)");
+  assert.deepEqual([equipment(h)[4], ...extras(h)].map(slot => [slot.style.gridRow, slot.style.gridColumn]),
+    [["4", "11"], ["1", "11"], ["3", "11"]], "the offhand, head and ender chest stay beside the rows");
+  assert.equal(hotbar(h)[0].style.gridColumn, "1");
   await h.runTimers(400);
   assert.equal(JSON.parse(requests.filter(request => request.method === "PUT").at(-1).body).settings.inventory.showArmor,
     false, "the armor choice is saved with the layout");
@@ -1386,6 +1448,106 @@ test("inventory grid places rows and armor, toggles armor and drops rows as the 
   resize({ left: 0, top: 0, width: 524, height: 128 });
   assert.deepEqual(main(h).map(slot => slot.hidden), [...Array(18).fill(true), ...Array(9).fill(false)],
     "the main row next to the hotbar appears first");
+});
+
+test("inventory sizes slots from the layout box, not a rect a tile animation has scaled", async () => {
+  const h = harness(defaultFetch(null, []));
+  await h.flush();
+  h.sockets[0].message(initial());
+  const body = h.get("#inventory-body");
+  const grid = h.get("#inventory-grid");
+  // Mid-animation the tile is still scaled to its old, wider size; the layout box is already the new one.
+  body.rect = { left: 0, top: 0, width: 728, height: 280 };
+  body.layoutSize = { width: 436, height: 280 };
+  h.events.resize();
+  assert.equal(grid.style.gridTemplateColumns, "repeat(9, var(--slot))");
+  assert.equal(grid.style.getPropertyValue("--slot"), "42px", "nine columns across the 408px content box");
+});
+
+test("the player head opens a lookup menu with groups, links and a page picker, contacting nothing until clicked", async () => {
+  const requests = [];
+  const h = harness(defaultFetch(null, requests));
+  await h.flush();
+  h.sockets[0].message(initial());
+  await h.flush();
+  const head = extras(h)[0];
+  const menu = h.get("#player-menu");
+  const dialog = h.get("#player-link-dialog");
+  assert.equal(menu.hidden, true);
+  assert.equal(head.className, "slot clickable", "the head is framed like any other slot");
+  assert.equal(extras(h)[1].className, "slot clickable", "and so is the ender chest");
+
+  head.emit("click");
+  assert.equal(menu.hidden, false);
+  const [header, ...groups] = menu.children;
+  assert.match(header.textContent, /^Steve8667ba71-b85a-4004-af54-457a9734eed7Copy nameCopy UUID$/);
+  assert.deepEqual(groups.map(row => row.dataset.group),
+    ["profile", "renders", "hypixel", "pvp", "data", "search"], "no server suggestions in singleplayer");
+  assert.ok(groups.every(row => row.children[1].textContent.length > 0), "every group says what it holds");
+
+  groups[0].emit("click");
+  const nameMc = menu.children.find(row => row.dataset.site === "NameMC");
+  assert.equal(menu.children[0].className, "player-menu-item player-menu-back");
+  assert.deepEqual([nameMc.tagName, nameMc.href, nameMc.target, nameMc.rel],
+    ["a", "https://namemc.com/profile/Steve", "_blank", "noopener noreferrer"]);
+  assert.match(nameMc.textContent, /^NameMCnamemc\.comName history/, "each site shows its domain and what it does");
+  menu.children[0].emit("click");
+  assert.equal(menu.children.length, 7, "Back returns to the groups");
+
+  menu.children.find(row => row.dataset.group === "renders").emit("click");
+  const face = menu.children.find(row => row.dataset.site === "2D face");
+  assert.deepEqual([face.tagName, face.href], ["a", "https://mc-heads.net/avatar/8667ba71b85a4004af54457a9734eed7"],
+    "each MC Heads render is its own row, using the undashed UUID");
+  assert.equal(menu.children.length, 12, "Back plus every MC Heads render");
+  menu.children[0].emit("click");
+
+  menu.children.find(row => row.dataset.group === "data").emit("click");
+  const mojang = menu.children.find(row => row.dataset.site === "Mojang API");
+  assert.equal(mojang.tagName, "button", "sites with several pages open the picker instead of a link");
+  mojang.emit("click");
+  assert.equal(dialog.hidden, false);
+  assert.equal(h.get("#player-link-title").textContent, "Mojang API");
+  const pages = h.get("#player-link-pages").children;
+  assert.deepEqual(pages.map(page => page.dataset.page), ["Name → UUID", "Profile and skin"]);
+  assert.deepEqual([pages[0].children[1].href, pages[0].children[1].rel],
+    ["https://api.mojang.com/users/profiles/minecraft/Steve", "noopener noreferrer"]);
+  assert.ok(pages.every(page => page.children[0].children[1].textContent.length > 0), "every page is described");
+
+  h.events.keyup({ key: "Escape" });
+  assert.deepEqual([dialog.hidden, menu.hidden], [true, false], "Escape closes the picker first");
+  h.events.keyup({ key: "Escape" });
+  assert.equal(menu.hidden, true, "then the menu");
+  head.emit("click");
+  head.emit("click");
+  assert.equal(menu.hidden, true, "clicking the head again closes it");
+  head.emit("click");
+  h.events.pointerdown({ target: h.get("#inventory-grid") });
+  assert.equal(menu.hidden, true, "clicking elsewhere closes it");
+  assert.ok(requests.every(request => request.url.startsWith("/")), "no lookup site was contacted");
+
+  h.run(`renderPlayerMenu({ name: "Alex", uuid: "0f2a4c1e-9b3d-3c5e-8f7a-1b2c3d4e5f60" }); undefined`);
+  assert.match(menu.children[0].textContent, /Offline-mode account/);
+  h.run(`playerMenuGroup = "renders"; renderPlayerMenu({ name: "Alex", uuid: "0f2a4c1e-9b3d-3c5e-8f7a-1b2c3d4e5f60" }); undefined`);
+  const offlineFace = menu.children.find(row => row.dataset.site === "2D face");
+  assert.deepEqual([offlineFace.tagName, offlineFace.attributes["aria-disabled"]], ["span", "true"],
+    "UUID-only sites are greyed out for offline accounts");
+  h.run(`playerMenuGroup = "profile"; renderPlayerMenu({ name: "Alex", uuid: "0f2a4c1e-9b3d-3c5e-8f7a-1b2c3d4e5f60" }); undefined`);
+  assert.equal(menu.children.find(row => row.dataset.site === "Minecraft-Statistic").href,
+    "https://minecraft-statistic.net/en/player/Alex.html", "name lookups still work");
+  h.run(`openPlayerPages(PLAYER_LINK_GROUPS.find(group => group.id === "data").sites[0], { name: "Alex", uuid: "0f2a4c1e-9b3d-3c5e-8f7a-1b2c3d4e5f60" })`);
+  assert.deepEqual(h.get("#player-link-pages").children.map(page => page.className), ["player-page", "player-page disabled"],
+    "in the picker, only the pages that need a UUID are greyed out");
+
+  assert.equal(h.run(`playerLinkUrl("https://x.test/{name}/{uuid}/{uuidDashed}", { name: "a b&c", uuid: "8667ba71-b85a-4004-af54-457a9734eed7" })`),
+    "https://x.test/a%20b%26c/8667ba71b85a4004af54457a9734eed7/8667ba71-b85a-4004-af54-457a9734eed7");
+  assert.deepEqual(plain(h.run(`suggestedPlayerLinks({ kind: "server", name: "MC.Hypixel.net:25565" }).map(site => site.name)`)),
+    ["Plancke", "25Karma", "Sk1er", "SkyCrypt"]);
+  assert.deepEqual(plain(h.run(`suggestedPlayerLinks({ kind: "server", name: "not2b2t.org" })`)), [],
+    "only the server's own domain and its subdomains match");
+  h.run(`currentPlayerState = { ...currentPlayerState, world: { ...currentPlayerState.world, kind: "server", name: "2b2t.org" } }`);
+  head.emit("click");
+  assert.deepEqual(menu.children.slice(1, 4).map(row => row.textContent.split("2b2tiers")[0]),
+    ["Suggested for this server", "2B2Tiers", "All sites"], "sites for the current server come first");
 });
 
 test("player tile shows saturation and hunger above health, food, and status effects with timers and beacon markers", async () => {
@@ -1520,72 +1682,815 @@ test("navigation, portal and experience maths match the game", () => {
     hundred: [100, 200, 300] });
 });
 
-test("rules combine AND groups of OR conditions, switch profiles, show rules-only tiles and hold briefly", () => {
-  const h = harness();
-  const result = h.run(`(() => {
-    const player = ${JSON.stringify(inNether({ motion: { ...details().motion, glider: item({ name: "Elytra" }) } }))};
-    const rule = { id: "r", name: "R", enabled: true,
-      groups: [[{ type: "dimension", values: ["nether"] }], [{ type: "health", max: 5 }, { type: "elytra" }]] };
-    const negated = { ...rule, groups: [[{ type: "biome", values: ["desert"], not: true }]] };
-    const base = defaultLayout();
-    const profile = addProfile(base, "Nether", "default");
-    const layout = { ...profile.layout,
-      tiles: base.tiles.map(t => t.id === "movement" ? { ...t, rulesOnly: true } : t),
-      rules: [{ ...rule, profile: profile.id, tiles: { movement: "show", inventory: "hide" },
-        settings: { inventory: { showArmor: false } } }] };
-    const engine = createRuleEngine();
-    const off = effectiveView(layout, []);
-    const on = effectiveView(layout, engine.active(layout, player, 1000));
-    const held = engine.active(layout, { ...player, dimension: "minecraft:overworld" }, 2500).length;
-    const released = engine.active(layout, { ...player, dimension: "minecraft:overworld" }, 3100).length;
-    return {
-      matches: ruleMatches(rule, player, 0),
-      lowHealthOnly: ruleMatches(rule, { ...player, motion: { ...player.motion, glider: null }, health: 4 }, 0),
-      neither: ruleMatches(rule, { ...player, motion: { ...player.motion, glider: null } }, 0),
-      overworld: ruleMatches(rule, { ...player, dimension: "minecraft:overworld" }, 0),
-      negated: ruleMatches(negated, player, 0), disabled: ruleMatches({ ...rule, enabled: false }, player, 0),
-      offline: ruleMatches(rule, { ...player, available: false }, 0),
-      offProfile: off.profileId, offMovement: off.visible.has("movement"),
-      onProfile: on.profileId === profile.id, onMovement: on.visible.has("movement"),
-      onInventory: on.visible.has("inventory"), armor: on.settings.inventory.showArmor, held, released,
-      advancement: conditionMatches({ type: "advancement", seconds: 10 },
-        { ...player, history: { events: [{ category: "advancement", timestamp: 1000 }] } }, 9000),
-      advancementOver: conditionMatches({ type: "advancement", seconds: 10 },
-        { ...player, history: { events: [{ category: "advancement", timestamp: 1000 }] } }, 12000),
-      time: ["dawn", "day", "dusk", "night"].map(v => conditionMatches({ type: "time", values: [v] },
-        { ...player, world: { ...player.world, time: 12500 } }, 0))
-    };
-  })()`);
-  assert.deepEqual(plain(result), { matches: true, lowHealthOnly: true, neither: false, overworld: false,
-    negated: true, disabled: false, offline: false, offProfile: "default", offMovement: false, onProfile: true,
-    onMovement: true, onInventory: false, armor: false, held: 1, released: 0, advancement: true,
-    advancementOver: false, time: [false, false, true, false] });
+// ------------------------------------------------------------------------------------------------ Rules v2
+
+/** The example layout from docs/RULES_V2.md. */
+const docLayout = () => ({ version: 2, tiles: [], profiles: [{ id: "nether", name: "Nether", tiles: [] }],
+  pinned: [{ source: "inventory", slot: 9, x: 10, y: 20 }],
+  animation: { durationMs: 300, easing: "ease-out" },
+  folders: [{ id: "combat", name: "Combat", enabled: true, collapsed: false }],
+  places: [{ id: "home", name: "Home", world: "Test World", dimension: "minecraft:overworld", x: 120, y: 64, z: -340 }],
+  toggles: [{ id: "afk", name: "AFK", on: false }],
+  rules: [{ id: "xp-gain", name: "XP while gaining", enabled: true, folder: null,
+    when: [{ type: "xpGained", compare: ">=", value: 1, window: 10 },
+      { join: "and", not: true, type: "inCombat", within: 5 },
+      { join: "or", type: "toggle", toggle: "afk" }],
+    then: [{ do: "show", panel: "xp" }, { do: "set", panel: "xp", setting: "window", value: 10 }],
+    else: [], timing: { delayMs: 0, lingerMs: 2000 }, animation: null }] });
+
+/** The pure rules and layout functions, from a fresh dashboard context. */
+function rulesApi() {
+  return harness().run(`({ normalizeLayout, migrateLayoutV1, normalizeLayoutV1, createRuleEngine, effectiveView,
+    evaluateCondition, ruleBlocks, defaultLayout, removeProfile, ruleSegments, moveRuleInList, moveSegment, fileRule,
+    newRuleIndex, RULE_TEMPLATES, ruleFromTemplate, shareRules, importShare, importRuleSet, exportRuleSet })`);
+}
+
+const ruleLayout = (R, rules, extra = {}) => R.normalizeLayout({ version: 2, tiles: [], ...extra, rules });
+const rule = (id, when, then = [], more = {}) => ({ id, name: id, enabled: true, when, then, ...more });
+const ruleEnv = (player = snapshot(), more = {}) => ({ player, width: 1280, clock: { minutes: 600, weekday: 1 }, ...more });
+const toggleRow = (id, join) => join ? { join, type: "toggle", toggle: id } : { type: "toggle", toggle: id };
+const toggleList = on => ["a", "b", "c", "d"].map(id => ({ id, name: id.toUpperCase(), on: on.includes(id) }));
+
+test("rules v2: the documented layout round-trips and missing parts get defaults", () => {
+  const R = rulesApi();
+  const layout = plain(R.normalizeLayout(docLayout()));
+  for (const key of ["rules", "folders", "places", "toggles", "animation", "pinned"]) {
+    assert.deepEqual(layout[key], docLayout()[key], key);
+  }
+  assert.equal(layout.profiles[0].tiles.length, 14);
+  assert.equal(layout.profiles[0].settings.xp.window, 60, "profile settings are completed with defaults");
+  assert.deepEqual(plain(R.normalizeLayout(layout)), layout, "normalizing is idempotent");
+  assert.deepEqual(plain(R.normalizeLayout(plain(R.defaultLayout()))), plain(R.defaultLayout()));
+  const minimal = plain(R.normalizeLayout({ version: 2, tiles: [], rules: [{ id: "r", name: "R", enabled: false,
+    when: [{ type: "inGame", join: "or" }, { type: "still" }, { type: "elytra", join: "or", not: false }] }] }));
+  assert.deepEqual(minimal.rules[0], { id: "r", name: "R", enabled: false, folder: null,
+    when: [{ type: "inGame" }, { type: "still", join: "and" }, { type: "elytra", join: "or" }],
+    then: [], else: [], timing: { delayMs: 0, lingerMs: 2000 }, animation: null });
+  assert.deepEqual(minimal.animation, { durationMs: 300, easing: "ease-out" });
+  assert.deepEqual([minimal.folders, minimal.places, minimal.toggles], [[], [], []]);
+  const removed = plain(R.removeProfile(R.normalizeLayout({ ...docLayout(), rules: [{ ...docLayout().rules[0],
+    then: [{ do: "profile", profile: "nether" }, { do: "show", panel: "xp" }] }] }), "nether"));
+  assert.deepEqual(removed.rules[0].then, [{ do: "show", panel: "xp" }], "removing a profile drops actions switching to it");
 });
 
-test("layouts keep profiles, rules and pinned windows, and reject malformed ones", () => {
-  const h = harness();
-  const normalize = value => h.run(`normalizeLayout(${JSON.stringify(value)})`);
-  const rule = { id: "rule-1", name: "Nether", enabled: true, groups: [[{ type: "dimension", values: ["nether"] }]],
-    profile: "nether", tiles: { movement: "show" }, settings: { xp: { window: 300 } } };
-  const value = { version: 1, tiles: [{ id: "movement", enabled: true, x: 0, y: 0, w: 4, h: 4, rulesOnly: true }],
-    profiles: [{ id: "nether", name: "Nether", tiles: [] }], rules: [rule],
-    pinned: [{ source: "inventory", slot: 9, x: 10, y: 20 }] };
-  const layout = normalize(value);
-  assert.deepEqual(plain(layout.rules), [rule]);
-  assert.equal(layout.tiles.find(tile => tile.id === "movement").rulesOnly, true);
-  assert.equal(layout.profiles[0].tiles.length, 12);
-  assert.equal(layout.profiles[0].settings.xp.window, 60, "profile settings are completed with defaults");
-  assert.deepEqual(plain(layout.pinned), value.pinned);
-  for (const bad of [{ ...value, rules: [{ ...rule, profile: "missing" }] },
-    { ...value, rules: [{ ...rule, groups: [[]] }] }, { ...value, rules: [{ ...rule, groups: [[{ type: "weather" }]] }] },
-    { ...value, rules: [rule, rule] }, { ...value, profiles: [{ id: "default", name: "X", tiles: [] }] },
-    { ...value, rules: [{ ...rule, settings: { xp: { window: 45 } } }] },
-    { ...value, pinned: [{ source: "chest", slot: 0, x: 0, y: 0 }] }]) {
-    assert.throws(() => normalize(bad), JSON.stringify(bad).slice(0, 120));
+test("rules v2: invalid layouts are rejected, naming the rule", () => {
+  const R = rulesApi();
+  const withRule = change => {
+    const value = docLayout();
+    value.rules[0] = { ...value.rules[0], ...change };
+    return value;
+  };
+  const withCondition = (index, change) => withRule({ when: docLayout().rules[0].when.map((condition, position) =>
+    position === index ? { ...condition, ...change } : condition) });
+  const then = action => withRule({ then: [action] });
+  const named = [
+    withCondition(0, { type: "weather2" }), withCondition(0, { compare: "~" }), withCondition(0, { compare: "between" }),
+    withCondition(0, { compare: "between", value: 5, value2: 4 }), withCondition(0, { value: "1" }),
+    withCondition(0, { window: 0 }), withCondition(0, { window: 3601 }), withCondition(0, { for: 5, within: 5 }),
+    withCondition(0, { for: 0 }), withCondition(1, { within: undefined }), withCondition(1, { for: 3 }),
+    withCondition(1, { join: "xor" }), withCondition(1, { not: "yes" }), withCondition(2, { toggle: "missing" }),
+    withRule({ when: Array(33).fill({ type: "inGame" }) }), withRule({ when: "inGame" }),
+    withRule({ then: Array(17).fill({ do: "show", panel: "xp" }) }), withRule({ else: [{ do: "hide", panel: "xp", fill: "xp" }] }),
+    then({ do: "set", panel: "xp", setting: "window", value: 45 }), then({ do: "set", panel: "xp", setting: "colour", value: 1 }),
+    then({ do: "place", panel: "history", x: 0, y: 0, w: 2, h: 3 }), then({ do: "place", panel: "xp", x: 11, y: 0, w: 2, h: 2 }),
+    then({ do: "swap", panel: "xp", with: "xp" }), then({ do: "show", panel: "chat" }),
+    then({ do: "profile", profile: "missing" }), then({ do: "notify", text: "x".repeat(129) }),
+    then({ do: "notify", text: "" }), then({ do: "explode" }),
+    withRule({ timing: { lingerMs: 499 } }), withRule({ timing: { delayMs: -1 } }), withRule({ folder: "missing" }),
+    withRule({ animation: { durationMs: 300, easing: "bounce" } }), withRule({ enabled: "yes" }),
+    withRule({ when: [{ type: "realTime", from: "24:00", to: "06:00" }] }),
+    withRule({ when: [{ type: "realTime", from: "22:00", to: "06:00", days: [1, 1] }] }),
+    withRule({ when: [{ type: "nearPlace", place: "home", radius: 5, x2: 1, y2: 1, z2: 1 }] }),
+    withRule({ when: [{ type: "nearPlace", place: "away", radius: 5 }] }),
+    withRule({ when: [{ type: "nearPlace", x: 0, y: 0, z: 0, radius: 0 }] }),
+    withRule({ when: [{ type: "time", values: ["noon"] }] }),
+    withRule({ when: [{ type: "time", ticks: { from: 0, to: 24000 } }] }),
+    withRule({ when: [{ type: "statRose", stat: "minecraft:stone", compare: ">=", value: 1, window: 10 }] }),
+    withRule({ when: [{ type: "holding", item: "Stone" }] }),
+    withRule({ when: [{ type: "portalLinking" }] }),
+    withRule({ when: [{ type: "ruleActive", rule: "xp-gain" }] })];
+  for (const bad of named) {
+    assert.throws(() => R.normalizeLayout(bad), /Rule "XP while gaining": /, JSON.stringify(bad.rules[0]).slice(0, 160));
   }
-  const removed = h.run(`removeProfile(normalizeLayout(${JSON.stringify(value)}), "nether")`);
-  assert.equal(removed.profiles.length, 0);
-  assert.equal(removed.rules[0].profile, undefined, "rules no longer switch to a removed profile");
+  const many = (count, make) => Array.from({ length: count }, (_, index) => make(index));
+  const loop = ["a", "b", "c"].map((id, index, all) =>
+    rule(id, [{ type: "ruleActive", rule: all[(index + 1) % 3] }]));
+  for (const [bad, message] of [
+    [{ ...docLayout(), rules: [docLayout().rules[0], docLayout().rules[0]] }, /same id/],
+    [{ ...docLayout(), rules: loop }, /form a loop/],
+    [{ ...docLayout(), rules: many(129, index => rule(`r${index}`, [])) }, /Too many rules/],
+    [{ ...docLayout(), folders: many(33, index => ({ id: `f${index}`, name: "F", enabled: true, collapsed: false })) }, /folders/],
+    [{ ...docLayout(), places: many(65, index => ({ ...docLayout().places[0], id: `p${index}` })) }, /places/],
+    [{ ...docLayout(), toggles: many(17, index => ({ id: `t${index}`, name: "T", on: false })) }, /toggles/],
+    [{ ...docLayout(), toggles: [docLayout().toggles[0], docLayout().toggles[0]] }, /Duplicate toggles/],
+    [{ ...docLayout(), toggles: [{ id: "afk", name: "x".repeat(33), on: false }] }, /Invalid toggle/],
+    [{ ...docLayout(), places: [{ ...docLayout().places[0], dimension: "Overworld" }] }, /Invalid place/],
+    [{ ...docLayout(), places: [{ ...docLayout().places[0], x: 3e7 + 1 }] }, /Invalid place/],
+    [{ ...docLayout(), folders: [{ id: "combat", name: "Combat", enabled: true }] }, /Invalid folder/],
+    [{ ...docLayout(), animation: { durationMs: 5001, easing: "ease" } }, /animation/],
+    [{ ...docLayout(), version: 3 }, /Invalid layout/]]) {
+    assert.throws(() => R.normalizeLayout(bad), message);
+  }
+});
+
+test("rules v2: the shared validator cases are accepted and rejected as LayoutStore.java does", () => {
+  const R = rulesApi();
+  const cases = JSON.parse(fs.readFileSync(path.join(__dirname, "../fixtures/layouts-v2.json"), "utf8"));
+  assert.ok(cases.valid.length >= 10 && cases.invalid.length >= 90);
+  for (const { name, layout } of cases.valid) {
+    const normalized = plain(R.normalizeLayout(layout));
+    assert.deepEqual(plain(R.normalizeLayout(normalized)), normalized, name);
+  }
+  for (const { name, layout } of cases.invalid) assert.throws(() => R.normalizeLayout(layout), /./, name);
+});
+
+test("rules v2: AND binds tighter than OR, and an empty When never matches", () => {
+  const R = rulesApi();
+  const when = [toggleRow("a"), toggleRow("b", "and"), toggleRow("c", "or"), toggleRow("d", "and")];
+  assert.deepEqual(plain(R.ruleBlocks(when)), [[0, 1], [2, 3]]);
+  for (let bits = 0; bits < 16; bits++) {
+    const on = ["a", "b", "c", "d"].filter((_, index) => bits & (1 << index));
+    const layout = ruleLayout(R, [rule("r", when)], { toggles: toggleList(on) });
+    const state = R.createRuleEngine().evaluate(layout, ruleEnv(), 0).states.get("r");
+    const [a, b, c, d] = ["a", "b", "c", "d"].map(id => on.includes(id));
+    assert.equal(state.matched, a && b || c && d, `toggles on: ${on}`);
+    assert.equal(state.active, a && b || c && d);
+    assert.deepEqual(plain(state.blocks), [a && b, c && d]);
+  }
+  const empty = ruleLayout(R, [rule("e", [], [{ do: "show", panel: "xp" }], { else: [{ do: "hide", panel: "xp" }] })]);
+  const evaluation = R.createRuleEngine().evaluate(empty, ruleEnv(), 0);
+  assert.equal(evaluation.states.get("e").active, false);
+  assert.equal(R.effectiveView(empty, evaluation).visible.has("xp"), false, "Else applies to a rule that never matches");
+});
+
+test("rules v2: for/within modifiers, not, delay and linger follow the clock", () => {
+  const R = rulesApi();
+  const run = (when, timing, steps, player = () => snapshot()) => {
+    const engine = R.createRuleEngine();
+    return steps.map(([at, on]) => {
+      const layout = ruleLayout(R, [rule("r", when, [], timing ? { timing } : {})], { toggles: toggleList(on ? ["a"] : []) });
+      const state = engine.evaluate(layout, ruleEnv(player()), at).states.get("r");
+      return [state.conditions[0].ok, state.active];
+    });
+  };
+  const ok = results => results.map(([value]) => value);
+  const active = results => results.map(([, value]) => value);
+  assert.deepEqual(ok(run([{ ...toggleRow("a"), for: 30 }], null,
+    [[0, true], [29999, true], [30000, true], [31000, false], [32000, true], [61999, true], [62000, true]])),
+  [false, false, true, false, false, false, true], "for: continuously true for N s; resets when false");
+  assert.deepEqual(ok(run([{ ...toggleRow("a"), within: 5 }], null, [[0, true], [1000, false], [5000, false], [5001, false]])),
+    [true, true, true, false], "within: true if true at any point in the last N s");
+  assert.deepEqual(ok(run([{ ...toggleRow("a"), for: 10, not: true }], null, [[0, true], [10000, true]])),
+    [true, false], "not applies after the modifier");
+  assert.deepEqual(active(run([toggleRow("a")], { delayMs: 3000, lingerMs: 2000 },
+    [[0, true], [2999, true], [3000, true], [4000, true], [4500, false], [5999, false], [6000, false]])),
+  [false, false, true, true, true, true, false], "delay before activating, linger after the last match");
+  const offline = run([{ type: "dimension", values: ["nether"], not: true }], null, [[0, true]], () => unavailable());
+  assert.deepEqual(offline, [[false, false]], "unknown never counts as true, even with not");
+  assert.deepEqual(run([{ type: "inGame", not: true }, toggleRow("a", "and")], null, [[0, true]], () => unavailable()),
+    [[true, true]], "meta conditions still evaluate outside a world");
+});
+
+test("rules v2: list order wins per property; Else, folders, previews and notifications", () => {
+  const R = rulesApi();
+  const tiles = plain(R.defaultLayout().tiles);
+  const layout = (on, folderEnabled = true) => ruleLayout(R, [
+    rule("first", [toggleRow("a")], [{ do: "hide", panel: "movement" },
+      { do: "set", panel: "inventory", setting: "showArmor", value: false }]),
+    rule("second", [toggleRow("b")], [{ do: "show", panel: "movement" }, { do: "profile", profile: "nether" },
+      { do: "notify", text: "Second on", cooldown: 10 }], { else: [{ do: "notify", text: "Second off" },
+      { do: "hide", panel: "statistics" }] }),
+    rule("needs-third", [{ type: "ruleActive", rule: "third" }], [{ do: "focus", panel: "map" }]),
+    rule("third", [toggleRow("c")], [{ do: "place", panel: "xp", x: 0, y: 0, w: 4, h: 4 },
+      { do: "swap", panel: "player", with: "history" }], { folder: "f" })
+  ], { profiles: [{ id: "nether", name: "Nether", tiles, settings: { inventory: { showArmor: true }, xp: { window: 300 } } }],
+    folders: [{ id: "f", name: "F", enabled: folderEnabled, collapsed: false }], toggles: toggleList(on), tiles });
+  const engine = R.createRuleEngine();
+  const step = (on, at, options = {}) => {
+    const value = layout(on, options.folder);
+    const evaluation = engine.evaluate(value, ruleEnv(), at, options.force);
+    return { evaluation, view: R.effectiveView(value, evaluation) };
+  };
+  const all = step(["a", "b", "c"], 0);
+  assert.equal(all.view.profileId, "nether");
+  assert.equal(all.view.visible.has("movement"), false, "the higher rule's Hide beats the lower rule's Show");
+  assert.deepEqual(plain(all.view.claims.filter(claim => claim.property === "visible:movement")
+    .map(claim => [claim.rule, claim.won])), [["first", true], ["second", false]]);
+  assert.equal(all.view.settings.inventory.showArmor, false, "setting claims apply on top of the switched profile");
+  assert.equal(all.view.settings.xp.window, 300);
+  assert.equal(all.view.focus, "map", "Rule active reads a rule listed below it");
+  assert.deepEqual(plain(all.view.rects), { xp: { x: 0, y: 0, w: 4, h: 4 }, player: { swap: "history" },
+    history: { swap: "player" } });
+  assert.deepEqual(plain(all.evaluation.notifications.map(entry => entry.text)), ["Second on"]);
+  assert.deepEqual(plain(all.evaluation.events.map(event => [event.rule, event.active])),
+    [["first", true], ["second", true], ["third", true], ["needs-third", true]]);
+  assert.deepEqual(plain(all.view.rules), ["first", "second", "needs-third", "third"]);
+
+  const later = step(["a"], 5000);
+  assert.equal(later.evaluation.states.get("second").active, false);
+  assert.deepEqual(plain(later.evaluation.notifications.map(entry => entry.text)), ["Second off"],
+    "Else notifies when the rule turns off");
+  assert.equal(later.view.visible.has("statistics"), false, "an inactive rule applies Else");
+  assert.equal(later.view.profileId, "default");
+  assert.deepEqual(plain(step(["a", "b"], 6000).evaluation.notifications), [], "a notification waits for its cooldown");
+  assert.deepEqual(plain(step(["a", "b"], 20000).evaluation.notifications), [], "and fires only when the rule turns on");
+  const folderOff = step(["c"], 30000, { folder: false });
+  assert.equal(folderOff.evaluation.states.get("third").enabled, false, "a disabled folder disables its rules");
+  assert.equal(folderOff.evaluation.states.get("needs-third").active, false);
+  const forced = step([], 40000, { force: { first: "on", second: "off" } });
+  assert.equal(forced.evaluation.states.get("first").active, true);
+  assert.equal(forced.evaluation.states.get("first").forced, "on");
+  assert.equal(forced.view.visible.has("movement"), false);
+  assert.ok(engine.log().length >= 8 && engine.log().every(event => typeof event.at === "number"));
+});
+
+test("rules v2: every condition type reads the snapshot", () => {
+  const R = rulesApi();
+  const now = 1_000_000;
+  const refs = { places: [{ id: "home", name: "Home", world: "Test World", dimension: "minecraft:overworld",
+    x: 120, y: 64, z: -340 }], toggles: [{ id: "afk", name: "AFK", on: true }] };
+  const evaluate = (condition, player = snapshot(), extra = {}) => {
+    const normalized = R.normalizeLayout({ version: 2, tiles: [], ...refs,
+      rules: [rule("r", [condition]), rule("on", [])] }).rules[0].when[0];
+    const ctx = { player, now, width: 1280, clock: { minutes: 23 * 60, weekday: 6 },
+      toggles: new Map([["afk", true]]), places: new Map([["home", refs.places[0]]]), ruleActive: id => id === "on",
+      amount: () => null, returnTrip: () => false, ...extra };
+    return R.evaluateCondition(normalized, ctx).holds;
+  };
+  const damaged = item({ itemId: "minecraft:iron_pickaxe", count: 1, maxCount: 1, damage: 95, maxDamage: 100,
+    remainingDurability: 5 });
+  const withHeld = held => snapshot({ inventory: { ...inventory(), slots: [held, ...inventory().slots.slice(1)],
+    equipment: { ...inventory().equipment, mainhand: held } } });
+  const effect = (endsAt, amplifier = 1) => snapshot({ effects: [{ id: "minecraft:speed", name: "Speed", amplifier,
+    endsAt, beacon: false }] });
+  const event = (category, at) => history({ events: [{ id: 9, timestamp: at, category, label: category, details: "" }] });
+  const enderStone = { seenAt: 1, slots: [item({ count: 10 }), ...Array.from({ length: 26 }, empty)] };
+  const pickups = [{ id: 1, at: now - 5000, source: "Ground", item: item({ itemId: "minecraft:diamond", name: "Diamond" }), count: 3 }];
+  const cases = [
+    [{ type: "world", values: ["test world"] }, undefined, true],
+    [{ type: "world", values: ["singleplayer"] }, undefined, true],
+    [{ type: "world", values: ["Other"] }, undefined, false],
+    [{ type: "dimension", values: ["overworld"] }, undefined, true],
+    [{ type: "dimension", values: ["nether"] }, undefined, false],
+    [{ type: "biome", values: ["Plains"] }, undefined, true],
+    [{ type: "time", values: ["day"] }, undefined, true],
+    [{ type: "time", ticks: { from: 23000, to: 1000 } }, undefined, false],
+    [{ type: "time", ticks: { from: 5000, to: 7000 } }, undefined, true],
+    [{ type: "weather", values: ["rain", "thunder"] }, undefined, false],
+    [{ type: "day", compare: ">=", value: 3 }, undefined, true],
+    [{ type: "day", compare: "between", value: 4, value2: 10 }, undefined, false],
+    [{ type: "gameMode", values: ["survival"] }, undefined, true],
+    [{ type: "nearPlace", place: "home", radius: 3 }, snapshot({ position: { x: 121, y: 64, z: -341 } }), true],
+    [{ type: "nearPlace", place: "home", radius: 3 }, snapshot({ position: { x: 121, y: 64, z: -341 },
+      world: { ...details().world, name: "Other" } }), false],
+    [{ type: "nearPlace", place: "home", radius: 5, flat: true }, snapshot({ position: { x: 120, y: 200, z: -340 } }), true],
+    [{ type: "nearPlace", place: "home", radius: 5 }, snapshot({ position: { x: 120, y: 200, z: -340 } }), false],
+    [{ type: "nearPlace", x: 0, y: 60, z: -5, x2: 2, y2: 70, z2: 0 }, undefined, true],
+    [{ type: "nearPlace", x: 0, y: 60, z: -5, x2: 2, y2: 70, z2: 0, dimension: "minecraft:the_nether" }, undefined, false],
+    [{ type: "yLevel", compare: "<", value: 0 }, undefined, false],
+    [{ type: "health", compare: "between", value: 15, value2: 18 }, undefined, true],
+    [{ type: "food", compare: "=", value: 18 }, undefined, true],
+    [{ type: "saturation", compare: ">", value: 6 }, undefined, false],
+    [{ type: "absorption", compare: "!=", value: 0 }, undefined, true],
+    [{ type: "xpLevel", compare: ">=", value: 5 }, undefined, true],
+    [{ type: "effect", values: ["speed"], level: { compare: ">=", value: 2 }, remaining: { compare: ">", value: 30 } },
+      effect(now + 60000), true],
+    [{ type: "effect", values: ["speed"], remaining: { compare: ">", value: 90 } }, effect(now + 60000), false],
+    [{ type: "effect", values: ["speed"], remaining: { compare: ">", value: 90 } }, effect(null), true],
+    [{ type: "effect", values: ["speed"], level: { compare: ">=", value: 2 } }, effect(null, 0), false],
+    [{ type: "movement", values: ["ground"] }, undefined, true],
+    [{ type: "speed", axis: "horizontal", compare: ">", value: 4 }, undefined, true],
+    [{ type: "speed", axis: "vertical", compare: "<", value: 0 }, undefined, false],
+    [{ type: "still" }, undefined, false],
+    [{ type: "still" }, snapshot({ motion: { ...details().motion, speed: 0.05 } }), true],
+    [{ type: "afk", compare: ">=", value: 1 }, undefined, null],
+    [{ type: "afk", compare: ">=", value: 1 }, snapshot({ motion: { ...details().motion, idleSince: now - 90000 } }), true],
+    [{ type: "afk", compare: ">=", value: 2 }, snapshot({ motion: { ...details().motion, idleSince: now - 90000 } }), false],
+    [{ type: "holding", item: "minecraft:stone", hand: "main" }, undefined, true],
+    [{ type: "holding", item: "minecraft:stone", hand: "off" }, undefined, false],
+    [{ type: "hasItem", item: "minecraft:stone", compare: "=", value: 32 }, undefined, true],
+    [{ type: "hasItem", item: "minecraft:stone", compare: ">=", value: 42 }, snapshot({ enderChest: enderStone }), false],
+    [{ type: "hasItem", item: "minecraft:stone", compare: ">=", value: 42, enderChest: true }, snapshot({ enderChest: enderStone }), true],
+    [{ type: "freeSlots", compare: "=", value: 35 }, undefined, true],
+    [{ type: "durability", target: "held", compare: "<", value: 10 }, withHeld(damaged), true],
+    [{ type: "durability", target: "tool", compare: "<", value: 10 }, withHeld(damaged), true],
+    [{ type: "durability", target: "armor", compare: "<", value: 10 }, withHeld(damaged), null],
+    [{ type: "elytra" }, undefined, false],
+    [{ type: "elytra" }, snapshot({ motion: { ...details().motion, glider: item({ name: "Elytra" }) } }), true],
+    [{ type: "xpGained", compare: ">=", value: 12, window: 60 }, undefined, true],
+    [{ type: "xpGained", compare: ">=", value: 1, window: 10 }, undefined, false],
+    [{ type: "pickedUp", item: "minecraft:diamond", compare: ">=", value: 3, window: 10 }, snapshot({ pickups }), true],
+    [{ type: "pickedUp", compare: ">=", value: 1, window: 4 }, snapshot({ pickups }), false],
+    [{ type: "pickedUp", item: "minecraft:stone", compare: ">=", value: 1, window: 10 }, snapshot({ pickups }), false],
+    [{ type: "statRose", stat: "minecraft:custom/minecraft:jump", compare: ">=", value: 1, window: 10 }, undefined, null],
+    [{ type: "advancement", within: 10 }, snapshot({ history: event("advancement", now - 5000) }), true],
+    [{ type: "advancement", within: 10 }, snapshot({ history: event("advancement", now - 15000) }), false],
+    [{ type: "advancement", advancement: "minecraft:story/mine_stone", within: 10 },
+      snapshot({ advancements: { tabs: [], entries: [{ id: "minecraft:story/mine_stone", doneAt: now - 2000 }] } }), true],
+    [{ type: "advancement", advancement: "minecraft:story/mine_stone", within: 10 }, undefined, null],
+    [{ type: "died", within: 10 }, snapshot({ history: event("death", now - 9000) }), true],
+    [{ type: "died", within: 10 }, undefined, false],
+    [{ type: "changedDimension", within: 60 }, snapshot({ history: event("dimension", now - 1000) }), true],
+    [{ type: "joinedWorld", within: 60 }, undefined, false],
+    [{ type: "joinedWorld", within: 60 }, snapshot({ sessionSeconds: 10 }), true],
+    [{ type: "inCombat", within: 5 }, snapshot({ history: event("damage", now - 1000) }), true],
+    [{ type: "inCombat", within: 5 }, snapshot({ history: event("heal", now - 1000) }), false],
+    [{ type: "villagersNearby", radius: 32, compare: ">=", value: 1 }, snapshot({ villagers: [villager()] }), true],
+    [{ type: "villagersNearby", radius: 30, compare: ">=", value: 1 }, snapshot({ villagers: [villager()] }), false],
+    [{ type: "villagersNearby", radius: 32, compare: ">=", value: 1 }, inNether({ villagers: [villager()] }), false],
+    [{ type: "toggle", toggle: "afk" }, undefined, true],
+    [{ type: "ruleActive", rule: "on" }, undefined, true],
+    [{ type: "width", compare: "<", value: 700 }, undefined, false],
+    [{ type: "realTime", from: "22:00", to: "06:00" }, undefined, true],
+    [{ type: "realTime", from: "22:00", to: "06:00", days: [1, 2, 3, 4, 5] }, undefined, false],
+    [{ type: "realTime", from: "08:00", to: "17:00" }, undefined, false],
+    [{ type: "sessionTime", compare: ">=", value: 60 }, undefined, true],
+    [{ type: "inGame" }, undefined, true],
+    [{ type: "inGame" }, unavailable(), false],
+    [{ type: "toggle", toggle: "afk" }, unavailable(), true],
+    [{ type: "world", values: ["test world"] }, unavailable(), null]];
+  for (const [condition, player, expected] of cases) {
+    assert.equal(evaluate(condition, player), expected, JSON.stringify(condition));
+  }
+  assert.equal(evaluate({ type: "width", compare: "<", value: 700 }, undefined, { width: 500 }), true);
+  assert.equal(evaluate({ type: "realTime", from: "22:00", to: "06:00" }, undefined,
+    { clock: { minutes: 6 * 60, weekday: 0 } }), false, "the end time is excluded");
+});
+
+test("rules v2: sensor conditions read the mod's sensors, and costly ones are unknown until sent", () => {
+  const R = rulesApi();
+  const evaluate = (condition, sensorOverrides = {}) => {
+    const normalized = R.normalizeLayout({ version: 2, tiles: [], rules: [rule("r", [condition])] }).rules[0].when[0];
+    const ctx = { player: snapshot({ sensors: sensors(sensorOverrides) }), now: 1000, width: 1280, clock: null,
+      toggles: new Map(), places: new Map(), ruleActive: () => false, amount: () => null, returnTrip: () => false };
+    return R.evaluateCondition(normalized, ctx).holds;
+  };
+  const nearby = { radius: 32, entities: [
+    { type: "minecraft:zombie", hostile: true, distance: 3 }, { type: "minecraft:creeper", hostile: true, distance: 9.5 },
+    { type: "minecraft:player", hostile: false, distance: 12 }, { type: "minecraft:skeleton", hostile: true, distance: 30 }] };
+  const cases = [
+    [{ type: "moonPhase", values: ["full"] }, {}, true],
+    [{ type: "moonPhase", values: ["new"] }, { moonPhase: 4 }, true],
+    [{ type: "moonPhase", values: ["new"] }, { moonPhase: 5 }, false],
+    [{ type: "light", source: "block", compare: "<", value: 8 }, {}, null],
+    [{ type: "light", source: "block", compare: "<", value: 8 }, { light: { block: 7, sky: 15, combined: 15 } }, true],
+    [{ type: "light", source: "combined", compare: "<", value: 8 }, { light: { block: 7, sky: 15, combined: 15 } }, false],
+    [{ type: "spawnDistance", compare: "<", value: 200 }, {}, true],
+    [{ type: "spawnDistance", compare: "<", value: 200 }, { spawnDistance: null }, null],
+    [{ type: "lookingAt", target: "block", distance: 5 }, {}, null],
+    [{ type: "lookingAt", target: "block", distance: 5 }, { look: { kind: "none", id: null, distance: null } }, false],
+    [{ type: "lookingAt", target: "block", id: "minecraft:stone", distance: 5 },
+      { look: { kind: "block", id: "minecraft:stone", distance: 4.5 } }, true],
+    [{ type: "lookingAt", target: "block", distance: 4 }, { look: { kind: "block", id: "minecraft:stone", distance: 4.5 } }, false],
+    [{ type: "lookingAt", target: "entity", distance: 5 }, { look: { kind: "block", id: "minecraft:stone", distance: 2 } }, false],
+    [{ type: "air", compare: "<", value: 5 }, { air: 80 }, true],
+    [{ type: "air", compare: "<", value: 5 }, {}, false],
+    [{ type: "armor", compare: ">=", value: 20 }, { armor: 20 }, true],
+    [{ type: "onFire" }, { onFire: true }, true],
+    [{ type: "inRain" }, {}, false],
+    [{ type: "sleeping" }, { sleeping: true }, true],
+    [{ type: "raid" }, { raid: true }, true],
+    [{ type: "bossBar" }, { raid: true }, false],
+    [{ type: "riding" }, { riding: "minecraft:boat" }, true],
+    [{ type: "riding", entity: "minecraft:horse" }, { riding: "minecraft:boat" }, false],
+    [{ type: "riding" }, {}, false],
+    [{ type: "usingItem", values: ["eating", "drinking"] }, { using: "drinking" }, true],
+    [{ type: "usingItem", values: ["eating"] }, {}, false],
+    [{ type: "hostilesNearby", radius: 16, compare: ">=", value: 2 }, {}, null],
+    [{ type: "hostilesNearby", radius: 16, compare: ">=", value: 2 }, { nearby }, true],
+    [{ type: "hostilesNearby", radius: 8, compare: ">=", value: 2 }, { nearby }, false],
+    [{ type: "hostilesNearby", radius: 32, entity: "minecraft:creeper", compare: "=", value: 1 }, { nearby }, true],
+    [{ type: "mobNearby", entity: "minecraft:skeleton", radius: 32 }, { nearby }, true],
+    [{ type: "mobNearby", entity: "minecraft:skeleton", radius: 16 }, { nearby }, false],
+    [{ type: "playersNearby", radius: 16, compare: ">=", value: 1 }, { nearby }, true],
+    [{ type: "playersNearby", radius: 10, compare: ">=", value: 1 }, { nearby }, false],
+    [{ type: "screen", values: ["trading"] }, {}, null],
+    [{ type: "screen", values: ["trading"] }, { screen: "trading" }, true],
+    [{ type: "screen", values: ["trading"] }, { screen: "none" }, false]
+  ];
+  for (const [condition, overrides, expected] of cases) {
+    assert.equal(evaluate(condition, overrides), expected, `${JSON.stringify(condition)} with ${JSON.stringify(overrides)}`);
+  }
+  // Outside a world every sensor condition is unknown.
+  const ctx = { player: unavailable(), now: 0, toggles: new Map(), places: new Map() };
+  const onFire = R.normalizeLayout({ version: 2, tiles: [], rules: [rule("r", [{ type: "onFire", not: true }])] }).rules[0];
+  assert.equal(R.evaluateCondition(onFire.when[0], ctx).holds, null);
+});
+
+test("sensors and registries are validated like the Java model", () => {
+  const h = harness();
+  const good = h.apply(undefined, initial(snapshot({ sensors: sensors({ light: { block: 3, sky: 15, combined: 12 },
+    look: { kind: "entity", id: "minecraft:cow", distance: 3.4 },
+    nearby: { radius: 16, entities: [{ type: "minecraft:zombie", hostile: true, distance: 4.2 }] }, screen: "chest" }) })));
+  assert.equal(good.sensors.nearby.entities[0].type, "minecraft:zombie");
+  assert.equal(good.registries.entities[0].name, "Creeper");
+  for (const bad of [{ moonPhase: 8 }, { air: -21 }, { armor: -1 }, { onFire: "yes" }, { riding: "horse" },
+    { using: "sleeping" }, { screen: "chat" }, { light: { block: 16, sky: 0, combined: 0 } },
+    { look: { kind: "none", id: "minecraft:stone", distance: null } }, { look: { kind: "block", id: "minecraft:stone", distance: 66 } },
+    { nearby: { radius: 65, entities: [] } },
+    { nearby: { radius: 16, entities: Array(129).fill({ type: "minecraft:cow", hostile: false, distance: 1 }) } },
+    { nearby: { radius: 16, entities: [{ type: "minecraft:cow", hostile: 0, distance: 1 }] } }]) {
+    assert.throws(() => h.apply(undefined, initial(snapshot({ sensors: sensors(bad) }))), JSON.stringify(bad).slice(0, 80));
+  }
+  for (const bad of [{ items: null }, { blocks: [{ id: "Stone", name: "Stone", icon: null }] },
+    { stats: [{ id: "minecraft:custom/minecraft:jump", name: "", icon: null }] },
+    { entities: [{ id: "minecraft:cow", name: "Cow", icon: "Bad Icon" }] },
+    { items: Array(4097).fill({ id: "minecraft:stone", name: "Stone", icon: null }) }]) {
+    assert.throws(() => h.apply(undefined, initial(snapshot({ registries: registries(bad) }))), JSON.stringify(bad).slice(0, 80));
+  }
+  assert.throws(() => h.apply(undefined, initial(snapshot({ sensors: undefined }))));
+  assert.throws(() => h.apply(undefined, initial(unavailable({ sensors: sensors() }))));
+});
+
+test("rules v2: amounts count only what was gained inside their window", () => {
+  const R = rulesApi();
+  const ids = ["xp", "damage", "stat", "mined", "zombies", "placed"];
+  const layout = ruleLayout(R, [
+    rule("xp", [{ type: "xpGained", compare: ">=", value: 5, window: 20 }]),
+    rule("damage", [{ type: "tookDamage", compare: ">=", value: 2, window: 10 }]),
+    rule("stat", [{ type: "statRose", stat: "minecraft:custom/minecraft:jump", compare: ">=", value: 2, window: 30 }]),
+    rule("mined", [{ type: "minedBlock", compare: ">=", value: 3, window: 10 }]),
+    rule("zombies", [{ type: "killedMob", entity: "minecraft:zombie", compare: ">=", value: 2, window: 10 }]),
+    rule("placed", [{ type: "placedBlock", block: "minecraft:stone", compare: ">=", value: 1, window: 10 }])]);
+  const engine = R.createRuleEngine();
+  const matched = (player, at) => {
+    const states = engine.evaluate(layout, ruleEnv(player), at).states;
+    return ids.filter(id => states.get(id).matched);
+  };
+  const t0 = 1_000_000;
+  const kill = (id, label, details) => ({ id, timestamp: t0 + 1000, category: "kill", label, details });
+  const player = (points, health, jumps, events, used = 0) => snapshot({ xp: { ...details().xp, points }, health,
+    absorption: 0, history: history({ events }), statistics: statistics([counter({ value: jumps }),
+      counter({ id: "minecraft:used/minecraft:stone", label: "Stone used", value: used, session: used })]) });
+  assert.deepEqual(matched(player(100, 20, 40, [], 5), t0), [], "the first values are only a baseline");
+  const events = [{ id: 5, timestamp: t0 + 1000, category: "mine", label: "Mined 2 × Stone", details: "Last at 1, 2, 3" },
+    kill(6, "Killed 2 × Zombie", "minecraft:zombie"),
+    kill(7, "Killed Skeleton", "minecraft:skeleton · counted from statistics (ranged or indirect kill)")];
+  assert.deepEqual(matched(player(106, 16, 42, events, 6), t0 + 1000), ["xp", "damage", "stat", "zombies", "placed"]);
+  const coalesced = [{ ...events[0], timestamp: t0 + 2000, label: "Mined 3 × Stone" }, ...events.slice(1)];
+  assert.deepEqual(matched(player(106, 16, 42, coalesced, 6), t0 + 2000), ["xp", "damage", "stat", "mined", "zombies", "placed"],
+    "a coalesced history event counts what it grew by");
+  assert.deepEqual(matched(player(106, 16, 42, coalesced, 6), t0 + 11500), ["xp", "stat"],
+    "older increases leave the window");
+  assert.deepEqual(matched(unavailable(), t0 + 12000), [], "amounts are unknown outside a world");
+});
+
+test("rules v2: portal linking lasts until the portal is lit, you go back through, or time runs out", () => {
+  const R = rulesApi();
+  const layout = ruleLayout(R, [rule("link", [{ type: "portalLinking", minutes: 10 }])]);
+  const engine = R.createRuleEngine();
+  const t0 = 1_000_000;
+  const matched = (player, at) => engine.evaluate(layout, ruleEnv(player), at).states.get("link").matched;
+  const portal = (value, lit = null) => ({ crossing: value, obsidian: [], lit });
+  assert.equal(matched(snapshot(), t0), false, "no crossing yet");
+  assert.equal(matched(inNether({ portal: portal(crossing({ at: t0 })) }), t0 + 1000), true);
+  assert.equal(matched(inNether({ portal: portal(crossing({ at: t0 }), { x: 100, y: 64, z: -201 }) }), t0 + 2000), false);
+  assert.equal(matched(inNether({ portal: portal(crossing({ at: t0 })) }), t0 + 600001), false, "ends after N minutes");
+  const back = crossing({ id: 4, at: t0 + 5000, fromDimension: "minecraft:the_nether", from: { x: 99, y: 70, z: -200 },
+    toDimension: "minecraft:overworld", to: { x: 804, y: 64, z: -1604 }, target: { x: 792, y: 64, z: -1600 } });
+  assert.equal(matched(snapshot({ portal: portal(back) }), t0 + 6000), false, "going back through the same portals");
+  const elsewhere = crossing({ id: 5, at: t0 + 7000, from: { x: 2000, y: 64, z: 2000 }, to: { x: 250, y: 70, z: 250 },
+    target: { x: 250, y: 64, z: 250 } });
+  assert.equal(matched(inNether({ portal: portal(elsewhere) }), t0 + 8000), true, "a trip through a new portal");
+});
+
+/** A small deterministic random generator for the migration property test. */
+function seeded(seed) {
+  return () => {
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    return seed / 2147483648;
+  };
+}
+
+test("rules v2: migrating v1 rules keeps their logic, actions and order", () => {
+  const R = rulesApi();
+  const random = seeded(42);
+  const pick = count => Math.floor(random() * count);
+  // Each v1 condition is a distinct atom ("world: atom-N"); compare both logics over random atom values.
+  for (let round = 0; round < 60; round++) {
+    let atoms = 0;
+    const groups = Array.from({ length: 1 + pick(5) }, () => Array.from({ length: 1 + pick(round % 3 === 0 ? 8 : 3) },
+      () => ({ type: "world", values: [`atom-${atoms++}`], ...(random() < 0.3 ? { not: true } : {}) })));
+    const v1 = { version: 1, tiles: [], rules: [{ id: "r", name: "R", enabled: true, groups }] };
+    const migrated = plain(R.normalizeLayout(v1));
+    const byId = new Map(migrated.rules.map(entry => [entry.id, entry]));
+    const truth = (values, condition) => condition.type === "ruleActive"
+      ? matches(values, byId.get(condition.rule)) : values[Number(condition.values[0].slice(5))] !== Boolean(condition.not);
+    const matches = (values, entry) => R.ruleBlocks(entry.when).some(block => block.every(index => truth(values, entry.when[index])));
+    for (let sample = 0; sample < 40; sample++) {
+      const values = Array.from({ length: atoms }, () => random() < 0.5);
+      const expected = groups.every(group => group.some(condition => values[Number(condition.values[0].slice(5))] !== Boolean(condition.not)));
+      assert.equal(matches(values, byId.get("r")), expected, JSON.stringify({ groups, values }));
+    }
+    const helpers = migrated.rules.filter(entry => entry.id !== "r");
+    const expanded = groups.reduce((count, group) => count * group.length, 1) * groups.length;
+    assert.equal(helpers.length, expanded > 32 ? groups.length : 0);
+    assert.ok(migrated.rules.every(entry => entry.when.length <= 32 && /^[a-z0-9-]{1,32}$/.test(entry.id)));
+    if (helpers.length) assert.equal(migrated.rules.at(-1).id, "r", "helpers are listed above the rule using them");
+  }
+});
+
+test("rules v2: v1 conditions, actions and limits convert as documented", () => {
+  const R = rulesApi();
+  const settings = { inventory: { showArmor: false }, statistics: { recentRows: 4, recentLifetime: 10 },
+    movement: { showVertical: false, showGlider: false }, xp: { window: 300, goals: [40] },
+    performance: { window: 30 }, pickups: { lifetime: 5, maxRows: 4, showSource: false } };
+  const v1 = { version: 1, tiles: [{ id: "movement", enabled: true, x: 0, y: 0, w: 4, h: 4, rulesOnly: true }],
+    profiles: [{ id: "nether", name: "Nether", tiles: [] }], pinned: [{ source: "inventory", slot: 9, x: 10, y: 20 }],
+    updates: { intervalMillis: 100 }, rules: [
+      { id: "a-very-long-rule-id-that-is-32ch", name: "Nether", enabled: true,
+        groups: [[{ type: "dimension", values: ["nether"] }, { type: "health", min: 2, max: 5, not: true }],
+          [{ type: "food", max: 6 }, { type: "saturation", min: 1 }, { type: "health" }, { type: "health", min: 9, max: 3 }],
+          [{ type: "advancement", seconds: 30 }, { type: "combat" }, { type: "elytra" },
+            { type: "time", values: ["night", "noon"] }]],
+        profile: "nether", tiles: Object.fromEntries(["player", "inventory", "statistics", "history", "map", "build",
+          "movement", "xp"].map((id, index) => [id, index % 2 ? "hide" : "show"])), settings },
+      { id: "plain", name: "Plain", enabled: false, groups: [[{ type: "gameMode", values: ["creative", "hardcore"] }]] }] };
+  const layout = plain(R.normalizeLayout(v1));
+  assert.equal(layout.version, 2);
+  assert.equal(layout.tiles.find(tile => tile.id === "movement").rulesOnly, true, "rules-only panels stay rules-only");
+  assert.deepEqual([layout.pinned, layout.updates], [v1.pinned, v1.updates]);
+  // 2 × 4 × 4 blocks × 3 rows = 96 rows: each group becomes a helper rule.
+  assert.deepEqual(layout.rules.map(entry => entry.id), ["a-very-long-rule-id-that-i-p1", "a-very-long-rule-id-that-i-p2",
+    "a-very-long-rule-id-that-i-p3", "a-very-long-rule-id-that-is-32ch", "a-very-long-rule-id-that-is-2", "plain"]);
+  const [part1, part2, part3, main, rest, plainRule] = layout.rules;
+  assert.deepEqual(part1.when, [{ type: "dimension", values: ["nether"] },
+    { type: "health", join: "or", not: true, compare: "between", value: 2, value2: 5 }]);
+  assert.deepEqual(part2.when.map(({ join, ...condition }) => condition), [{ type: "food", compare: "<=", value: 6 },
+    { type: "saturation", compare: ">=", value: 1 }, { type: "health", compare: ">=", value: 0 },
+    { type: "health", compare: "<", value: 0 }]);
+  assert.deepEqual(part3.when.map(({ join, ...condition }) => condition), [{ type: "advancement", within: 30 },
+    { type: "inCombat", within: 10 }, { type: "elytra" }, { type: "time", values: ["night"] }]);
+  assert.deepEqual([part1.timing, part1.then, part1.enabled, part1.name], [{ delayMs: 0, lingerMs: 500 }, [], true, "Nether (part 1)"]);
+  assert.deepEqual(main.when, [{ type: "ruleActive", rule: part1.id }, { type: "ruleActive", rule: part2.id, join: "and" },
+    { type: "ruleActive", rule: part3.id, join: "and" }]);
+  assert.deepEqual(main.timing, { delayMs: 0, lingerMs: 2000 }, "the old 2 s hold becomes the linger");
+  const actions = [...main.then, ...rest.then];
+  assert.equal(main.then.length, 16, "at most 16 actions per rule");
+  assert.deepEqual([rest.name, rest.when, rest.enabled], ["Nether (2)", main.when, true], "the rest share the When list");
+  assert.deepEqual(actions.slice(0, 3), [{ do: "profile", profile: "nether" }, { do: "show", panel: "player" },
+    { do: "hide", panel: "inventory" }]);
+  assert.equal(actions.length, 1 + 8 + 11);
+  assert.deepEqual(actions.find(action => action.setting === "goals"), { do: "set", panel: "xp", setting: "goals", value: [40] });
+  assert.deepEqual([plainRule.when, plainRule.enabled], [[{ type: "gameMode", values: ["creative"] }], false],
+    "values that could never match are dropped");
+  const v1Small = { version: 1, tiles: [], rules: [{ id: "s", name: "S", enabled: true,
+    groups: [[{ type: "elytra" }, { type: "movement", values: ["swimming"] }], [{ type: "biome", values: ["desert"] }]] }] };
+  assert.deepEqual(plain(R.normalizeLayout(v1Small)).rules[0].when, [{ type: "elytra" },
+    { type: "biome", values: ["desert"], join: "and" }, { type: "movement", values: ["swimming"], join: "or" },
+    { type: "biome", values: ["desert"], join: "and" }], "(A or B) and C becomes A and C or B and C");
+  const tooMany = { version: 1, tiles: [], rules: Array.from({ length: 40 }, (_, index) => ({ id: `r${index}`, name: "R",
+    enabled: true, groups: [0, 1, 2].map(() => [{ type: "elytra" }, { type: "elytra" }, { type: "elytra" }, { type: "elytra" }]) })) };
+  assert.throws(() => R.normalizeLayout(tooMany), /more than the limit of 128/);
+});
+
+test("rules v2: migrated helper rules behave like the v1 rule in the engine", () => {
+  const R = rulesApi();
+  const v1 = { version: 1, tiles: plain(R.defaultLayout().tiles), rules: [{ id: "big", name: "Big", enabled: true, tiles: { xp: "hide" }, groups: [
+    [{ type: "health", max: 5 }, { type: "food", max: 5 }, { type: "saturation", max: 1 }],
+    [{ type: "dimension", values: ["nether"] }, { type: "biome", values: ["desert"] }, { type: "elytra" }],
+    [{ type: "time", values: ["night"] }, { type: "gameMode", values: ["creative"] }, { type: "movement", values: ["swimming"] }]] }] };
+  const layout = R.normalizeLayout(v1);
+  assert.equal(layout.rules.length, 4);
+  const engine = R.createRuleEngine();
+  const xpShown = (player, at) => R.effectiveView(layout, engine.evaluate(layout, ruleEnv(player), at)).visible.has("xp");
+  assert.equal(xpShown(inNether({ health: 4 }), 0), true, "two of three groups match");
+  const all = inNether({ health: 4, world: { ...details().world, time: 15000 } });
+  assert.equal(xpShown(all, 1000), false, "all three groups match");
+  assert.equal(xpShown(inNether({ health: 4 }), 3000), true, "and it turns off after the linger");
+});
+
+test("rules v2: folders keep their rules together, and moves never split them", () => {
+  const R = rulesApi();
+  const list = folders => folders.split(" ").map((folder, index) => ({ id: `r${index}`, folder: folder === "-" ? null : folder }));
+  const shape = rules => rules.map(rule => `${rule.id}:${rule.folder ?? "-"}`).join(" ");
+  const rules = list("- a a - b");
+  assert.deepEqual(plain(R.ruleSegments(rules, [{ id: "a" }, { id: "b" }, { id: "c" }]).map(segment =>
+    [segment.folder, segment.rules.map(rule => rule.id)])),
+  [[null, ["r0"]], ["a", ["r1", "r2"]], [null, ["r3"]], ["b", ["r4"]], ["c", []]], "an empty folder comes last");
+  assert.equal(shape(R.moveRuleInList(rules, "r3", -1)), "r0:- r3:- r1:a r2:a r4:b", "a lone rule jumps a folder's run");
+  assert.equal(shape(R.moveRuleInList(rules, "r2", -1)), "r0:- r2:a r1:a r3:- r4:b", "inside a folder it swaps");
+  assert.equal(R.moveRuleInList(rules, "r1", -1), rules, "a folder's first rule doesn't leave it");
+  assert.equal(shape(R.moveSegment(rules, 1, 1)), "r0:- r3:- r1:a r2:a r4:b", "a folder moves as a whole");
+  assert.equal(R.moveSegment(rules, 0, -1), rules);
+  const filed = list("- a a - b");
+  assert.equal(shape(R.fileRule(filed, filed[0], "a")), "r1:a r2:a r0:a r3:- r4:b", "joins the end of the folder");
+  const out = list("- a a - b");
+  assert.equal(shape(R.fileRule(out, out[1], null)), "r0:- r2:a r1:- r3:- r4:b", "leaves just after the folder");
+  const fresh = list("- a a - b");
+  assert.equal(shape(R.fileRule(fresh, fresh[3], "c")), "r0:- r1:a r2:a r3:c r4:b", "a new folder starts in place");
+  assert.equal(R.newRuleIndex(rules, "a"), 3);
+  assert.equal(R.newRuleIndex(rules, "c"), 5);
+  assert.equal(R.newRuleIndex(rules, null), 5);
+});
+
+test("rules v2: every template adds a valid rule", () => {
+  const R = rulesApi();
+  for (const profiles of [[], [{ id: "phone", name: "Phone", tiles: [] }]]) {
+    let layout = R.normalizeLayout({ version: 2, tiles: [], profiles });
+    for (const template of R.RULE_TEMPLATES) {
+      const rule = R.ruleFromTemplate(template, layout);
+      layout = R.normalizeLayout({ ...layout, rules: [...layout.rules, rule] });
+    }
+    assert.equal(layout.rules.length, R.RULE_TEMPLATES.length);
+    assert.equal(new Set(layout.rules.map(rule => rule.id)).size, layout.rules.length);
+    assert.equal(layout.rules.find(rule => rule.name === "Phone layout").then[0].profile, profiles[0]?.id ?? "default");
+    const again = R.ruleFromTemplate(R.RULE_TEMPLATES[0], layout);
+    assert.notEqual(again.id, layout.rules[0].id, "adding a template twice gives a new id");
+  }
+});
+
+test("rules v2: share strings carry rules with what they use, and importing only adds", () => {
+  const R = rulesApi();
+  const source = R.normalizeLayout({ version: 2, tiles: [], profiles: [{ id: "night", name: "Night", tiles: [] }],
+    folders: [{ id: "trips", name: "Trips ✈", enabled: false, collapsed: true }],
+    places: [{ id: "home", name: "Home", world: "W", dimension: "minecraft:overworld", x: 1, y: 2, z: 3 },
+      { id: "far", name: "Far", world: "W", dimension: "minecraft:overworld", x: 9, y: 9, z: 9 }],
+    toggles: [{ id: "afk", name: "AFK", on: true }],
+    rules: [
+      { id: "base", name: "Base", enabled: true, when: [{ type: "toggle", toggle: "afk" }] },
+      { id: "go", name: "Go", enabled: true, folder: "trips", when: [{ type: "ruleActive", rule: "base" },
+        { join: "and", type: "nearPlace", place: "home", radius: 5 }],
+      then: [{ do: "profile", profile: "night" }, { do: "notify", text: "Bon voyage ✈", cooldown: 5 }] },
+      { id: "other", name: "Other", enabled: true, when: [{ type: "nearPlace", place: "far", radius: 5 }] }] });
+  const text = R.shareRules(source, ["go"]);
+  assert.match(text, /^minepanel-rules:1:[A-Za-z0-9_-]+$/);
+  const target = R.normalizeLayout({ version: 2, tiles: [],
+    places: [{ id: "home", name: "Home", world: "W", dimension: "minecraft:overworld", x: 1, y: 2, z: 3 }],
+    toggles: [{ id: "afk", name: "Other AFK", on: false }],
+    rules: [{ id: "go", name: "Mine", enabled: true, when: [] }] });
+  const result = R.importShare(target, `  ${text}\n`);
+  const next = result.layout;
+  assert.deepEqual(plain(result.rules), ["base", "go-2"].map(id => id), "the rule it reads comes along, with fresh ids");
+  assert.equal(next.rules[0].name, "Mine", "nothing is overwritten");
+  const go = next.rules.find(rule => rule.id === "go-2");
+  assert.deepEqual(plain(go.when), [{ type: "ruleActive", rule: "base" },
+    { type: "nearPlace", join: "and", place: "home", radius: 5 }], "the identical place is reused");
+  assert.equal(next.places.length, 1);
+  assert.deepEqual(plain(next.toggles.map(toggle => toggle.name)), ["Other AFK", "AFK"], "a toggle named differently is added");
+  assert.deepEqual(plain(go.then), [{ do: "notify", text: "Bon voyage ✈", cooldown: 5 }], "no profile named Night here");
+  assert.equal(result.dropped, 1);
+  assert.equal(go.folder, null, "a single rule comes without its folder");
+  // A folder comes with its rules, and Switch profile finds the profile by name.
+  const withNight = { ...target, profiles: [{ id: "n2", name: "Night", tiles: [] }] };
+  const folder = R.importShare(R.normalizeLayout(withNight), R.shareRules(source, [], "trips"));
+  const folderRule = folder.layout.rules.find(rule => rule.name === "Go");
+  assert.equal(folderRule.folder, folder.folder);
+  assert.deepEqual(plain(folder.layout.folders), [{ id: "trips", name: "Trips ✈", enabled: false, collapsed: false }]);
+  assert.equal(folderRule.then[0].profile, "n2");
+  assert.equal(folder.layout.rules.find(rule => rule.name === "Base").folder, null);
+  // Broken or hostile input is rejected with a message, never half-imported.
+  for (const [bad, message] of [["hello", /Not a MinePanel share string/], ["minepanel-rules:1:@@", /Not a MinePanel/],
+    [`minepanel-rules:1:${Buffer.from(JSON.stringify({ version: 2, rules: [] })).toString("base64url")}`, /newer/],
+    [`minepanel-rules:1:${Buffer.from(JSON.stringify({ version: 1, rules: [{}], places: [], toggles: [], profiles: [],
+      folder: null })).toString("base64url")}`, /Rule/],
+    [`minepanel-rules:1:${Buffer.from(JSON.stringify({ version: 1, rules: [{ id: "x", name: "X", enabled: true,
+      when: [{ type: "toggle", toggle: "afk" }] }], places: [], toggles: [], profiles: [], folder: null }))
+      .toString("base64url")}`, null]]) {
+    if (message) assert.throws(() => R.importShare(target, bad), message);
+    else assert.equal(R.importShare(target, bad).layout.rules.at(-1).when.length, 0, "an unknown toggle is left out");
+  }
+  const full = R.normalizeLayout({ ...target, rules: Array.from({ length: 128 }, (_, index) =>
+    ({ id: `r${index}`, name: "R", enabled: true, when: [] })) });
+  assert.throws(() => R.importShare(full, text), /Too many rules/);
+});
+
+test("rules v2: rule set files fill in defaults, link their own parts, warn about typos and can replace everything", () => {
+  const R = rulesApi();
+  const target = R.normalizeLayout({ version: 2, tiles: [], profiles: [{ id: "p1", name: "Nether trip", tiles: [] }],
+    toggles: [{ id: "afk", name: "AFK", on: true }],
+    rules: [{ id: "old", name: "Old", enabled: true, when: [] }] });
+  const set = { format: "minepanel-rules", version: 1,
+    folders: [{ id: "combat", name: "Combat" }, { id: "travel", name: "Travel", enabled: false }],
+    places: [{ id: "base", name: "Base", world: "W", dimension: "minecraft:overworld", x: 0, y: 64, z: 0 }],
+    toggles: [{ id: "quiet", name: "Quiet" }],
+    rules: [
+      { id: "danger", name: "Danger", folder: "combat",
+        when: [{ type: "hostilesNearby", radius: 16, compare: ">=", value: 3 }, { join: "and", type: "toggle", toggle: "quiet", not: true }],
+        then: [{ do: "show", panel: "history" }] },
+      { name: "Fleeing", folder: "combat", when: [{ type: "ruleActive", rule: "danger" },
+        { join: "and", type: "speed", axis: "total", comapre: ">=", compare: ">", value: 6 }],
+      then: [{ do: "notify", text: "Run!", cooldown: 30, sound: true }] },
+      { id: "home", name: "Home", folder: "travel", when: [{ type: "nearPlace", place: "base", radius: 32, flat: true }],
+        then: [{ do: "profile", profile: "nether trip" }, { do: "profile", profile: "Phone" }],
+        else: [{ do: "profile", profile: "default" }], timing: { lingerMs: 1000, delay: 5 } }] };
+  const added = R.importRuleSet(target, set);
+  const next = added.layout;
+  assert.deepEqual(plain(next.rules.map(rule => rule.id)), ["old", "danger", "fleeing", "home"]);
+  assert.deepEqual(plain(next.folders), [{ id: "combat", name: "Combat", enabled: true, collapsed: false },
+    { id: "travel", name: "Travel", enabled: false, collapsed: false }]);
+  assert.deepEqual(plain(next.toggles), [{ id: "afk", name: "AFK", on: true }, { id: "quiet", name: "Quiet", on: false }]);
+  const [, danger, fleeing, home] = next.rules;
+  assert.equal(danger.enabled, true);
+  assert.equal(fleeing.when[0].rule, "danger");
+  assert.deepEqual(plain(home.then), [{ do: "profile", profile: "p1" }], "profiles are found by name, any case");
+  assert.deepEqual(plain(home.else), [{ do: "profile", profile: "default" }]);
+  assert.equal(added.dropped, 1);
+  assert.deepEqual(plain(added.folders), ["combat", "travel"]);
+  assert.deepEqual(plain(added.warnings), [
+    "Rule \"Home\": Then action 2 left out: no profile \"Phone\" on this dashboard",
+    "Rule \"Fleeing\": condition 2: ignored \"comapre\"",
+    "Rule \"Fleeing\": Then action 1: ignored \"sound\"",
+    "Rule \"Home\": timing: ignored \"delay\""]);
+  // Importing again only adds, with fresh ids that still link up.
+  const again = R.importRuleSet(next, set).layout;
+  assert.deepEqual(plain(again.rules.slice(4).map(rule => rule.id)), ["danger-2", "fleeing-2", "home-2"]);
+  assert.equal(again.rules[5].when[0].rule, "danger-2");
+  assert.equal(again.rules[4].folder, "combat-2");
+  // Replace starts from no rules, folders, places or toggles and keeps the file's ids; the rest of the layout stays.
+  const replaced = R.importRuleSet(again, set, { replace: true }).layout;
+  assert.deepEqual(plain(replaced.rules.map(rule => rule.id)), ["danger", "fleeing", "home"]);
+  assert.deepEqual(plain(replaced.toggles.map(toggle => toggle.id)), ["quiet"]);
+  assert.deepEqual(plain(replaced.profiles), plain(target.profiles));
+  // Export and re-import with replace gives the same rules back.
+  const exported = JSON.parse(JSON.stringify(R.exportRuleSet(replaced)));
+  assert.equal(exported.rules[2].then[0].profile, "Nether trip", "exports name the profile");
+  assert.deepEqual(plain(R.importRuleSet(replaced, exported, { replace: true }).layout), plain(replaced));
+  assert.deepEqual(plain(R.importShare(replaced, JSON.stringify(exported), { replace: true }).layout), plain(replaced),
+    "the same rule set pasted as text");
+  for (const [bad, message] of [[{ ...set, version: 2 }, /newer/], [{ ...set, format: "other" }, /format/],
+    [{ ...set, rules: [] }, /no rules/], [{ ...set, rules: [{ name: "X", folder: "nope", when: [] }] }, /Rule "X": folder "nope"/],
+    [{ ...set, rules: [{ name: "X", when: [{ type: "health", compare: "<" }] }] }, /Rule "X": condition 1: compare: invalid value/],
+    [{ ...set, folders: "combat" }, /"folders" must be a list/]]) {
+    assert.throws(() => R.importRuleSet(target, bad), message);
+  }
+  assert.throws(() => R.importShare(target, "{ not json"), /Not valid JSON/);
+});
+
+test("rules v2: rule sets arrange profiles: Default, existing ones by name and new ones, with warnings", () => {
+  const R = rulesApi();
+  const target = R.normalizeLayout({ version: 2, tiles: [{ id: "player", enabled: true, x: 0, y: 0, w: 4, h: 4 }],
+    settings: { xp: { window: 300 } },
+    profiles: [{ id: "keep", name: "Keep", tiles: [] }, { id: "mine", name: "Mining", tiles: [], settings: { xp: { window: 10 } } }],
+    rules: [] });
+  const set = { format: "minepanel-rules", version: 1,
+    profiles: [
+      { name: "default", panels: { map: { x: 0, y: 0, w: 8, h: 10 }, player: { x: 8, y: 0, w: 4, h: 4, mode: "rules" },
+        xp: { x: 8, y: 9, w: 4, h: 4 }, inventory: "off" } },
+      { name: "mining", settings: { pickups: { maxRows: 12, colour: "red" }, xp: { window: 3600 } } },
+      { id: "fly", name: "Flying", panels: { map: { x: 0, y: 0, w: 12, h: 12, size: "big" } }, layout: true }],
+    rules: [{ name: "Fly", when: [{ type: "movement", values: ["elytra"] }], then: [{ do: "profile", profile: "fly" }] }] };
+  const result = R.importRuleSet(target, set);
+  const next = result.layout;
+  const tile = (tiles, id) => plain(tiles.find(entry => entry.id === id));
+  assert.equal(result.profiles, 3);
+  assert.deepEqual(tile(next.tiles, "map"), { id: "map", enabled: true, x: 0, y: 0, w: 8, h: 10 });
+  assert.deepEqual(tile(next.tiles, "player"), { id: "player", enabled: true, x: 8, y: 0, w: 4, h: 4, rulesOnly: true });
+  assert.deepEqual(tile(next.tiles, "xp"), { id: "xp", enabled: true, x: 8, y: 4, w: 4, h: 4 }, "it floats up");
+  assert.equal(tile(next.tiles, "inventory").enabled, false);
+  assert.equal(tile(next.tiles, "statistics").enabled, false, "panels left out are off");
+  assert.equal(next.settings.xp.window, 300, "Default keeps its settings when the file gives none");
+  const mining = next.profiles.find(profile => profile.id === "mine");
+  assert.equal(mining.settings.pickups.maxRows, 12);
+  assert.equal(mining.settings.xp.window, 3600);
+  assert.equal(mining.tiles.length, 14, "Mining keeps its panels");
+  const flying = next.profiles.find(profile => profile.name === "Flying");
+  assert.equal(flying.id, "fly");
+  assert.deepEqual(plain(next.profiles.map(profile => profile.id)), ["keep", "mine", "fly"], "others stay unless replacing");
+  assert.equal(next.rules[0].then[0].profile, "fly", "Switch profile can name a profile the rule set defines");
+  assert.deepEqual(plain(result.warnings), [
+    "Profile \"default\", panel \"xp\": placed at x 8, y 4, 4 × 4 instead of x 8, y 9, 4 × 4 (panels move up to the highest free row, can't overlap, keep their minimum size and stay within 12 columns)",
+    "Profile \"mining\": ignored settings \"pickups.colour\"",
+    "Profile \"Flying\": ignored \"layout\"",
+    "Profile \"Flying\", panel \"map\": ignored \"size\""]);
+  // Replace removes profiles the rule set doesn't define, but only if it defines some.
+  const replaced = R.importRuleSet(next, set, { replace: true }).layout;
+  assert.deepEqual(plain(replaced.profiles.map(profile => profile.name)), ["mining", "Flying"]);
+  const rulesOnly = R.importRuleSet(next, { version: 1, rules: set.rules }, { replace: true }).layout;
+  assert.deepEqual(plain(rulesOnly.profiles), plain(next.profiles));
+  // Export and import with replace gives the whole arrangement back.
+  const again = R.importRuleSet(next, JSON.parse(JSON.stringify(R.exportRuleSet(next))), { replace: true });
+  assert.deepEqual(plain(again.layout), plain(next));
+  assert.deepEqual(plain(again.warnings), []);
+  for (const [profiles, message] of [[[{ name: "X", panels: { radar: "off" } }], /Profile "X": unknown panel "radar"/],
+    [[{ name: "X", panels: { map: { x: 0, y: 0 } } }], /Profile "X", panel "map": needs x, y, w and h/],
+    [[{ name: "X", panels: { map: { x: 0, y: 0, w: 4, h: 4, mode: "auto" } } }], /mode must be/],
+    [[{ name: "X", panels: {} }, { name: "x", panels: {} }], /defined twice/],
+    [[{ panels: {} }], /Profile 1: needs a name/],
+    [[{ name: "X", settings: { xp: { window: 7 } } }], /Profile "X": Invalid xp settings/],
+    [Array.from({ length: 17 }, (_, index) => ({ name: `P${index}`, panels: {} })), /At most 16 profiles/]]) {
+    assert.throws(() => R.importRuleSet(target, { version: 1, profiles, rules: set.rules }), message);
+  }
+});
+
+test("rules v2: the examples in docs/RULE_SETS.md import as described", () => {
+  const R = rulesApi();
+  const doc = fs.readFileSync(path.join(__dirname, "../../../docs/RULE_SETS.md"), "utf8");
+  const examples = [...doc.matchAll(/```json\r?\n([\s\S]*?)```/g)].map(match => JSON.parse(match[1].replace(/^ {3}/gm, "")));
+  assert.equal(examples.length, 2);
+  const empty = R.normalizeLayout({ version: 2, tiles: [] });
+  const quick = R.importRuleSet(empty, examples[0]);
+  assert.deepEqual(plain(quick.warnings), []);
+  assert.equal(quick.layout.rules[0].when[0].for, 3);
+  const full = R.importRuleSet(empty, examples[1]);
+  assert.deepEqual(plain(full.warnings), [], "the example has no warnings");
+  assert.equal(full.layout.rules.length, 4);
+  assert.equal(full.layout.rules[3].then[0].profile, "nether", "Switch profile finds the profile the file defines");
+  assert.deepEqual(plain(full.layout.tiles.filter(tile => tile.enabled).map(tile => tile.id).sort()),
+    ["history", "inventory", "pickups", "player", "xp"]);
+  assert.equal(full.layout.tiles.find(tile => tile.id === "history").rulesOnly, true);
+  assert.equal(full.layout.settings.xp.window, 300);
+  assert.equal(full.layout.profiles[0].tiles.find(tile => tile.id === "map").w, 12);
 });
 
 test("detail fields and item contents are validated", () => {
@@ -1660,6 +2565,27 @@ test("movement shows mode icon, 3D speed in blocks/s and km/h, facing and elytra
   assert.equal(slotParts(h.get("#movement-icon").children[0]).icon.src, "/icon/e0-e1.png");
 });
 
+test("the AFK panel times how long the player has been idle and lists non-zero statistics", async () => {
+  const stored = { version: 1, tiles: [{ id: "afk", enabled: true, x: 0, y: 0, w: 6, h: 6 }] };
+  const h = harness(defaultFetch(stored));
+  await h.flush();
+  h.sockets[0].message(initial(snapshot({ statistics: statistics([counter({ id: "minecraft:custom/minecraft:deaths",
+    label: "Deaths", value: 0, session: 0, display: "0", sessionDisplay: "0" }), counter()]) })));
+  assert.equal(h.get("#afk-timer").textContent, "—", "unknown without the mod's idle time");
+  assert.equal(h.get("#afk-status").textContent, "Unavailable");
+  h.sockets[0].message(update({ revision: 5, baseRevision: 4,
+    motion: { ...details().motion, idleSince: Date.now() - 3_725_000 } }));
+  assert.equal(h.get("#afk-timer").textContent, "1:02:05");
+  assert.equal(h.get("#afk-status").textContent, "AFK");
+  const lines = h.get("#afk-crawl").children;
+  assert.ok(lines.length > 0, "a statistic is shown");
+  assert.ok(lines.every(line => line.title === "Jumps: 40"), "only statistics above zero are shown");
+  h.sockets[0].message(update({ revision: 6, baseRevision: 5,
+    motion: { ...details().motion, idleSince: Date.now() - 2_000 } }));
+  assert.equal(h.get("#afk-timer").textContent, "0:02");
+  assert.equal(h.get("#afk-status").textContent, "Active");
+});
+
 test("experience shows XP/h for the chosen window and the time to the next level and next hundred", async () => {
   const requests = [];
   const h = harness(defaultFetch(null, requests));
@@ -1712,7 +2638,8 @@ test("performance shows the average and 1% low with a graph over the chosen wind
   choices[0].emit("click");
   assert.equal(h.get("#performance-window-menu").hidden, true);
   assert.equal(h.get("#performance-window").textContent, "10 s");
-  assert.ok(h.get("#performance-area").attributes.d.endsWith("L1000,100L0,100Z"), "10 s fills the graph");
+  assert.ok(h.get("#performance-area").attributes.d.endsWith("L1000,100L-111.1,100Z"),
+    "10 s fills the graph, with one clipped second past the left edge to slide in from");
   await h.runTimers(400);
   assert.equal(JSON.parse(requests.filter(request => request.method === "PUT").at(-1).body).settings.performance.window, 10);
 
@@ -1732,6 +2659,16 @@ test("the performance graph averages long windows and its curve never overshoots
   assert.equal(points.at(-1).x, 1);
   assert.ok(points.every(point => point.y > 50 && point.y < 70), "noise is averaged out");
   assert.equal(JSON.stringify(h.run("performancePoints([30, 60], 10)")), '[{"x":0.8888888888888888,"y":30},{"x":1,"y":60}]');
+  // Groups are cut at fixed sample numbers, so one more sample only changes the newest point.
+  const before = h.run(`performancePoints(Array.from({ length: 600 }, (_, i) => i * 7 % 13), 600, 1000)`);
+  const after = h.run(`performancePoints(Array.from({ length: 600 }, (_, i) => (i + 1) * 7 % 13), 600, 1001)`);
+  assert.deepEqual(after.slice(-2, -1).map(point => point.y), before.slice(-1).map(point => point.y),
+    "the finished group keeps its average as the graph scrolls");
+  assert.equal(after.at(-1).y, 600 * 7 % 13, "the newest group starts afresh with just the newest sample");
+  assert.equal(h.run("newSamples([1, 2, 3], [2, 3, 4])"), 1);
+  assert.equal(h.run("newSamples([1, 2], [1, 2, 3, 4])"), 2);
+  assert.equal(h.run("newSamples([1, 2, 3], [1, 2, 3])"), 0);
+  assert.equal(h.run("newSamples([1, 2, 3], [9])"), 1, "nothing in common reads as all new");
   // A spike between flat runs: a plain cubic would dip below the flat part; the monotone curve stays within it.
   const path = h.run(`smoothPath([{ x: 0, y: 90 }, { x: 10, y: 90 }, { x: 20, y: 10 }, { x: 30, y: 90 }, { x: 40, y: 90 }])`);
   const ys = path.slice(1).split(/[MC]/).join(",").split(",").filter((_, index) => index % 2).map(Number);
@@ -1899,42 +2836,275 @@ test("advancements show an All total above the tabs, and pinned ones go to the t
   assert.equal(h.get("#advancement-list").children[0].dataset.pinned, "true");
 });
 
-test("a rules-only tile keeps its space and appears when a rule made in the editor matches", async () => {
+test("a rules-only tile keeps its space and appears when a converted v1 rule matches", async () => {
+  const requests = [];
+  const tiles = plain(harness().run("defaultLayout().tiles"))
+    .map(tile => tile.id === "movement" ? { ...tile, rulesOnly: true } : tile);
+  const stored = { version: 1, tiles, rules: [{ id: "rule-1", name: "Nether", enabled: true,
+    groups: [[{ type: "dimension", values: ["minecraft:the_nether"] }]], tiles: { movement: "show" } }] };
+  const h = harness(defaultFetch(stored, requests));
+  await h.flush();
+  h.sockets[0].message(initial(snapshot()));
+  const movement = h.get("#tile-movement");
+  const position = movement.style.getPropertyValue("--grid-row");
+  assert.equal(movement.hidden, true, "rules-only tiles are hidden until a rule shows them");
+  h.get("#edit-toggle").emit("click");
+  assert.equal(movement.hidden, false, "still shown while customizing");
+  assert.equal(h.get("#head-movement").children.at(-1).textContent, "Rules only");
+  h.get("#edit-done").emit("click");
+  h.sockets[0].message(update({ dimension: "minecraft:the_nether" }));
+  assert.equal(movement.hidden, false, "the rule shows the tile in the Nether");
+  assert.equal(movement.style.getPropertyValue("--grid-row"), position, "and it keeps its place");
+  assert.equal(h.get("#tile-statistics").style.getPropertyValue("--grid-row"), "5 / span 9", "nothing else moves");
+  h.get("#rules-open").emit("click");
+  assert.equal(byKey(h.get("#rules-sidebar"), "nav.rule-1").textContent, "Nether");
+  assert.equal(findAll(h.get("#rules-sidebar"), element => element.className === "rule-dot active").length, 1);
+  assert.deepEqual(findAll(h.get("#rules-detail"), element => element.className === "value-chip")
+    .map(chip => chip.title), ["minecraft:the_nether"]);
+  assert.equal(byKey(h.get("#rules-detail"), "then.0.panel").value, "movement");
+  await h.runTimers(400);
+  const saved = JSON.parse(requests.filter(request => request.method === "PUT").at(-1).body);
+  assert.equal(saved.version, 2);
+  assert.deepEqual(saved.rules[0].then, [{ do: "show", panel: "movement" }]);
+  assert.equal(saved.tiles.find(tile => tile.id === "movement").rulesOnly, true);
+});
+
+test("a stored layout that can't be converted is kept and not overwritten until a layout is imported", async () => {
+  const requests = [];
+  const stored = { version: 1, tiles: [], rules: Array.from({ length: 40 }, (_, index) => ({ id: `r${index}`,
+    name: "R", enabled: true, groups: [0, 1, 2].map(() => Array(4).fill({ type: "elytra" })) })) };
+  const h = harness(defaultFetch(stored, requests));
+  await h.flush();
+  assert.match(h.get("#layout-status").textContent,
+    /^The saved layout couldn't be loaded \(Converting the rules needs 160 rules, more than the limit of 128\)/);
+  h.get("#layout-reset").emit("click");
+  h.get("#edit-toggle").emit("click");
+  h.get("#edit-done").emit("click");
+  await h.runTimers(400);
+  const saves = () => requests.filter(request => request.method === "PUT").length;
+  assert.equal(saves(), 0);
+  assert.equal(h.get("#layout-status").className, "save-status error", "the warning stays");
+  h.get("#layout-file").files = [{ text: async () => JSON.stringify({ version: 2, tiles: [] }) }];
+  h.get("#layout-file").emit("change");
+  await h.flush();
+  await h.runTimers(400);
+  assert.equal(saves(), 1, "importing a layout replaces it");
+});
+
+const buttonNamed = (element, text) => findAll(element, child => child.tagName === "button"
+  && child.textContent === text)[0];
+
+test("rules editor: a new rule's When and Then are edited and saved", async () => {
   const requests = [];
   const h = harness(defaultFetch(null, requests));
   await h.flush();
   h.sockets[0].message(initial(snapshot()));
-  h.get("#edit-toggle").emit("click");
-  const movement = h.get("#tile-movement");
-  const position = movement.style.getPropertyValue("--grid-row");
-  const modeToggle = h.get("#head-movement").children.at(-1);
-  modeToggle.emit("click");
-  assert.equal(modeToggle.textContent, "Rules only");
-  assert.equal(movement.hidden, false, "still shown while customizing");
   h.get("#rules-open").emit("click");
-  h.get("#rule-add").emit("click");
-  assert.equal(h.run("layout.rules.length"), 1);
-  assert.deepEqual(plain(h.run("layout.rules[0].groups")), [[{ type: "dimension", values: ["minecraft:the_nether"] }]]);
-  const card = h.get("#rules-list").children[0];
-  const tileSelects = card.children[2].children[2].children;
-  const movementSelect = tileSelects[TILE_INDEX_MOVEMENT].children[1];
-  movementSelect.value = "show";
-  movementSelect.emit("change");
-  assert.equal(h.run("layout.rules[0].tiles.movement"), "show");
-  h.get("#rules-dialog-close").emit("click");
-  h.get("#edit-done").emit("click");
-  assert.equal(movement.hidden, true, "rules-only tiles are hidden until a rule shows them");
-  assert.equal(movement.style.getPropertyValue("--grid-row"), position, "and keep their place");
-  h.sockets[0].message(update({ dimension: "minecraft:the_nether" }));
-  assert.equal(movement.hidden, false, "the rule shows the tile in the Nether");
-  assert.equal(h.get("#tile-statistics").style.getPropertyValue("--grid-row"), "5 / span 9", "nothing else moves");
+  const sidebar = h.get("#rules-sidebar");
+  const detail = h.get("#rules-detail");
+  buttonNamed(sidebar, "+ New rule").emit("click");
+  setValue(byKey(detail, "rule.name"), "Low health");
+  buttonNamed(detail, "+ AND condition").emit("click");
+  setValue(byKey(detail, "when.0.type"), "health");
+  setValue(byKey(detail, "when.0.compare"), "<");
+  setValue(byKey(detail, "when.0.value"), "6");
+  buttonNamed(detail, "+ OR condition").emit("click");
+  setValue(byKey(detail, "when.1.values.add"), "nether, the_end");
+  buttonNamed(detail, "+ Action").emit("click");
+  setValue(byKey(detail, "then.0.panel"), "player");
+  setValue(byKey(detail, "then.0.do"), "focus");
   await h.runTimers(400);
-  const saved = JSON.parse(requests.filter(request => request.method === "PUT").at(-1).body);
-  assert.equal(saved.tiles.find(tile => tile.id === "movement").rulesOnly, true);
-  assert.equal(saved.rules[0].tiles.movement, "show");
+  const rule = savedLayout(requests).rules[0];
+  assert.equal(rule.name, "Low health");
+  assert.deepEqual(rule.when, [{ type: "health", compare: "<", value: 6 },
+    { type: "dimension", join: "or", values: ["nether", "the_end"] }]);
+  assert.deepEqual(rule.then, [{ do: "focus", panel: "player" }]);
+  assert.equal(byKey(sidebar, `nav.${rule.id}`).textContent, "Low health");
+  assert.equal(findAll(detail, element => element.className.startsWith("rule-block")).length, 2, "OR starts a new block");
 });
 
-const TILE_INDEX_MOVEMENT = 6;
+test("rules editor: every condition type starts valid, and pickers suggest the game's registries", async () => {
+  const requests = [];
+  const h = harness(defaultFetch(null, requests));
+  await h.flush();
+  h.sockets[0].message(initial(snapshot()));
+  h.get("#rules-open").emit("click");
+  const detail = h.get("#rules-detail");
+  buttonNamed(h.get("#rules-sidebar"), "+ New rule").emit("click");
+  buttonNamed(detail, "+ AND condition").emit("click");
+  const types = plain(h.run("Object.keys(CONDITION_TYPES)")).filter(type => !["toggle", "ruleActive"].includes(type));
+  for (const type of types) {
+    setValue(byKey(detail, "when.0.type"), type);
+    assert.equal(h.get("#rules-error").hidden, true, `${type}: ${h.get("#rules-error").textContent}`);
+    assert.equal(plain(h.run("layout")).rules[0].when[0].type, type);
+  }
+  setValue(byKey(detail, "when.0.type"), "mobNearby");
+  const input = byKey(detail, "when.0.entity");
+  input.value = "creep";
+  input.emit("input");
+  const options = findAll(detail, element => element.className === "id-picker-option");
+  assert.deepEqual(options.map(option => option.children[1].textContent), ["Creeper"]);
+  options[0].emit("click");
+  assert.equal(plain(h.run("layout")).rules[0].when[0].entity, "minecraft:creeper");
+  setValue(byKey(detail, "when.0.type"), "lookingAt");
+  setValue(byKey(detail, "when.0.id"), "minecraft:water");
+  assert.deepEqual(plain(h.run("layout")).rules[0].when[0],
+    { type: "lookingAt", target: "block", id: "minecraft:water", distance: 5, within: 10 }, "the row keeps its modifier");
+  assert.equal(findAll(detail, element => element.className === "value-chip").length, 0);
+});
+
+test("rules editor: templates, folders, copy and paste, share and import", async () => {
+  const requests = [];
+  const h = harness(defaultFetch(null, requests));
+  await h.flush();
+  h.sockets[0].message(initial(snapshot()));
+  h.get("#rules-open").emit("click");
+  const sidebar = h.get("#rules-sidebar");
+  const detail = h.get("#rules-detail");
+  const live = () => plain(h.run("layout"));
+  // Templates add ordinary rules.
+  byKey(sidebar, "nav.templates").emit("click");
+  byKey(detail, "template.combat").emit("click");
+  byKey(sidebar, "nav.templates").emit("click");
+  byKey(detail, "template.xp-gain").emit("click");
+  assert.deepEqual(live().rules.map(rule => rule.id), ["combat", "xp-gain"]);
+  assert.equal(byKey(detail, "rule.name").value, "XP while gaining", "the added rule is selected");
+  // A folder: filing the second rule in it, collapsing and turning it off are saved with the layout.
+  buttonNamed(sidebar, "+ Folder").emit("click");
+  setValue(byKey(detail, "folder.name"), "Fights");
+  assert.equal(live().folders[0].name, "Fights");
+  byKey(sidebar, "nav.combat").emit("click");
+  setValue(byKey(detail, "rule.folder"), "folder-1");
+  assert.equal(live().rules.find(rule => rule.id === "combat").folder, "folder-1");
+  assert.ok(findAll(sidebar, element => element.className.includes("in-folder")).length === 1);
+  byKey(sidebar, "nav.folder.folder-1.0.caret").emit("click");
+  assert.equal(live().folders[0].collapsed, true);
+  assert.equal(byKey(sidebar, "nav.combat"), undefined, "a collapsed folder hides its rules");
+  setValue(byKey(sidebar, "nav.folder.folder-1.0.enabled"), false);
+  assert.equal(live().folders[0].enabled, false);
+  // Copy two conditions from one rule and paste them into another.
+  byKey(sidebar, "nav.xp-gain").emit("click");
+  buttonNamed(detail, "+ OR condition").emit("click");
+  setValue(byKey(detail, "when.0.select"), true);
+  setValue(byKey(detail, "when.1.select"), true);
+  assert.equal(byKey(detail, "when.copy").textContent, "Copy 2");
+  byKey(detail, "when.copy").emit("click");
+  buttonNamed(sidebar, "+ New rule").emit("click");
+  byKey(detail, "when.paste").emit("click");
+  const pasted = live().rules.at(-1);
+  assert.deepEqual(pasted.when, live().rules.find(rule => rule.id === "xp-gain").when);
+  // Share the folder and import it again: a second folder with a copy of its rule; nothing is replaced.
+  byKey(sidebar, "nav.folder.folder-1.0").emit("click");
+  byKey(detail, "folder.share").emit("click");
+  const text = byKey(detail, "share.text").value;
+  assert.match(text, /^minepanel-rules:1:/);
+  byKey(sidebar, "nav.import").emit("click");
+  byKey(detail, "import.text").value = text;
+  buttonNamed(detail, "Import").emit("click");
+  const imported = live();
+  assert.equal(imported.folders.length, 2);
+  assert.equal(imported.rules.length, 4);
+  assert.equal(imported.rules.at(-1).folder, imported.folders[1].id);
+  assert.equal(imported.rules.at(-1).name, "Combat");
+  assert.match(findAll(detail, element => element.tagName === "p").map(element => element.textContent).join(" "),
+    /Added 1 rule in a new folder/);
+  byKey(detail, "import.text").value = "nonsense";
+  buttonNamed(detail, "Import").emit("click");
+  assert.ok(findAll(detail, element => element.className === "rules-error").some(element =>
+    element.textContent === "Not a MinePanel share string or rule set"));
+  assert.equal(live().rules.length, 4);
+  await h.runTimers(400);
+  assert.equal(savedLayout(requests).rules.length, 4, "everything is saved");
+});
+
+test("rules editor: a rule set file is imported, replacing everything when asked, with its warnings listed", async () => {
+  const requests = [];
+  const stored = { version: 2, tiles: [], rules: [{ id: "old", name: "Old", enabled: true, when: [] }] };
+  const h = harness(defaultFetch(stored, requests));
+  await h.flush();
+  h.sockets[0].message(initial(snapshot()));
+  h.get("#rules-open").emit("click");
+  const sidebar = h.get("#rules-sidebar");
+  const detail = h.get("#rules-detail");
+  byKey(sidebar, "nav.import").emit("click");
+  const set = { format: "minepanel-rules", version: 1, rules: [{ name: "Night", when: [{ type: "time", values: ["night"] }],
+    then: [{ do: "focus", panel: "map", fill: "auto" }] }] };
+  const choose = async () => {
+    const file = byKey(detail, "import.file");
+    file.files = [{ text: async () => JSON.stringify(set) }];
+    file.emit("change");
+    await h.flush();
+  };
+  await choose();
+  assert.deepEqual(plain(h.run("layout")).rules.map(rule => rule.name), ["Old", "Night"]);
+  assert.deepEqual(findAll(detail, element => element.tagName === "li").map(element => element.textContent),
+    ["Rule \"Night\": Then action 1: ignored \"fill\""]);
+  setValue(byKey(detail, "import.replace"), true);
+  set.profiles = [{ name: "Default", panels: { map: { x: 0, y: 0, w: 12, h: 8 } } }, { name: "Night", panels: {} }];
+  await choose();
+  assert.deepEqual(plain(h.run("layout")).rules.map(rule => rule.id), ["night"]);
+  const arranged = plain(h.run("layout"));
+  assert.deepEqual(arranged.tiles.filter(tile => tile.enabled).map(tile => tile.id), ["map"], "the dashboard is rearranged");
+  assert.deepEqual(arranged.profiles.map(profile => profile.name), ["Night"]);
+  assert.match(findAll(detail, element => element.tagName === "p").map(element => element.textContent).join(" "),
+    /Arranged 2 profiles\./);
+  assert.match(findAll(detail, element => element.tagName === "p").map(element => element.textContent).join(" "),
+    /Replaced everything with 1 rule\./);
+  assert.equal(byKey(detail, "import.replace").checked, false, "replace has to be ticked again each time");
+  await h.runTimers(400);
+  assert.deepEqual(savedLayout(requests).rules.map(rule => rule.name), ["Night"]);
+});
+
+test("rules editor: an invalid value is reported and not saved until it is fixed", async () => {
+  const requests = [];
+  const stored = { version: 2, tiles: [], rules: [{ id: "r", name: "R", enabled: true,
+    when: [{ type: "dimension", values: ["minecraft:overworld"] }, { type: "yLevel", compare: ">", value: 100 }] }] };
+  const h = harness(defaultFetch(stored, requests));
+  await h.flush();
+  h.sockets[0].message(initial(snapshot()));
+  h.get("#rules-open").emit("click");
+  const detail = h.get("#rules-detail");
+  const rows = findAll(detail, element => element.className.startsWith("rule-block")).flatMap(block => block.children);
+  assert.deepEqual(rows.map(row => row.className), ["rule-row ok", "rule-row bad"], "live state on each condition");
+  const redraws = detail.replacements;
+  const saves = () => requests.filter(request => request.method === "PUT").length;
+  const before = saves();
+  setValue(byKey(detail, "when.1.value"), "");
+  await h.runTimers(400);
+  assert.equal(saves(), before);
+  assert.equal(h.get("#rules-error").hidden, false);
+  assert.match(h.get("#rules-error").textContent, /^Not saved yet: Rule "R": condition 2: /);
+  setValue(byKey(detail, "when.1.value"), "50");
+  await h.runTimers(400);
+  assert.equal(h.get("#rules-error").hidden, true);
+  assert.equal(savedLayout(requests).rules[0].when[1].value, 50);
+  assert.equal(detail.replacements, redraws, "typing a value never redraws (and so never steals focus)");
+});
+
+test("rules editor: places and toggles are managed, and removing one drops the conditions that use it", async () => {
+  const requests = [];
+  const stored = { version: 2, tiles: [], toggles: [{ id: "afk", name: "AFK", on: false }],
+    rules: [{ id: "r", name: "R", enabled: true, when: [{ type: "toggle", toggle: "afk" }] }] };
+  const h = harness(defaultFetch(stored, requests));
+  await h.flush();
+  h.sockets[0].message(initial(snapshot()));
+  h.get("#rules-open").emit("click");
+  const sidebar = h.get("#rules-sidebar");
+  const detail = h.get("#rules-detail");
+  byKey(sidebar, "nav.toggles").emit("click");
+  setValue(byKey(detail, "toggle.0.on"), true);
+  await h.runTimers(400);
+  assert.equal(savedLayout(requests).toggles[0].on, true);
+  findAll(detail, element => element.title?.startsWith("Remove"))[0].emit("click");
+  byKey(sidebar, "nav.places").emit("click");
+  buttonNamed(detail, "+ Current position").emit("click");
+  await h.runTimers(400);
+  const saved = savedLayout(requests);
+  assert.deepEqual(saved.toggles, []);
+  assert.deepEqual(saved.rules[0].when, []);
+  assert.equal(saved.places.length, 1);
+  assert.equal(saved.places[0].dimension, "minecraft:overworld");
+});
 
 function buildPlacement(overrides = {}) {
   return { id: "5f0c1a2b-0000-4000-8000-000000000001", name: "Starter House", total: 1200, placed: 300, wrong: 4,
@@ -2020,4 +3190,297 @@ test("build progress explains why there is nothing to show", async () => {
   assert.deepEqual(message(), ["Unavailable", "Build progress stopped after an error; see the game log."]);
   h.sockets[0].message(update({ ...unavailable(), revision: 10, baseRevision: 9 }));
   assert.deepEqual(message(), ["Unavailable", "Join a world to see build progress."]);
+});
+
+// ------------------------------------------------------------------------------------------- Layout solver
+
+const solverHarness = harness();
+const box = (id, x, y, w, h) => ({ id, enabled: true, x, y, w, h });
+function solved(tiles, { visible = tiles.map(tile => tile.id), rects = {}, fills = {} } = {}) {
+  solverHarness.run("0");
+  return plain(solverHarness.run(`solveLayout(${JSON.stringify(tiles)}, { visible: new Set(${JSON.stringify(visible)}),
+    rects: ${JSON.stringify(rects)}, fills: ${JSON.stringify(fills)} })`));
+}
+const without = (tiles, id) => tiles.map(tile => tile.id).filter(other => other !== id);
+
+test("solver: a hidden panel's space goes to the one neighbour whose edge matches, above or below first", () => {
+  const tiles = [box("player", 0, 0, 4, 4), box("xp", 0, 4, 4, 4), box("map", 4, 0, 8, 8)];
+  assert.deepEqual(solved(tiles, { visible: without(tiles, "xp") }),
+    { player: { x: 0, y: 0, w: 4, h: 8 }, map: { x: 4, y: 0, w: 8, h: 8 } });
+  assert.deepEqual(solved(tiles, { visible: without(tiles, "player") }).xp, { x: 0, y: 0, w: 4, h: 8 },
+    "the panel below grows up");
+  const sideBySide = [box("player", 0, 0, 4, 4), box("xp", 4, 0, 4, 4), box("map", 8, 0, 4, 8)];
+  assert.deepEqual(solved(sideBySide, { visible: without(sideBySide, "xp") }).player, { x: 0, y: 0, w: 8, h: 4 },
+    "then left or right");
+});
+
+test("solver: several neighbours on one side grow together when their edges cover the gap", () => {
+  const tiles = [box("player", 0, 0, 2, 4), box("xp", 2, 0, 2, 4), box("map", 0, 4, 4, 4), box("history", 4, 0, 8, 8)];
+  const result = solved(tiles, { visible: without(tiles, "map") });
+  assert.deepEqual(result.player, { x: 0, y: 0, w: 2, h: 8 });
+  assert.deepEqual(result.xp, { x: 2, y: 0, w: 2, h: 8 });
+  assert.deepEqual(result.history, { x: 4, y: 0, w: 8, h: 8 });
+});
+
+test("solver: with no matching neighbour the panels below slide up, unless the Hide keeps the space empty", () => {
+  const tiles = [box("player", 0, 0, 4, 4), box("xp", 0, 4, 6, 4), box("map", 6, 0, 6, 2)];
+  assert.deepEqual(solved(tiles, { visible: without(tiles, "player") }).xp, { x: 0, y: 0, w: 6, h: 4 });
+  assert.deepEqual(solved(tiles, { visible: without(tiles, "player"), fills: { player: "empty" } }).xp,
+    { x: 0, y: 4, w: 6, h: 4 });
+});
+
+test("solver: a Hide fill panel grows over the space when that makes a rectangle, else moves into it", () => {
+  const row = [box("player", 0, 0, 4, 4), box("xp", 0, 4, 4, 4), box("map", 4, 4, 8, 4), box("history", 4, 0, 8, 4)];
+  assert.deepEqual(solved(row, { visible: without(row, "xp"), fills: { xp: "map" } }).map,
+    { x: 0, y: 4, w: 12, h: 4 }, "player above would grow by default; the override picks map");
+  const tiles = [box("player", 0, 0, 4, 4), box("xp", 0, 4, 4, 4), box("map", 4, 0, 8, 8), box("history", 0, 8, 12, 4)];
+  const result = solved(tiles, { visible: without(tiles, "player"), fills: { player: "history" } });
+  assert.deepEqual(result.history, { x: 0, y: 0, w: 4, h: 4 }, "history moves into the gap");
+  assert.deepEqual(result.xp, { x: 0, y: 4, w: 4, h: 8 }, "and the panels above its old spot grow into it");
+  assert.deepEqual(result.map, { x: 4, y: 0, w: 8, h: 12 });
+});
+
+test("solver: a placed panel's neighbours shrink away from it, and its old spot is filled", () => {
+  const tiles = [box("player", 0, 0, 6, 4), box("xp", 6, 0, 6, 4)];
+  assert.deepEqual(solved(tiles, { rects: { xp: { x: 0, y: 0, w: 3, h: 4 } } }),
+    { player: { x: 3, y: 0, w: 9, h: 4 }, xp: { x: 0, y: 0, w: 3, h: 4 } });
+});
+
+test("solver: swapped panels trade rectangles; a panel with no part big enough is pushed down", () => {
+  const tiles = [box("player", 0, 0, 6, 4), box("xp", 6, 0, 6, 4)];
+  assert.deepEqual(solved(tiles, { rects: { player: { swap: "xp" }, xp: { swap: "player" } } }),
+    { player: { x: 6, y: 0, w: 6, h: 4 }, xp: { x: 0, y: 0, w: 6, h: 4 } });
+  const pushed = [box("player", 0, 0, 4, 2), box("xp", 6, 0, 2, 2)];
+  assert.deepEqual(solved(pushed, { rects: { xp: { x: 0, y: 0, w: 3, h: 3 } } }),
+    { player: { x: 0, y: 3, w: 4, h: 2 }, xp: { x: 0, y: 0, w: 3, h: 3 } });
+});
+
+test("solver: rules-only panels get their own space back and the default layout is unchanged", () => {
+  const h = harness();
+  const tiles = plain(h.run("defaultLayout().tiles"));
+  const visible = tiles.filter(tile => tile.enabled).map(tile => tile.id);
+  const result = solved(tiles, { visible });
+  for (const tile of tiles.filter(entry => entry.enabled)) {
+    assert.deepEqual(result[tile.id], { x: tile.x, y: tile.y, w: tile.w, h: tile.h }, tile.id);
+  }
+});
+
+test("solver: a panel's visibility can't change again within the dwell, and flapping back changes nothing", () => {
+  const h = harness();
+  h.run(`globalThis.dwell = createPanelDwell(1000);
+    globalThis.at = (visible, now) => [...dwell.apply({ visible: new Set(visible), rects: {}, fills: {}, focus: null },
+      now).visible]`);
+  const shown = (visible, now) => plain(h.run(`at(${JSON.stringify(visible)}, ${now})`));
+  assert.deepEqual(shown(["xp"], 0), ["xp"]);
+  assert.deepEqual(shown([], 100), [], "the first change is immediate");
+  assert.deepEqual(shown(["xp"], 500), [], "held during the dwell");
+  assert.deepEqual(shown(["xp"], 1100), ["xp"], "applied once the dwell is over");
+  assert.deepEqual(shown([], 1200), ["xp"]);
+  assert.deepEqual(shown(["xp"], 1300), ["xp"], "back to what is shown: nothing happens");
+  assert.deepEqual(shown(["xp"], 2200), ["xp"]);
+});
+
+// ------------------------------------------------------------------------------- Rules on the dashboard
+const defaultTiles = () => plain(solverHarness.run("defaultLayout().tiles"));
+
+const gridRect = element => {
+  const [x, w] = element.style.getPropertyValue("--grid-column").split(" / span ").map(Number);
+  const [y, h] = element.style.getPropertyValue("--grid-row").split(" / span ").map(Number);
+  return { x: x - 1, y: y - 1, w, h };
+};
+const inWorld = { id: "r", name: "In game", enabled: true, when: [{ type: "inGame" }] };
+
+test("rules on the dashboard: Place moves a panel, the others make room, and Focus lifts one above the grid", async () => {
+  const h = harness(defaultFetch({ version: 2, tiles: defaultTiles(), rules: [{ ...inWorld,
+    then: [{ do: "place", panel: "xp", x: 0, y: 0, w: 4, h: 4 }, { do: "focus", panel: "pickups" }] }] }));
+  await h.flush();
+  assert.deepEqual(gridRect(h.get("#tile-xp")), { x: 0, y: 17, w: 4, h: 4 });
+  h.sockets[0].message(initial(snapshot()));
+  assert.deepEqual(gridRect(h.get("#tile-xp")), { x: 0, y: 0, w: 4, h: 4 });
+  const shown = ["player", "inventory", "statistics", "history", "movement", "xp", "performance", "pickups",
+    "advancements", "villagers"].map(id => ({ id, ...gridRect(h.get(`#tile-${id}`)) }));
+  for (const a of shown) {
+    for (const b of shown) {
+      if (a.id < b.id) {
+        assert.ok(!(a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h), `${a.id} / ${b.id}`);
+      }
+    }
+  }
+  assert.deepEqual(gridRect(h.get("#tile-movement")), { x: 0, y: 17, w: 4, h: 8 }, "movement grows into xp's spot");
+  assert.equal(h.get("#tile-pickups").classList.contains("focused"), true);
+  assert.equal(h.get("#grid").classList.contains("has-focus"), true);
+  h.get("#edit-toggle").emit("click");
+  assert.deepEqual(gridRect(h.get("#tile-xp")), { x: 0, y: 17, w: 4, h: 4 }, "customizing shows the base layout");
+  assert.equal(h.get("#grid").classList.contains("has-focus"), false);
+});
+
+test("rules on the dashboard: toggles are buttons that flip and save, and Notify shows a message", async () => {
+  const requests = [];
+  const h = harness(defaultFetch({ version: 2, tiles: defaultTiles(), toggles: [{ id: "afk", name: "AFK", on: false }],
+    rules: [{ ...inWorld, when: [{ type: "toggle", toggle: "afk" }], then: [{ do: "notify", text: "Away" }] }] },
+  requests));
+  await h.flush();
+  h.sockets[0].message(initial(snapshot()));
+  const bar = h.get("#rule-toggles");
+  assert.equal(bar.hidden, false);
+  assert.equal(bar.children[0].textContent, "AFK");
+  assert.equal(h.get("#rule-toasts").children.length, 0);
+  bar.children[0].emit("click");
+  assert.equal(bar.children[0].attributes["aria-pressed"], "true");
+  assert.deepEqual(h.get("#rule-toasts").children.map(toast => toast.textContent), ["Away"]);
+  await h.runTimers(400);
+  assert.equal(savedLayout(requests).toggles[0].on, true);
+  const reset = bar.children[bar.children.length - 1];
+  assert.equal(reset.textContent, "All off");
+  assert.equal(reset.disabled, false, "All off is available while a toggle is on");
+  reset.emit("click");
+  assert.equal(bar.children[0].attributes["aria-pressed"], "false");
+  assert.equal(bar.children[bar.children.length - 1].disabled, true, "and greyed out once every toggle is off");
+  await h.runTimers(400);
+  assert.equal(savedLayout(requests).toggles[0].on, false, "turning them all off is saved");
+});
+
+test("rules editor: it leaves customizing while open, previews a rule, and docks to inspect panels", async () => {
+  const h = harness(defaultFetch({ version: 2, tiles: defaultTiles(), rules: [{ id: "r", name: "Hide XP", enabled: true,
+    when: [{ type: "died", within: 5 }], then: [{ do: "hide", panel: "xp" }] }] }));
+  await h.flush();
+  h.sockets[0].message(initial(snapshot()));
+  h.get("#edit-toggle").emit("click");
+  h.get("#rules-open").emit("click");
+  assert.equal(h.get("#grid").className.includes("editing"), false, "the dashboard shows what rules do");
+  assert.equal(h.get("#tile-xp").hidden, false);
+  setValue(byKey(h.get("#rules-detail"), "rule.preview"), "on");
+  assert.equal(h.get("#tile-xp").hidden, true, "Force on applies the rule");
+  h.get("#rules-dock").emit("click");
+  assert.equal(h.get("#rules-dialog").classList.contains("docked"), true);
+  h.get("#grid").emit("click", { target: { closest: () => ({ dataset: { tile: "xp" } }) }, stopPropagation() {} });
+  const inspector = h.get("#rules-detail").textContent;
+  assert.match(inspector, /^Inspector: Experience/);
+  assert.match(inspector, /Hide XPThenHide ExperienceWins/);
+  h.get("#rules-dialog-close").emit("click");
+  assert.equal(h.get("#grid").className.includes("editing"), true, "customizing resumes");
+  h.get("#edit-done").emit("click");
+  assert.equal(h.get("#tile-xp").hidden, false, "the preview ended with the editor");
+});
+
+test("rules editor: Set on grid docks the editor and shows the panel's ghost to place", async () => {
+  const requests = [];
+  const h = harness(defaultFetch({ version: 2, tiles: defaultTiles(), rules: [{ ...inWorld,
+    then: [{ do: "place", panel: "xp", x: 2, y: 3, w: 4, h: 4 }] }] }, requests));
+  await h.flush();
+  h.sockets[0].message(initial(snapshot()));
+  h.get("#rules-open").emit("click");
+  byKey(h.get("#rules-detail"), "then.0.grid").emit("click");
+  assert.equal(h.get("#rules-dialog").classList.contains("docked"), true);
+  const ghost = h.get("#grid").children.at(-1);
+  assert.equal(ghost.className, "place-ghost");
+  assert.equal(ghost.style.getPropertyValue("--grid-column"), "3 / span 4");
+  assert.match(ghost.children[0].textContent, /^Experience · column 3, row 4, 4 × 4$/);
+  buttonNamed(ghost, "Set").emit("click");
+  await h.runTimers(400);
+  assert.deepEqual(savedLayout(requests).rules[0].then[0], { do: "place", panel: "xp", x: 2, y: 3, w: 4, h: 4 });
+});
+
+test("the player's appearance is validated like the Java model", () => {
+  const h = harness();
+  assert.deepEqual(plain(h.apply(undefined, initial()).appearance), appearance());
+  assert.equal(h.apply(undefined, initial(snapshot({ appearance: appearance({ skin: null }) }))).appearance.skin, null,
+    "a skin that can't be read is allowed; the model is drawn without it");
+  const layer = appearance().armor[0];
+  const held = appearance().rightHand;
+  for (const bad of [
+    appearance({ skin: "Skin.png" }), appearance({ slim: "no" }),
+    appearance({ armor: Array.from({ length: 17 }, () => layer) }),
+    appearance({ armor: [{ ...layer, slot: "offhand" }] }), appearance({ armor: [{ ...layer, model: "horse_body" }] }),
+    appearance({ armor: [{ ...layer, color: "#ABCDEF" }] }), appearance({ armor: [{ ...layer, texture: null }] }),
+    appearance({ rightHand: { ...held, rotation: [0, 0] } }), appearance({ rightHand: { ...held, scale: [1, 1, 1e6] } }),
+    appearance({ leftHand: { ...held, flat: 1 } }), undefined
+  ]) {
+    assert.throws(() => h.apply(undefined, initial(snapshot({ appearance: bad }))), JSON.stringify(bad));
+  }
+});
+
+test("3D render: boxes use the game's texture layout and item sprites are extruded at their own pixel size", () => {
+  const h = harness();
+  // The head's front face (towards -z in model space) shows the face, (8, 8)–(16, 16) of a 64 × 64 skin.
+  const head = h.run(`(() => { const out = []; addCube(out, [0, 0], [-4, -8, -4], [8, 8, 8], 0, false, [64, 64]); return out; })()`);
+  assert.equal(head.length, 6 * 6 * 8, "six faces of two triangles");
+  const front = head.slice(3 * 6 * 8, 4 * 6 * 8);
+  const vertices = Array.from({ length: 6 }, (_, index) => front.slice(index * 8, index * 8 + 8));
+  assert.ok(vertices.every(vertex => vertex[2] === -4 && vertex[5] === -1), "the front face is at z = -4, facing -z");
+  assert.deepEqual([...new Set(vertices.map(vertex => vertex.slice(6).join()))].sort(),
+    ["0.125,0.125", "0.125,0.25", "0.25,0.125", "0.25,0.25"]);
+  const left = vertices.find(vertex => vertex[0] === -4 && vertex[1] === -8);
+  assert.deepEqual(plain(left.slice(6)), [0.125, 0.125], "the face's top-left texel is at the box's -x top corner");
+
+  // A 16-pixel sprite drawn at 64 × 64 (4 × 4 blocks): one opaque sprite pixel gives a slab and four side walls.
+  const sprite = h.run(`(() => {
+    const pixels = new Uint8ClampedArray(64 * 64 * 4);
+    for (let y = 8; y < 12; y++) for (let x = 4; x < 8; x++) pixels.set([200, 100, 50, 255], (y * 64 + x) * 4);
+    return { factor: pixelFactor(pixels, 64), mesh: extrudeSprite(pixels, 64, null) };
+  })()`);
+  assert.equal(sprite.factor, 4);
+  assert.equal(sprite.mesh.length, (2 + 4) * 6 * 8, "front, back and four walls around the one pixel");
+});
+
+test("3D render: after a drag it waits, then eases back upright while spinning up again", () => {
+  const h = harness();
+  const result = h.run(`(() => {
+    const settings = { spin: true, axis: "y", speed: 30 };
+    const spin = createSpin();
+    const facing = () => decompose(spinOrientation(spin, "y"), "y").angle;
+    dragSpin(spin, "y", 40, 90);
+    const tilted = quat.angle(spin.swing);
+    const heading = facing();
+    stepSpin(spin, SPIN_RETURN_DELAY - 0.1, settings);
+    const waiting = { tilt: quat.angle(spin.swing), heading: facing() };
+    for (let step = 0; step < 300; step++) stepSpin(spin, 1 / 30, settings);
+    return { tilted, heading, waiting, settled: quat.angle(spin.swing), ramp: spin.ramp };
+  })()`);
+  assert.ok(result.tilted > 0.5, "dragging down tips the model over");
+  assert.ok(Math.abs(result.waiting.tilt - result.tilted) < 1e-9 && Math.abs(result.waiting.heading - result.heading) < 1e-9,
+    "it stays where it was left for a moment");
+  assert.ok(result.settled < 1e-3, `it ends upright (${result.settled})`);
+  assert.equal(result.ramp, 1, "and back at full speed");
+
+  const still = h.run(`(() => {
+    const spin = createSpin();
+    dragSpin(spin, "y", 0, 60);
+    const before = spinOrientation(spin, "y");
+    const moving = stepSpin(spin, 5, { spin: false, axis: "y", speed: 30 });
+    return { moving, unchanged: before.every((value, index) => Math.abs(value - spinOrientation(spin, "y")[index]) < 1e-12) };
+  })()`);
+  assert.deepEqual(plain(still), { moving: false, unchanged: true }, "with spinning off it stays where it was dragged");
+
+  const rebased = h.run(`(() => {
+    const spin = createSpin();
+    dragSpin(spin, "y", 30, 45);
+    const before = spinOrientation(spin, "y");
+    rebaseSpin(spin, before, "x");
+    const after = spinOrientation(spin, "x");
+    return before.every((value, index) => Math.abs(value - after[index]) < 1e-9);
+  })()`);
+  assert.equal(rebased, true, "changing the axis doesn't make the model jump");
+});
+
+test("3D render tile: settings are saved, and it explains when there is nothing to draw", async () => {
+  const requests = [];
+  const h = harness(defaultFetch(null, requests));
+  await h.flush();
+  assert.equal(h.get("#model-status").textContent, "Unavailable");
+  assert.equal(h.get("#model-message").textContent, "Join a world to see your player.");
+  h.sockets[0].message(initial(snapshot()));
+  assert.equal(h.get("#model-message").hidden, false);
+  assert.match(h.get("#model-message").textContent, /can't draw 3D/, "no WebGL in the test browser");
+
+  assert.deepEqual(h.get("#model-axis").children.map(option => option.textContent), ["Turntable", "Head over heels", "Cartwheel"]);
+  assert.equal(h.get("#model-spin").checked, true);
+  assert.equal(h.get("#model-speed").value, "30");
+  setValue(h.get("#model-spin"), false);
+  setValue(h.get("#model-axis"), "z");
+  setValue(h.get("#model-speed"), "60");
+  await h.runTimers(400);
+  assert.deepEqual(savedLayout(requests).settings.model, { spin: false, axis: "z", speed: 60 });
+  assert.throws(() => h.run(`normalizeSettings({ model: { speed: 45 } })`), /Invalid model settings/);
+  assert.throws(() => h.run(`normalizeSettings({ model: { axis: "w" } })`), /Invalid model settings/);
 });

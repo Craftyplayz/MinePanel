@@ -228,10 +228,10 @@ public final class BuildProgressTest {
         var details = PlayerDetails.placeholder();
         var before = new PlayerSnapshot(1, 1, true, 0L, "minecraft:overworld", 0.0, 0.0, 0.0, 20.0, 20.0, 0.0,
                 InventorySnapshot.empty(), null, GameplayHistory.empty(), 20, 5.0, List.of(), details);
-        check(before.toJson().contains("\"schemaVersion\":4") && before.toJson().contains("\"build\":{\"available\":false"),
-                "schema version 4 carries the build field");
+        check(before.toJson().contains("\"schemaVersion\":5") && before.toJson().contains("\"build\":{\"available\":false"),
+                "schema version 5 carries the build field");
         var withBuild = new PlayerDetails(details.world(), details.motion(), details.xp(), details.portal(),
-                details.pickups(), null, List.of(), null, details.performance(), build);
+                details.pickups(), null, List.of(), null, details.performance(), build, details.icons());
         var after = new PlayerSnapshot(2, 2, true, 0L, "minecraft:overworld", 0.0, 0.0, 0.0, 20.0, 20.0, 0.0,
                 InventorySnapshot.empty(), null, GameplayHistory.empty(), 20, 5.0, List.of(), withBuild);
         String delta = after.toDeltaJson(before);

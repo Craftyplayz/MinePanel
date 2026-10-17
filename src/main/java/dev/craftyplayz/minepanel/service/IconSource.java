@@ -9,4 +9,9 @@ public interface IconSource {
     default byte[] effectIcon(String effectId) {
         return null;
     }
+
+    /** Returns a skin or armor texture by the key published in the player's appearance, or {@code null}. */
+    default byte[] texture(String key) {
+        return null;
+    }
 }

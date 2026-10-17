@@ -153,6 +153,8 @@ public final class StatisticsAndHistoryTest {
                 id -> "Zombie");
         check(last(tracker).label().equals("Killed Zombie"), "attributions are consumed once");
 
+        tracker.containerOpened(29000, "§6Large Chest§f");
+        check(last(tracker).label().equals("Opened Large Chest"), "legacy formatting codes are stripped");
         tracker.containerOpened(30000, "Chest");
         tracker.inventoryChanged(30500, "Chest", Map.of("Diamond", 3, "Cobblestone", -10));
         check(last(tracker).label().equals("Inventory changed (Chest)")
@@ -213,7 +215,7 @@ public final class StatisticsAndHistoryTest {
         var stats = tracker.sample(100, List.of(jump(2), deaths(1)));
         check(update(store, 100, stats, history.snapshot()), "initial extended snapshot");
         PlayerSnapshot first = store.player();
-        check(first.toJson().contains("\"schemaVersion\":4") && first.toJson().contains("\"statistics\":{\"entries\":[")
+        check(first.toJson().contains("\"schemaVersion\":5") && first.toJson().contains("\"statistics\":{\"entries\":[")
                 && first.toJson().contains("\"history\":{\"sessionId\":1")
                 && first.toJson().contains("\"food\":20,\"saturation\":5.0,\"effects\":[],\"world\":{"), "full fields serialized");
         check(!update(store, 101, stats, history.snapshot()), "unchanged snapshot suppressed");

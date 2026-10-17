@@ -23,7 +23,7 @@ public record PlayerSnapshot(
         List<StatusEffect> effects,
         PlayerDetails details
 ) {
-    public static final int SCHEMA_VERSION = 4;
+    public static final int SCHEMA_VERSION = 5;
 
     public PlayerSnapshot(long revision, long capturedAt, boolean available, Long sessionSeconds, String dimension,
                           Double x, Double y, Double z, Double health, Double maxHealth, Double absorption,

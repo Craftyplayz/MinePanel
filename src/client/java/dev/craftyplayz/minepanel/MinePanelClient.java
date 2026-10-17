@@ -67,6 +67,9 @@ public final class MinePanelClient implements ClientModInitializer {
             FabricLoader.getInstance().getConfigDir().resolve("minepanel").resolve("layout.json"));
     private final ClientActivity activity = new ClientActivity(history, portals, this::pickedUp);
     private final BuildProgressCollector build = new BuildProgressCollector();
+    private final SensorsCollector sensors = new SensorsCollector();
+    private final RegistriesCollector registries = new RegistriesCollector();
+    private final AppearanceCollector appearance = new AppearanceCollector();
     private static final int SAVE_INTERVAL_TICKS = 100;
     private int saveTicks;
     private int portalScans;
@@ -172,6 +175,9 @@ public final class MinePanelClient implements ClientModInitializer {
         advancements.reset();
         worldData.reset();
         build.reset();
+        sensors.reset();
+        registries.reset();
+        appearance.reset();
     }
 
     /** Client thread: items were added to (positive count) or removed from (negative count) the inventory. */
@@ -203,7 +209,7 @@ public final class MinePanelClient implements ClientModInitializer {
             var feet = client.player.blockPosition();
             portals.observe(millis, dimension, feet.getX(), feet.getY(), feet.getZ(),
                     WorldCollector.inNetherPortal(client.level, client.player));
-            motion.tick(client.player);
+            motion.tick(client, client.player);
             worldData.tick(client, client.level);
             build.tick();
             if (++saveTicks % SAVE_INTERVAL_TICKS == 0) lifecycleExecutor.execute(worldStore::save);
@@ -249,7 +255,10 @@ public final class MinePanelClient implements ClientModInitializer {
                     experience.observe(millis, player.experienceLevel, player.experienceProgress), portals.state(),
                     pickups.pickups(), advancements.collect(client.getConnection(), icons),
                     worldData.villagers(client, level, icons), worldData.enderChest(client, level, icons),
-                    FrameCollector.snapshot(), build.snapshot(client, snapshot, icons));
+                    FrameCollector.snapshot(), build.snapshot(client, snapshot, icons),
+                    MinecraftInventoryCollector.icons(client, player, icons),
+                    sensors.collect(client, level, player, layouts.sensorNeeds(), millis), registries.collect(level, icons),
+                    appearance.collect(client, player, icons));
             telemetry.updatePlayer(
                     millis,
                     (now - sessionStartedNanos) / 1_000_000_000L,

@@ -24,10 +24,15 @@ import net.minecraft.world.item.ItemStack;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayDeque;
+import java.util.HexFormat;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -45,10 +50,16 @@ final class IconRenderer implements IconSource {
     private static final int MAX_ICONS = 4096;
     private static final int RENDERS_PER_TICK = 16;
     private static final long WAIT_MILLIS = 3_000;
+    private static final int MAX_TEXTURES = 512;
 
     private final Map<String, CompletableFuture<byte[]>> icons = new ConcurrentHashMap<>();
+    // Registry entries the pickers list: rendered only when the dashboard first asks for one (any thread).
+    private final Map<String, ItemStack> deferred = new ConcurrentHashMap<>();
+    private final ConcurrentLinkedQueue<String> wanted = new ConcurrentLinkedQueue<>();
     private final ArrayDeque<Pending> pending = new ArrayDeque<>();
     private final Map<String, byte[]> effectIcons = new ConcurrentHashMap<>();
+    // Skin and armor textures by key: PNG bytes, or a resource-pack texture read when the dashboard first asks.
+    private final Map<String, Object> textures = new ConcurrentHashMap<>();
     private final PoseStack poseStack = new PoseStack();
     private final Projection projection = new Projection();
     private volatile int epoch;
@@ -85,24 +96,87 @@ final class IconRenderer implements IconSource {
         pending.addLast(new Pending(key, copy, future));
     }
 
+    /**
+     * Client thread: a key for an icon that is rendered only if the dashboard asks for it (registry lists hold
+     * thousands of items, most of which are never shown).
+     */
+    String deferredKey(ItemStack stack) {
+        String key = keyFor(stack);
+        if (!icons.containsKey(key)) deferred.putIfAbsent(key, stack.copyWithCount(1));
+        return key;
+    }
+
     /** Resource packs changed: every icon must be rendered again under new keys. */
     void reset() {
         epoch++;
         icons.values().forEach(future -> future.complete(null));
         icons.clear();
         pending.clear();
+        deferred.clear();
+        wanted.clear();
         effectIcons.clear();
+        textures.clear();
     }
 
     @Override
     public byte[] icon(String key) throws InterruptedException {
         CompletableFuture<byte[]> future = icons.get(key);
+        if (future == null && deferred.containsKey(key)) {
+            // Rendered on the client thread; this thread waits for it like for any pending icon.
+            future = icons.computeIfAbsent(key, ignored -> new CompletableFuture<>());
+            wanted.add(key);
+        }
         if (future == null) return null;
         try {
             return future.get(WAIT_MILLIS, TimeUnit.MILLISECONDS);
         } catch (ExecutionException | TimeoutException unavailable) {
             return null;
         }
+    }
+
+    /**
+     * Client thread: a key for a texture in the active resource packs (armor layers, default skins), read only when
+     * the dashboard asks for it. Null once {@value #MAX_TEXTURES} textures are known (until the next reload).
+     */
+    String resourceTexture(Identifier path) {
+        return addTexture("r", path.toString().getBytes(StandardCharsets.UTF_8), path);
+    }
+
+    /** Client thread: a key for a texture the game already holds as pixels (a downloaded skin), as PNG bytes. */
+    String imageTexture(byte[] png) {
+        return addTexture("p", png, png);
+    }
+
+    private String addTexture(String kind, byte[] identity, Object value) {
+        String key;
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(identity);
+            key = kind + epoch + "-" + HexFormat.of().formatHex(digest, 0, 10);
+        } catch (NoSuchAlgorithmException unavailable) {
+            return null;
+        }
+        if (textures.containsKey(key)) return key;
+        if (textures.size() >= MAX_TEXTURES) return null;
+        textures.put(key, value);
+        return key;
+    }
+
+    @Override
+    public byte[] texture(String key) {
+        Object value = textures.get(key);
+        if (value instanceof byte[] png) return png.length == 0 ? null : png;
+        if (!(value instanceof Identifier path)) return null;
+        byte[] bytes = new byte[0];
+        var resource = Minecraft.getInstance().getResourceManager().getResource(path);
+        if (resource.isPresent()) {
+            try (InputStream input = resource.get().open()) {
+                bytes = input.readNBytes(4 * 1024 * 1024);
+            } catch (IOException | RuntimeException unreadable) {
+                bytes = new byte[0];
+            }
+        }
+        textures.replace(key, value, bytes);
+        return bytes.length == 0 ? null : bytes;
     }
 
     /** Effect icons are plain textures, so they are read from the active resource packs rather than rendered. */
@@ -128,6 +202,14 @@ final class IconRenderer implements IconSource {
 
     /** Render thread, between frames. */
     void renderPending(Minecraft minecraft) {
+        for (String key; (key = wanted.poll()) != null; ) {
+            ItemStack stack = deferred.remove(key);
+            CompletableFuture<byte[]> future = icons.get(key);
+            if (stack == null || future == null || future.isDone()) continue;
+            ItemStack copy = stack.copy();
+            copy.set(DataComponents.ENCHANTMENT_GLINT_OVERRIDE, false);
+            pending.addLast(new Pending(key, copy, future));
+        }
         if (pending.isEmpty()) return;
         ensureTargets();
         GpuDevice device = RenderSystem.getDevice();

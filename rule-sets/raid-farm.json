@@ -1,0 +1,49 @@
+{
+  "format": "minepanel-rules",
+  "version": 1,
+  "profiles": [
+    {
+      "id": "raid-farm",
+      "name": "Raid farm",
+      "panels": {
+        "xp":          { "x": 0, "y": 0,  "w": 4, "h": 4 },
+        "history":     { "x": 4, "y": 0,  "w": 4, "h": 18 },
+        "statistics":  { "x": 8, "y": 0,  "w": 4, "h": 18 },
+        "inventory":   { "x": 0, "y": 4,  "w": 4, "h": 9 },
+        "performance": { "x": 0, "y": 13, "w": 2, "h": 5 },
+        "player":      { "x": 2, "y": 13, "w": 2, "h": 5 }
+      },
+      "settings": {
+        "statistics": {
+          "shown": [
+            "minecraft:killed/minecraft:pillager",
+            "minecraft:killed/minecraft:vindicator",
+            "minecraft:killed/minecraft:evoker",
+            "minecraft:killed/minecraft:witch",
+            "minecraft:used/minecraft:diamond_sword",
+            "minecraft:custom/minecraft:walk_one_cm",
+            "minecraft:custom/minecraft:deaths",
+            "minecraft:custom/minecraft:mob_kills",
+            "minecraft:custom/minecraft:player_kills"
+          ]
+        },
+        "inventory": { "showArmor": false },
+        "xp": { "window": 600 },
+        "performance": { "window": 600 }
+      }
+    }
+  ],
+  "rules": [
+    {
+      "id": "raid-farm",
+      "name": "Raid farm",
+      "when": [
+        { "type": "killedMob", "entity": "minecraft:pillager", "window": 30, "compare": ">=", "value": 30 }
+      ],
+      "then": [
+        { "do": "profile", "profile": "raid-farm" }
+      ],
+      "timing": { "lingerMs": 20000 }
+    }
+  ]
+}
