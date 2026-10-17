@@ -20,6 +20,12 @@ gradlew.bat releaseBuild
 
 The configured release artifact is `build/release/minepanel-0.1.jar`. This is an expected output, not a claim that it has been generated here. Node.js is also required for frontend syntax and regression checks. Static assets are copied by Gradle into the JAR; there is no framework, transpilation step, or CDN. The build requires access to the configured Gradle/Fabric repositories the first time.
 
+## Testing locally
+
+- `./gradlew runClient` starts a development Minecraft client with MinePanel loaded, without copying anything anywhere.
+- `./gradlew installMod` builds the JAR (without running tests) and copies it into a real instance's `mods` folder, first deleting any other `minepanel-*.jar` there. Set the folder once in `~/.gradle/gradle.properties`, for example `minepanelModsDir=D:/Minecraft/Instances/26.1.2/minecraft/mods`, or pass `-PminepanelModsDir=...` or set `MINEPANEL_MODS_DIR`. Close Minecraft first; Windows locks loaded JARs.
+- `scripts/download-latest-release.ps1 -ModsDir <mods folder>` downloads the newest GitHub release JAR into a mods folder and removes older MinePanel JARs. It does nothing if that version is already there. `-ModsDir` defaults to `MINEPANEL_MODS_DIR`.
+
 ## GitHub Releases
 
 The [build workflow](.github/workflows/build.yml) runs on Ubuntu 24.04 with Java 25 and Node 22 and runs `./gradlew releaseBuild` (which includes `check`, service tests and frontend tests). It then checks the JAR's integrity and that the packaged `fabric.mod.json` has the expected id and version.
