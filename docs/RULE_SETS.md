@@ -2,6 +2,8 @@
 
 A **rule set** is a JSON file that holds dashboard rules, plus the folders, places and toggles they use. It can also hold **profiles**: how panels are arranged on the Default layout and on other named layouts, and their settings. One file can therefore set up a whole dashboard. You can write one by hand or have an agent write it, then import it in the dashboard. This document describes every field, every condition and action, and how rules are evaluated. A file that follows it imports without errors.
 
+This is the file-format reference. The user-facing guide to rules is in the [wiki](wiki/Rules.md); keep both in sync when conditions, actions, panels or settings change. The test suite imports the two ```` ```json ```` examples below, so don't add or remove `json` code blocks without updating `dashboard.test.js`.
+
 Contents: [Quick start](#quick-start) · [How rules work](#how-rules-work) · [File format](#file-format) · [Profiles: arranging panels](#profiles-arranging-panels) · [Conditions](#conditions) · [Actions](#actions) · [Panels](#panels) · [Panel settings](#panel-settings) · [Importing and exporting](#importing-and-exporting) · [The editor](#the-editor) · [Limits](#limits) · [Writing rule sets with an agent](#writing-rule-sets-with-an-agent) · [Full example](#full-example)
 
 ## Quick start
@@ -137,7 +139,7 @@ A saved spot that `nearPlace` conditions can use. **A place only counts in the w
 |---|---|---|
 | `id` | yes | id |
 | `name` | yes | 1–64 characters |
-| `world` | yes | 1–128 characters. The world's name, as shown on the Player panel. For a server, that is the address as typed in the server list. Not case sensitive |
+| `world` | yes | 1–128 characters. The world's name, as the editor's **+ current** fills it in on a Server / world condition. For a server, that is the address as typed in the server list. Not case sensitive |
 | `dimension` | yes | A dimension id such as `minecraft:overworld`, `minecraft:the_nether` or `minecraft:the_end` |
 | `x`, `y`, `z` | yes | Numbers, −30 000 000 to 30 000 000 |
 
@@ -296,6 +298,7 @@ Every condition is an object with a `type` and the type's parameters. Any condit
 | `movement` | `values`: any of `"ground"`, `"elytra"`, `"swimming"`, `"riding"`, `"flying"`, `"falling"` | How the player moves. Elytra wins over riding, riding over swimming, swimming over flying (creative or spectator), and flying over falling (in the air and falling faster than 1 block/s). Everything else is ground |
 | `speed` | `"axis"`: `"total"` (default), `"horizontal"` or `"vertical"`; compare | Speed in blocks per second, averaged over the last half second. Vertical is negative while going down |
 | `still` | — | Total speed below 0.1 blocks/s. Looking around doesn't count as moving. Combine with `for`, e.g. `"for": 30` |
+| `afk` | compare | Minutes since the player last moved more than ¼ block, turned or moved the mouse cursor in game (the AFK panel's timer) |
 | `onFire` | — | Burning |
 | `inWater` | — | In water |
 | `inLava` | — | In lava |
@@ -433,6 +436,7 @@ Every action is an object with `"do"` and its parameters.
 | `villagers` | Villager trades | 3 × 3 | 0, 25, 8, 8 |
 | `map` | JourneyMap (off by default) | 2 × 2 | 0, 33, 6, 6 |
 | `build` | Build progress, from Litematica (off by default) | 2 × 2 | 6, 33, 6, 4 |
+| `afk` | AFK timer over a crawl of your statistics (off by default) | 3 × 3 | 6, 37, 6, 6 |
 | `model` | 3D render of your player | 2 × 3 | 8, 25, 4, 8 |
 
 The default spots are what a profile gets when the file leaves `panels` out for a new profile, and what an `"off"` panel remembers. Your own dashboard's arrangement may differ; **Download all rules** includes it.
@@ -501,7 +505,7 @@ Everything in a rule set can also be made in the editor (**Rules** at the top of
   - ↑/↓ on a rule moves it within its folder, or past a whole folder.
   - ↑/↓ on a folder moves the folder with its rules.
   - The checkbox turns a folder on or off, and ▸/▾ collapses it.
-- **+ New rule**, **+ Folder**, **From template** (nine ready-made rules), and **Import / export**.
+- **+ New rule**, **+ Folder**, **From template** (ten ready-made rules), and **Import / export**.
 - **Rule**:
   - Name, Enabled, Folder, Duplicate, Share and Delete.
   - **Preview**: Force on or off, only in this browser, until the editor closes.

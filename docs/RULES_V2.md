@@ -476,4 +476,6 @@ State on 2026-10-16, branch `rules-v2`: phases 1–5 are done, and their code is
 
 - **Phase 6: Litematica conditions.** The `build` snapshot field already has what they need: placement loaded (`placement !== null`), progress (`placed / total`) and materials missing (`materials`, with `left` and `have`). Add the condition types the usual way: `CONDITION_TYPES` and `conditionParams` (`layout.js`), `evaluateCondition` (`rules.js`), `LayoutRules.java`, the shared fixtures, and the editor's `conditionWithType` / `conditionControls` / `CONDITION_LABELS` (`features.js`).
 
+**Docs to update with each change:** the user wiki ([Rules](wiki/Rules.md), [Rule conditions](wiki/Rule-Conditions.md), [Rule actions](wiki/Rule-Actions.md), [Templates and rule sets](wiki/Rule-Sets.md)) and [RULE_SETS.md](RULE_SETS.md). Phase 6's Litematica conditions need rows in both condition references. See [`AGENTS.md`](../AGENTS.md).
+
 **Where to start reading:** `features.js` from "Rules editor" down; `app.js` `evaluateView` / `applyLayout`; `layout.js` "Rules (v2)" to "Share strings" and "Layout solver"; `rules.js` `evaluateCondition` / `sensorCondition` / `effectiveView`; `SensorsCollector.java`.
