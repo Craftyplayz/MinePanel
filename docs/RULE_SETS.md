@@ -433,6 +433,7 @@ Every action is an object with `"do"` and its parameters.
 | `villagers` | Villager trades | 3 × 3 | 0, 25, 8, 8 |
 | `map` | JourneyMap (off by default) | 2 × 2 | 0, 33, 6, 6 |
 | `build` | Build progress, from Litematica (off by default) | 2 × 2 | 6, 33, 6, 4 |
+| `model` | 3D render of your player | 2 × 3 | 8, 25, 4, 8 |
 
 The default spots are what a profile gets when the file leaves `panels` out for a new profile, and what an `"off"` panel remembers. Your own dashboard's arrangement may differ; **Download all rules** includes it.
 
@@ -460,6 +461,9 @@ The default spots are what a profile gets when the file leaves `panels` out for 
 | `advancements` | `popupSeconds` | 0–300: how long a newly earned advancement pops up (0 = never) | `10` |
 | `advancements` | `hiddenTabs` | List of up to 64 advancement tab ids left out | `[]` |
 | `advancements` | `pinned` | List of up to 64 advancement ids listed first | `[]` |
+| `model` | `spin` | `true` / `false`: turn on its own (the model still holds still when the system asks for reduced motion) | `true` |
+| `model` | `axis` | `"y"` (turntable), `"x"` (head over heels) or `"z"` (cartwheel) | `"y"` |
+| `model` | `speed` | One of `15`, `30`, `60`, `120`: degrees a second | `30` |
 
 ## Importing and exporting
 

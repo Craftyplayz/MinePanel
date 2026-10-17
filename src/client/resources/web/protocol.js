@@ -212,7 +212,7 @@ function applyHistory(previous, patch) {
 // ------------------------------------------------------------------------------- World, motion and other details
 
 const DETAIL_FIELDS = ["world", "motion", "xp", "portal", "pickups", "advancements", "villagers", "enderChest",
-  "performance", "build", "icons", "sensors", "registries"];
+  "performance", "build", "icons", "sensors", "registries", "appearance"];
 const WEATHER = ["clear", "rain", "thunder"];
 const GAME_MODES = ["survival", "creative", "adventure", "spectator"];
 const MOTION_MODES = ["ground", "elytra", "swimming", "riding", "flying", "falling"];
@@ -451,6 +451,36 @@ function validateRegistries(registries) {
   })]));
 }
 
+const APPEARANCE_SLOTS = ["head", "chest", "legs", "feet"];
+const APPEARANCE_MODELS = ["humanoid", "humanoid_leggings", "wings"];
+const MAX_APPEARANCE_LAYERS = 16;
+const textureKey = value => typeof value === "string" && /^[a-z0-9-]{1,64}$/.test(value);
+const transformPart = value => Array.isArray(value) && value.length === 3
+  && value.every(number => finite(number) && Math.abs(number) <= 1000);
+
+function validateHeld(held) {
+  if (held === null) return null;
+  requireValid(object(held) && textureKey(held.icon) && typeof held.flat === "boolean"
+    && ["rotation", "translation", "scale"].every(key => transformPart(held[key])));
+  return { icon: held.icon, flat: held.flat, rotation: [...held.rotation], translation: [...held.translation],
+    scale: [...held.scale] };
+}
+
+/** What the 3D render panel draws; mirrors Appearance on the Java side. */
+function validateAppearance(appearance) {
+  requireValid(object(appearance) && (appearance.skin === null || textureKey(appearance.skin))
+    && typeof appearance.slim === "boolean" && Array.isArray(appearance.armor)
+    && appearance.armor.length <= MAX_APPEARANCE_LAYERS);
+  const armor = appearance.armor.map(layer => {
+    requireValid(object(layer) && APPEARANCE_SLOTS.includes(layer.slot) && APPEARANCE_MODELS.includes(layer.model)
+      && textureKey(layer.texture) && (layer.color === null || typeof layer.color === "string"
+        && /^#[0-9a-f]{6}$/.test(layer.color)));
+    return { slot: layer.slot, model: layer.model, texture: layer.texture, color: layer.color };
+  });
+  return { skin: appearance.skin, slim: appearance.slim, armor, rightHand: validateHeld(appearance.rightHand),
+    leftHand: validateHeld(appearance.leftHand) };
+}
+
 /** Validates the detail fields: required while in a world (advancements and ender chest may be null), else null. */
 function validateDetails(state) {
   requireValid(DETAIL_FIELDS.every(key => has(state, key)));
@@ -461,7 +491,7 @@ function validateDetails(state) {
   const validators = { world: validateWorld, motion: validateMotion, xp: validateXp, portal: validatePortal,
     pickups: validatePickups, advancements: validateAdvancements, villagers: validateVillagers,
     enderChest: validateEnderChest, performance: validatePerformance, build: validateBuild, icons: validateIcons,
-    sensors: validateSensors, registries: validateRegistries };
+    sensors: validateSensors, registries: validateRegistries, appearance: validateAppearance };
   return Object.fromEntries(DETAIL_FIELDS.map(key => {
     const value = state[key];
     // Deltas carry over unchanged fields from the previous state, which were validated when they arrived.

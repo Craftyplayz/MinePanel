@@ -70,7 +70,7 @@ final class LayoutRules {
             Map.entry("movement", new int[] {2, 2}), Map.entry("xp", new int[] {2, 2}),
             Map.entry("pickups", new int[] {2, 2}), Map.entry("advancements", new int[] {3, 3}),
             Map.entry("villagers", new int[] {3, 3}), Map.entry("performance", new int[] {2, 2}),
-            Map.entry("afk", new int[] {3, 3}));
+            Map.entry("afk", new int[] {3, 3}), Map.entry("model", new int[] {2, 3}));
     private static final Pattern ID = Pattern.compile("[a-z0-9-]{1,32}");
     private static final Pattern REGISTRY_ID = Pattern.compile("[a-z0-9_.-]+:[a-z0-9/._-]+");
     private static final Pattern STATISTIC_ID = Pattern.compile("[a-z0-9_.-]+:[a-z0-9_.-]+/[a-z0-9_.-]+:[a-z0-9/._-]+");

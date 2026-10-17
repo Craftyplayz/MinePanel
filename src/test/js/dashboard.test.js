@@ -6,7 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const web = path.join(__dirname, "../../client/resources/web");
-const sources = ["protocol.js", "layout.js", "rules.js", "app.js", "player-links.js", "features.js"].map(name => fs.readFileSync(path.join(web, name), "utf8"));
+const sources = ["protocol.js", "layout.js", "rules.js", "app.js", "player-links.js", "features.js", "model.js"].map(name => fs.readFileSync(path.join(web, name), "utf8"));
 
 function empty() {
   return { empty: true, itemId: null, name: null, count: 0, maxCount: 0,
@@ -57,7 +57,7 @@ function details() {
     icons: { name: "Steve", uuid: "8667ba71-b85a-4004-af54-457a9734eed7",
       head: item({ itemId: "minecraft:player_head", name: "Steve's Head", count: 1, icon: "e0-head" }),
       enderChest: item({ itemId: "minecraft:ender_chest", name: "Ender Chest", count: 1, icon: "e0-ender" }) },
-    sensors: sensors(), registries: registries()
+    sensors: sensors(), registries: registries(), appearance: appearance()
   };
 }
 
@@ -65,6 +65,14 @@ function sensors(overrides = {}) {
   return { moonPhase: 0, spawnDistance: 120, air: 300, maxAir: 300, armor: 0, onFire: false, inWater: false,
     inLava: false, inRain: false, sneaking: false, sprinting: false, sleeping: false, riding: null, using: null,
     bossBar: false, raid: false, light: null, look: null, nearby: null, screen: null, ...overrides };
+}
+
+function appearance(overrides = {}) {
+  return { skin: "p0-0a1b2c3d4e5f60718293", slim: false,
+    armor: [{ slot: "chest", model: "humanoid", texture: "r0-1a2b3c4d5e6f70819203", color: null },
+      { slot: "legs", model: "humanoid_leggings", texture: "r0-2b3c4d5e6f7081920314", color: "#a06540" }],
+    rightHand: { icon: "e0-sword", flat: true, rotation: [0, -90, 55], translation: [0, 4, 0.5], scale: [0.85, 0.85, 0.85] },
+    leftHand: null, ...overrides };
 }
 
 function registries(overrides = {}) {
@@ -101,7 +109,7 @@ function unavailable(overrides = {}) {
     absorption: null, inventory: null, statistics: null, history: history({ active: false }),
     food: null, saturation: null, effects: null, world: null, motion: null, xp: null, portal: null, pickups: null,
     advancements: null, villagers: null, enderChest: null, performance: null, build: null, icons: null, sensors: null,
-    registries: null, ...overrides });
+    registries: null, appearance: null, ...overrides });
 }
 
 function defaultFetch(storedLayout = null, requests = []) {
@@ -1200,7 +1208,7 @@ test("imported or stored layouts are validated and completed", () => {
   const normalize = value => h.run(`normalizeLayout(${JSON.stringify(value)})`);
   const partial = normalize({ version: 1, tiles: [{ id: "history", enabled: true, x: 0, y: 5, w: 12, h: 2 }] });
   assert.deepEqual(plain(partial.tiles[0]), { id: "history", enabled: true, x: 0, y: 0, w: 12, h: 3 });
-  assert.equal(partial.tiles.length, 13);
+  assert.equal(partial.tiles.length, 14);
   assert.equal(partial.tiles.filter(tile => tile.enabled).length, 1, "missing tiles are added disabled");
   for (const bad of [null, [], { version: 3, tiles: [] }, { version: 1 }, { version: 2 },
     { version: 1, tiles: [{ id: "chat", enabled: true, x: 0, y: 0, w: 1, h: 1 }] },
@@ -1230,7 +1238,7 @@ test("the saved layout is loaded after the session and applied to tile grid plac
     [["Player", "false"], ["Inventory", "true"], ["Statistics", "false"], ["Activity log", "false"],
       ["JourneyMap", "false"], ["Build progress", "false"], ["Movement", "false"], ["Experience", "false"],
       ["Recent pickups", "false"], ["Advancements", "false"], ["Villager trades", "false"], ["Performance", "false"],
-      ["AFK", "false"]]);
+      ["AFK", "false"], ["3D render", "false"]]);
   await h.runTimers(400);
   const saves = requests.filter(request => request.url === "/api/layout" && request.method === "PUT");
   assert.equal(saves.length, 1, "a version 1 layout is saved back converted");
@@ -1709,7 +1717,7 @@ test("rules v2: the documented layout round-trips and missing parts get defaults
   for (const key of ["rules", "folders", "places", "toggles", "animation", "pinned"]) {
     assert.deepEqual(layout[key], docLayout()[key], key);
   }
-  assert.equal(layout.profiles[0].tiles.length, 13);
+  assert.equal(layout.profiles[0].tiles.length, 14);
   assert.equal(layout.profiles[0].settings.xp.window, 60, "profile settings are completed with defaults");
   assert.deepEqual(plain(R.normalizeLayout(layout)), layout, "normalizing is idempotent");
   assert.deepEqual(plain(R.normalizeLayout(plain(R.defaultLayout()))), plain(R.defaultLayout()));
@@ -2435,7 +2443,7 @@ test("rules v2: rule sets arrange profiles: Default, existing ones by name and n
   const mining = next.profiles.find(profile => profile.id === "mine");
   assert.equal(mining.settings.pickups.maxRows, 12);
   assert.equal(mining.settings.xp.window, 3600);
-  assert.equal(mining.tiles.length, 13, "Mining keeps its panels");
+  assert.equal(mining.tiles.length, 14, "Mining keeps its panels");
   const flying = next.profiles.find(profile => profile.name === "Flying");
   assert.equal(flying.id, "fly");
   assert.deepEqual(plain(next.profiles.map(profile => profile.id)), ["keep", "mine", "fly"], "others stay unless replacing");
@@ -3371,4 +3379,108 @@ test("rules editor: Set on grid docks the editor and shows the panel's ghost to 
   buttonNamed(ghost, "Set").emit("click");
   await h.runTimers(400);
   assert.deepEqual(savedLayout(requests).rules[0].then[0], { do: "place", panel: "xp", x: 2, y: 3, w: 4, h: 4 });
+});
+
+test("the player's appearance is validated like the Java model", () => {
+  const h = harness();
+  assert.deepEqual(plain(h.apply(undefined, initial()).appearance), appearance());
+  assert.equal(h.apply(undefined, initial(snapshot({ appearance: appearance({ skin: null }) }))).appearance.skin, null,
+    "a skin that can't be read is allowed; the model is drawn without it");
+  const layer = appearance().armor[0];
+  const held = appearance().rightHand;
+  for (const bad of [
+    appearance({ skin: "Skin.png" }), appearance({ slim: "no" }),
+    appearance({ armor: Array.from({ length: 17 }, () => layer) }),
+    appearance({ armor: [{ ...layer, slot: "offhand" }] }), appearance({ armor: [{ ...layer, model: "horse_body" }] }),
+    appearance({ armor: [{ ...layer, color: "#ABCDEF" }] }), appearance({ armor: [{ ...layer, texture: null }] }),
+    appearance({ rightHand: { ...held, rotation: [0, 0] } }), appearance({ rightHand: { ...held, scale: [1, 1, 1e6] } }),
+    appearance({ leftHand: { ...held, flat: 1 } }), undefined
+  ]) {
+    assert.throws(() => h.apply(undefined, initial(snapshot({ appearance: bad }))), JSON.stringify(bad));
+  }
+});
+
+test("3D render: boxes use the game's texture layout and item sprites are extruded at their own pixel size", () => {
+  const h = harness();
+  // The head's front face (towards -z in model space) shows the face, (8, 8)–(16, 16) of a 64 × 64 skin.
+  const head = h.run(`(() => { const out = []; addCube(out, [0, 0], [-4, -8, -4], [8, 8, 8], 0, false, [64, 64]); return out; })()`);
+  assert.equal(head.length, 6 * 6 * 8, "six faces of two triangles");
+  const front = head.slice(3 * 6 * 8, 4 * 6 * 8);
+  const vertices = Array.from({ length: 6 }, (_, index) => front.slice(index * 8, index * 8 + 8));
+  assert.ok(vertices.every(vertex => vertex[2] === -4 && vertex[5] === -1), "the front face is at z = -4, facing -z");
+  assert.deepEqual([...new Set(vertices.map(vertex => vertex.slice(6).join()))].sort(),
+    ["0.125,0.125", "0.125,0.25", "0.25,0.125", "0.25,0.25"]);
+  const left = vertices.find(vertex => vertex[0] === -4 && vertex[1] === -8);
+  assert.deepEqual(plain(left.slice(6)), [0.125, 0.125], "the face's top-left texel is at the box's -x top corner");
+
+  // A 16-pixel sprite drawn at 64 × 64 (4 × 4 blocks): one opaque sprite pixel gives a slab and four side walls.
+  const sprite = h.run(`(() => {
+    const pixels = new Uint8ClampedArray(64 * 64 * 4);
+    for (let y = 8; y < 12; y++) for (let x = 4; x < 8; x++) pixels.set([200, 100, 50, 255], (y * 64 + x) * 4);
+    return { factor: pixelFactor(pixels, 64), mesh: extrudeSprite(pixels, 64, null) };
+  })()`);
+  assert.equal(sprite.factor, 4);
+  assert.equal(sprite.mesh.length, (2 + 4) * 6 * 8, "front, back and four walls around the one pixel");
+});
+
+test("3D render: after a drag it waits, then eases back upright while spinning up again", () => {
+  const h = harness();
+  const result = h.run(`(() => {
+    const settings = { spin: true, axis: "y", speed: 30 };
+    const spin = createSpin();
+    const facing = () => decompose(spinOrientation(spin, "y"), "y").angle;
+    dragSpin(spin, "y", 40, 90);
+    const tilted = quat.angle(spin.swing);
+    const heading = facing();
+    stepSpin(spin, SPIN_RETURN_DELAY - 0.1, settings);
+    const waiting = { tilt: quat.angle(spin.swing), heading: facing() };
+    for (let step = 0; step < 300; step++) stepSpin(spin, 1 / 30, settings);
+    return { tilted, heading, waiting, settled: quat.angle(spin.swing), ramp: spin.ramp };
+  })()`);
+  assert.ok(result.tilted > 0.5, "dragging down tips the model over");
+  assert.ok(Math.abs(result.waiting.tilt - result.tilted) < 1e-9 && Math.abs(result.waiting.heading - result.heading) < 1e-9,
+    "it stays where it was left for a moment");
+  assert.ok(result.settled < 1e-3, `it ends upright (${result.settled})`);
+  assert.equal(result.ramp, 1, "and back at full speed");
+
+  const still = h.run(`(() => {
+    const spin = createSpin();
+    dragSpin(spin, "y", 0, 60);
+    const before = spinOrientation(spin, "y");
+    const moving = stepSpin(spin, 5, { spin: false, axis: "y", speed: 30 });
+    return { moving, unchanged: before.every((value, index) => Math.abs(value - spinOrientation(spin, "y")[index]) < 1e-12) };
+  })()`);
+  assert.deepEqual(plain(still), { moving: false, unchanged: true }, "with spinning off it stays where it was dragged");
+
+  const rebased = h.run(`(() => {
+    const spin = createSpin();
+    dragSpin(spin, "y", 30, 45);
+    const before = spinOrientation(spin, "y");
+    rebaseSpin(spin, before, "x");
+    const after = spinOrientation(spin, "x");
+    return before.every((value, index) => Math.abs(value - after[index]) < 1e-9);
+  })()`);
+  assert.equal(rebased, true, "changing the axis doesn't make the model jump");
+});
+
+test("3D render tile: settings are saved, and it explains when there is nothing to draw", async () => {
+  const requests = [];
+  const h = harness(defaultFetch(null, requests));
+  await h.flush();
+  assert.equal(h.get("#model-status").textContent, "Unavailable");
+  assert.equal(h.get("#model-message").textContent, "Join a world to see your player.");
+  h.sockets[0].message(initial(snapshot()));
+  assert.equal(h.get("#model-message").hidden, false);
+  assert.match(h.get("#model-message").textContent, /can't draw 3D/, "no WebGL in the test browser");
+
+  assert.deepEqual(h.get("#model-axis").children.map(option => option.textContent), ["Turntable", "Head over heels", "Cartwheel"]);
+  assert.equal(h.get("#model-spin").checked, true);
+  assert.equal(h.get("#model-speed").value, "30");
+  setValue(h.get("#model-spin"), false);
+  setValue(h.get("#model-axis"), "z");
+  setValue(h.get("#model-speed"), "60");
+  await h.runTimers(400);
+  assert.deepEqual(savedLayout(requests).settings.model, { spin: false, axis: "z", speed: 60 });
+  assert.throws(() => h.run(`normalizeSettings({ model: { speed: 45 } })`), /Invalid model settings/);
+  assert.throws(() => h.run(`normalizeSettings({ model: { axis: "w" } })`), /Invalid model settings/);
 });

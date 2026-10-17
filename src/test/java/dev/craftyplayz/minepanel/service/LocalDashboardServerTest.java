@@ -390,6 +390,10 @@ public final class LocalDashboardServerTest {
                 return key.equals("e0-abc") ? icon : null;
             }
 
+            public byte[] texture(String key) {
+                return key.equals("p0-skin") ? icon : null;
+            }
+
             public byte[] effectIcon(String id) {
                 return id.equals("minecraft:speed") ? icon : null;
             }
@@ -399,7 +403,7 @@ public final class LocalDashboardServerTest {
             server.start();
             URI base = URI.create(server.getUrl());
             String origin = base.toString().substring(0, base.toString().length() - 1);
-            for (String asset : new String[] {"protocol.js", "layout.js", "styles.css"}) {
+            for (String asset : new String[] {"protocol.js", "layout.js", "model.js", "styles.css"}) {
                 check(get(base.resolve(asset)).statusCode() == 200, asset + " is served");
             }
             HttpResponse<byte[]> iconResponse = CLIENT.send(HttpRequest.newBuilder(base.resolve("icon/e0-abc.png")).GET().build(),
@@ -414,6 +418,12 @@ public final class LocalDashboardServerTest {
             check(get(base.resolve("effect/minecraft/speed.png")).statusCode() == 200, "effect icons are served");
             check(get(base.resolve("effect/minecraft/flight.png")).statusCode() == 404, "unknown effect icons are not found");
             check(get(base.resolve("effect/Minecraft/../speed.png")).statusCode() == 404, "effect paths are strict");
+            HttpResponse<byte[]> skin = CLIENT.send(HttpRequest.newBuilder(base.resolve("texture/p0-skin.png")).GET().build(),
+                    HttpResponse.BodyHandlers.ofByteArray());
+            check(skin.statusCode() == 200 && skin.headers().firstValue("content-type").orElse("").equals("image/png")
+                            && java.util.Arrays.equals(skin.body(), icon), "skin and armor textures are served as PNGs");
+            check(get(base.resolve("texture/r0-missing.png")).statusCode() == 404, "unknown textures are not found");
+            check(get(base.resolve("texture/P0-skin.png")).statusCode() == 404, "texture keys are strict");
             String csp = get(base).headers().firstValue("content-security-policy").orElse("");
             check(csp.contains("frame-src http://127.0.0.1:* http://localhost:*")
                             && csp.contains("connect-src 'self' ws://127.0.0.1:") && !csp.contains("https:"),

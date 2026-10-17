@@ -2418,10 +2418,14 @@ function settingAction(panel, setting) {
 function settingValueControl(action, key) {
   const value = action.value;
   const change = next => editRules(() => { action.value = next; }, false);
-  const choices = { xp: { window: XP_WINDOW_CHOICES }, performance: { window: PERFORMANCE_WINDOW_CHOICES } }
-    [action.panel]?.[action.setting];
-  if (choices) return selectInput(`${key}.value`, choices.map(choice => [String(choice), `${choice} s`]),
+  const choices = { xp: { window: XP_WINDOW_CHOICES }, performance: { window: PERFORMANCE_WINDOW_CHOICES },
+    model: { speed: MODEL_SPEED_CHOICES } }[action.panel]?.[action.setting];
+  const unit = action.panel === "model" ? "°/s" : " s";
+  if (choices) return selectInput(`${key}.value`, choices.map(choice => [String(choice), `${choice}${unit}`]),
     String(value), next => change(Number(next)));
+  if (action.panel === "model" && action.setting === "axis") {
+    return selectInput(`${key}.value`, MODEL_AXIS_CHOICES.map(axis => [axis, MODEL_AXIS_LABELS[axis]]), value, change);
+  }
   if (typeof value === "boolean") return checkInput(`${key}.value`, "on", value, change);
   if (typeof value === "number") return numberInput(`${key}.value`, value, change, { min: 0 });
   if (Array.isArray(value)) {

@@ -57,7 +57,7 @@ const layoutFile = $("#layout-file");
 const TILE_LABELS = { player: "Player", inventory: "Inventory", statistics: "Statistics",
   history: "Activity log", map: "JourneyMap", build: "Build progress", movement: "Movement", xp: "Experience",
   pickups: "Recent pickups", advancements: "Advancements", villagers: "Villager trades", performance: "Performance",
-  afk: "AFK" };
+  afk: "AFK", model: "3D render" };
 const CATEGORY_LABELS = { lifecycle: "Session", death: "Death", dimension: "Dimension", kill: "Kill",
   mine: "Mined", place: "Placed", container: "Opened", inventory: "Inventory", drop: "Dropped",
   damage: "Damage", heal: "Healed", advancement: "Advancement", biome: "Biome", weather: "Weather", time: "Day" };

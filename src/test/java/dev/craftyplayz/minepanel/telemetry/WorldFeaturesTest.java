@@ -13,6 +13,7 @@ public final class WorldFeaturesTest {
         testContentsAndDetails();
         testFrameStats();
         testSensorsAndRegistries();
+        testAppearance();
         System.out.println("MinePanel world feature unit tests passed.");
     }
 
@@ -246,6 +247,44 @@ public final class WorldFeaturesTest {
 
     private static void check(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);
+    }
+
+    private static void testAppearance() {
+        var sword = Appearance.Held.rounded("e0-sword", true, new double[] {0, -90.00001, 55},
+                new double[] {0, 4.0000002, 0.5}, new double[] {0.85, 0.85, 0.85});
+        var appearance = new Appearance("p0-skin", true,
+                List.of(new Appearance.ArmorLayer("legs", "humanoid_leggings", "r0-legs", "#a06540"),
+                        new Appearance.ArmorLayer("chest", "wings", "r0-elytra", null)), sword, null);
+        check(appearance.toJson().equals("{\"skin\":\"p0-skin\",\"slim\":true,\"armor\":["
+                + "{\"slot\":\"legs\",\"model\":\"humanoid_leggings\",\"texture\":\"r0-legs\",\"color\":\"#a06540\"},"
+                + "{\"slot\":\"chest\",\"model\":\"wings\",\"texture\":\"r0-elytra\",\"color\":null}],"
+                + "\"rightHand\":{\"icon\":\"e0-sword\",\"flat\":true,\"rotation\":[0.0,-90.0,55.0],"
+                + "\"translation\":[0.0,4.0,0.5],\"scale\":[0.85,0.85,0.85]},\"leftHand\":null}"),
+                "appearance serializes, with float noise rounded away: " + appearance.toJson());
+        check(Appearance.Held.rounded("e0-sword", true, new double[] {0, -89.99999, 55}, new double[] {0, 4, 0.5},
+                new double[] {0.85, 0.85, 0.85}).equals(sword), "rounded transforms compare equal, so they aren't resent");
+        check(Appearance.EMPTY.toJson().equals("{\"skin\":null,\"slim\":false,\"armor\":[],\"rightHand\":null,"
+                + "\"leftHand\":null}"), "an unreadable appearance is empty");
+        invalid(() -> new Appearance("Skin.png", false, List.of(), null, null));
+        invalid(() -> new Appearance.ArmorLayer("offhand", "humanoid", "r0-a", null));
+        invalid(() -> new Appearance.ArmorLayer("head", "horse_body", "r0-a", null));
+        invalid(() -> new Appearance.ArmorLayer("head", "humanoid", "r0-a", "#ABCDEF"));
+        invalid(() -> new Appearance(null, false, java.util.Collections.nCopies(17,
+                new Appearance.ArmorLayer("head", "humanoid", "r0-a", null)), null, null));
+        invalid(() -> new Appearance.Held("e0-sword", true, Double.NaN, 0, 0, 0, 0, 0, 1, 1, 1));
+
+        var details = PlayerDetails.placeholder();
+        check(details.appearance().equals(Appearance.EMPTY), "details without an appearance carry the empty one");
+        var dressed = new PlayerDetails(details.world(), details.motion(), details.xp(), details.portal(),
+                details.pickups(), null, List.of(), null, details.performance(), details.build(), details.icons(),
+                details.sensors(), details.registries(), appearance);
+        var before = new PlayerSnapshot(1, 1, true, 0L, "minecraft:overworld", 0.0, 0.0, 0.0, 20.0, 20.0, 0.0,
+                InventorySnapshot.empty(), null, GameplayHistory.empty(), 20, 5.0, List.of(), details);
+        var after = new PlayerSnapshot(2, 2, true, 0L, "minecraft:overworld", 0.0, 0.0, 0.0, 20.0, 20.0, 0.0,
+                InventorySnapshot.empty(), null, GameplayHistory.empty(), 20, 5.0, List.of(), dressed);
+        check(before.toJson().contains(",\"appearance\":" + Appearance.EMPTY.toJson() + "}"),
+                "full snapshots end with the appearance");
+        check(after.toDeltaJson(before).contains(",\"appearance\":" + appearance.toJson()), "a changed appearance is sent");
     }
 
     private static void invalid(Runnable action) {

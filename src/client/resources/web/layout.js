@@ -13,17 +13,21 @@ const LAYOUT_COLUMNS = 12;
 const LAYOUT_MAX_Y = 1000;
 const LAYOUT_MAX_H = 60;
 const TILE_IDS = ["player", "inventory", "statistics", "history", "map", "build",
-  "movement", "xp", "pickups", "advancements", "villagers", "performance", "afk"];
+  "movement", "xp", "pickups", "advancements", "villagers", "performance", "afk", "model"];
 const TILE_MINIMUMS = {
   player: { w: 2, h: 2 }, inventory: { w: 3, h: 2 }, statistics: { w: 2, h: 3 },
   history: { w: 3, h: 3 }, map: { w: 2, h: 2 }, build: { w: 2, h: 2 },
   movement: { w: 2, h: 2 }, xp: { w: 2, h: 2 }, pickups: { w: 2, h: 2 }, advancements: { w: 3, h: 3 },
-  villagers: { w: 3, h: 3 }, performance: { w: 2, h: 2 }, afk: { w: 3, h: 3 }
+  villagers: { w: 3, h: 3 }, performance: { w: 2, h: 2 }, afk: { w: 3, h: 3 }, model: { w: 2, h: 3 }
 };
 const MAX_STATISTIC_SETTINGS = 512;
 const DEFAULT_MAP_URL = "http://127.0.0.1:8080/";
 const XP_WINDOW_CHOICES = [10, 30, 60, 300, 600, 3600];
 const PERFORMANCE_WINDOW_CHOICES = [10, 30, 60, 600];
+// The 3D render spins about the vertical (y), head over heels (x) or cartwheeling (z), in degrees per second.
+const MODEL_AXIS_CHOICES = ["y", "x", "z"];
+const MODEL_SPEED_CHOICES = [15, 30, 60, 120];
+const MODEL_AXIS_LABELS = { y: "Turntable", x: "Head over heels", z: "Cartwheel" };
 const MAX_XP_GOALS = 8;
 const MAX_XP_GOAL_LEVEL = 10000;
 const MAX_PROFILES = 16;
@@ -55,7 +59,8 @@ function defaultSettings() {
     pickups: { lifetime: 30, maxRows: 8, showSource: true, ignored: [] },
     // Tabs (advancement roots) left out, e.g. ones datapacks only use to list themselves;
     // pinned advancements are listed first, in the order they were pinned.
-    advancements: { popupSeconds: 10, hiddenTabs: [], pinned: [] }
+    advancements: { popupSeconds: 10, hiddenTabs: [], pinned: [] },
+    model: { spin: true, axis: "y", speed: 30 }
   };
 }
 
@@ -89,7 +94,10 @@ const SETTING_RULES = [
   ["pickups", "ignored", validItemIds],
   ["advancements", "popupSeconds", value => wholeIn(value, 0, 300)],
   ["advancements", "hiddenTabs", validItemIds],
-  ["advancements", "pinned", validItemIds]
+  ["advancements", "pinned", validItemIds],
+  ["model", "spin", value => typeof value === "boolean"],
+  ["model", "axis", value => MODEL_AXIS_CHOICES.includes(value)],
+  ["model", "speed", value => MODEL_SPEED_CHOICES.includes(value)]
 ];
 
 /** Copies only known, valid settings out of {@code value}; rejects present-but-malformed ones. */
@@ -133,7 +141,8 @@ function defaultLayout() {
     { id: "villagers", enabled: true, x: 0, y: 25, w: 8, h: 8 },
     { id: "map", enabled: false, x: 0, y: 33, w: 6, h: 6 },
     { id: "build", enabled: false, x: 6, y: 33, w: 6, h: 4 },
-    { id: "afk", enabled: false, x: 6, y: 37, w: 6, h: 6 }
+    { id: "afk", enabled: false, x: 6, y: 37, w: 6, h: 6 },
+    { id: "model", enabled: true, x: 8, y: 25, w: 4, h: 8 }
   ], profiles: [], pinned: [], updates: { intervalMillis: DEFAULT_UPDATE_INTERVAL },
   animation: { ...DEFAULT_ANIMATION }, folders: [], places: [], toggles: [], rules: [] };
 }

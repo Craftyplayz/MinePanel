@@ -26,6 +26,7 @@ public final class LocalDashboardServer implements AutoCloseable {
     private static final Logger LOGGER = Logger.getLogger("MinePanel");
     private static final int MAX_RESPONSE_BYTES = 1024 * 1024;
     private static final Pattern ICON_PATH = Pattern.compile("/icon/([a-z0-9-]{1,64})\\.png");
+    private static final Pattern TEXTURE_PATH = Pattern.compile("/texture/([a-z0-9-]{1,64})\\.png");
     private static final Pattern EFFECT_PATH = Pattern.compile("/effect/([a-z0-9_.-]{1,64})/([a-z0-9_.-]{1,128})\\.png");
     private static final Map<String, String[]> ASSETS = Map.of(
             "/", new String[] {"web/index.html", "text/html; charset=utf-8"},
@@ -35,6 +36,7 @@ public final class LocalDashboardServer implements AutoCloseable {
             "/rules.js", new String[] {"web/rules.js", "text/javascript; charset=utf-8"},
             "/player-links.js", new String[] {"web/player-links.js", "text/javascript; charset=utf-8"},
             "/features.js", new String[] {"web/features.js", "text/javascript; charset=utf-8"},
+            "/model.js", new String[] {"web/model.js", "text/javascript; charset=utf-8"},
             "/features.css", new String[] {"web/features.css", "text/css; charset=utf-8"},
             "/styles.css", new String[] {"web/styles.css", "text/css; charset=utf-8"});
     private static final Pattern VILLAGER_PATH = Pattern.compile(
@@ -143,6 +145,18 @@ public final class LocalDashboardServer implements AutoCloseable {
             var icon = ICON_PATH.matcher(path);
             if (icon.matches()) {
                 serveIcon(exchange, icon.group(1));
+                return;
+            }
+            var texture = TEXTURE_PATH.matcher(path);
+            if (texture.matches()) {
+                byte[] png = icons == null ? null : icons.texture(texture.group(1));
+                if (png == null) {
+                    respond(exchange, 404, "text/plain; charset=utf-8", "Texture unavailable");
+                } else {
+                    // Keys change with the texture's contents or the resource packs, like icon keys.
+                    exchange.getResponseHeaders().set("Cache-Control", "private, max-age=31536000, immutable");
+                    send(exchange, 200, "image/png", png);
+                }
                 return;
             }
             var effect = EFFECT_PATH.matcher(path);

@@ -24,7 +24,11 @@ import net.minecraft.world.item.ItemStack;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayDeque;
+import java.util.HexFormat;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -46,6 +50,7 @@ final class IconRenderer implements IconSource {
     private static final int MAX_ICONS = 4096;
     private static final int RENDERS_PER_TICK = 16;
     private static final long WAIT_MILLIS = 3_000;
+    private static final int MAX_TEXTURES = 512;
 
     private final Map<String, CompletableFuture<byte[]>> icons = new ConcurrentHashMap<>();
     // Registry entries the pickers list: rendered only when the dashboard first asks for one (any thread).
@@ -53,6 +58,8 @@ final class IconRenderer implements IconSource {
     private final ConcurrentLinkedQueue<String> wanted = new ConcurrentLinkedQueue<>();
     private final ArrayDeque<Pending> pending = new ArrayDeque<>();
     private final Map<String, byte[]> effectIcons = new ConcurrentHashMap<>();
+    // Skin and armor textures by key: PNG bytes, or a resource-pack texture read when the dashboard first asks.
+    private final Map<String, Object> textures = new ConcurrentHashMap<>();
     private final PoseStack poseStack = new PoseStack();
     private final Projection projection = new Projection();
     private volatile int epoch;
@@ -108,6 +115,7 @@ final class IconRenderer implements IconSource {
         deferred.clear();
         wanted.clear();
         effectIcons.clear();
+        textures.clear();
     }
 
     @Override
@@ -124,6 +132,51 @@ final class IconRenderer implements IconSource {
         } catch (ExecutionException | TimeoutException unavailable) {
             return null;
         }
+    }
+
+    /**
+     * Client thread: a key for a texture in the active resource packs (armor layers, default skins), read only when
+     * the dashboard asks for it. Null once {@value #MAX_TEXTURES} textures are known (until the next reload).
+     */
+    String resourceTexture(Identifier path) {
+        return addTexture("r", path.toString().getBytes(StandardCharsets.UTF_8), path);
+    }
+
+    /** Client thread: a key for a texture the game already holds as pixels (a downloaded skin), as PNG bytes. */
+    String imageTexture(byte[] png) {
+        return addTexture("p", png, png);
+    }
+
+    private String addTexture(String kind, byte[] identity, Object value) {
+        String key;
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(identity);
+            key = kind + epoch + "-" + HexFormat.of().formatHex(digest, 0, 10);
+        } catch (NoSuchAlgorithmException unavailable) {
+            return null;
+        }
+        if (textures.containsKey(key)) return key;
+        if (textures.size() >= MAX_TEXTURES) return null;
+        textures.put(key, value);
+        return key;
+    }
+
+    @Override
+    public byte[] texture(String key) {
+        Object value = textures.get(key);
+        if (value instanceof byte[] png) return png.length == 0 ? null : png;
+        if (!(value instanceof Identifier path)) return null;
+        byte[] bytes = new byte[0];
+        var resource = Minecraft.getInstance().getResourceManager().getResource(path);
+        if (resource.isPresent()) {
+            try (InputStream input = resource.get().open()) {
+                bytes = input.readNBytes(4 * 1024 * 1024);
+            } catch (IOException | RuntimeException unreadable) {
+                bytes = new byte[0];
+            }
+        }
+        textures.replace(key, value, bytes);
+        return bytes.length == 0 ? null : bytes;
     }
 
     /** Effect icons are plain textures, so they are read from the active resource packs rather than rendered. */

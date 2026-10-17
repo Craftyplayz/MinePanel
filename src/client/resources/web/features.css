@@ -77,6 +77,11 @@
 .afk-crawl-item .stat-category { margin-right: 6px; color: var(--muted); font-size: 11px; }
 .afk-crawl-item .total { font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .afk-crawl-empty { margin: 0; color: var(--muted); font-size: 12px; }
+/* 3D render: the canvas fills the tile below its settings; dragging turns the model */
+.model-stage { position: relative; flex: 1; min-height: 0; }
+.model-canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
+.model-stage.dragging .model-canvas { cursor: grabbing; }
+.model-message { position: absolute; inset: 0; display: grid; place-items: center; padding: 12px; text-align: center; pointer-events: none; }
 .popover { position: absolute; z-index: 10; top: 36px; right: 10px; display: flex; flex-wrap: wrap; gap: 4px; max-width: 220px; padding: 8px; border: 1px solid #2c363c; border-radius: 8px; background: #11191f; box-shadow: 0 10px 30px #000a; }
 .popover .chip[aria-checked="true"] { border-color: #3a4c43; color: var(--accent); background: #73e0b118; }
 

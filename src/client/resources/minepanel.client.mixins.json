@@ -9,6 +9,8 @@
     "BossOverlayAccessor",
     "CombatEventsMixin",
     "FrameTimingMixin",
+    "ItemLayerRenderStateAccessor",
+    "ItemRenderStateAccessor",
     "ClientAdvancementsAccessor",
     "ItemDropMixin",
     "ItemPickupMixin",

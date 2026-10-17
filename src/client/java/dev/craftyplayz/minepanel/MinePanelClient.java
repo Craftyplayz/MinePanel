@@ -69,6 +69,7 @@ public final class MinePanelClient implements ClientModInitializer {
     private final BuildProgressCollector build = new BuildProgressCollector();
     private final SensorsCollector sensors = new SensorsCollector();
     private final RegistriesCollector registries = new RegistriesCollector();
+    private final AppearanceCollector appearance = new AppearanceCollector();
     private static final int SAVE_INTERVAL_TICKS = 100;
     private int saveTicks;
     private int portalScans;
@@ -176,6 +177,7 @@ public final class MinePanelClient implements ClientModInitializer {
         build.reset();
         sensors.reset();
         registries.reset();
+        appearance.reset();
     }
 
     /** Client thread: items were added to (positive count) or removed from (negative count) the inventory. */
@@ -255,7 +257,8 @@ public final class MinePanelClient implements ClientModInitializer {
                     worldData.villagers(client, level, icons), worldData.enderChest(client, level, icons),
                     FrameCollector.snapshot(), build.snapshot(client, snapshot, icons),
                     MinecraftInventoryCollector.icons(client, player, icons),
-                    sensors.collect(client, level, player, layouts.sensorNeeds(), millis), registries.collect(level, icons));
+                    sensors.collect(client, level, player, layouts.sensorNeeds(), millis), registries.collect(level, icons),
+                    appearance.collect(client, player, icons));
             telemetry.updatePlayer(
                     millis,
                     (now - sessionStartedNanos) / 1_000_000_000L,

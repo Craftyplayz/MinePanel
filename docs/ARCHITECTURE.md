@@ -66,6 +66,20 @@ Statistics and history deltas replace their whole bounded objects only when chan
 
 The snapshot is the `performance` detail field. It holds frames per second for up to 600 seconds (newest last) and `{seconds, average, low}` per window, or null until the first second closes. It is rebuilt and resent only when a second closes. The browser averages long windows into at most 120 points and draws them with monotone cubic interpolation, so the curve never overshoots the data. The chosen window is saved as `settings.performance.window`. The mixin's injection into 26.1.2's `runTick` is unverified until the client compiles.
 
+## 3D render
+
+The `appearance` detail field (added within schema version 5; the dashboard and mod ship together) is `{ skin, slim, armor: [ { slot, model, texture, color } ], rightHand, leftHand }`, replaced whole when it changes. `AppearanceCollector` reads it on the client thread at sampling time and caches everything until the resource packs reload:
+
+- **Skin:** a downloaded skin is copied out of the `DynamicTexture` the game already holds (already converted from legacy 64×32 skins) and encoded to PNG once per skin. A default skin is read from the resource packs. Either is served at `/texture/<key>.png`; keys hash the contents or the resource path and the icon epoch, so they are cached as immutable. `skin` is null while the skin can't be read.
+- **Armor:** for each worn item's `equippable` asset, the layers of `assets/<ns>/equipment/<path>.json` (decoded with `EquipmentClientInfo.CODEC`, as `EquipmentAssetManager` loads them) for `humanoid`, `humanoid_leggings` (legs) and `wings` (chest). Colours follow `EquipmentLayerRenderer.getColorForLayer` (dyed leather, and undyed dyeable layers without a default are skipped). Elytra layers that use the player's texture take the skin's elytra or cape when there is one. Trims and the enchantment glint are left out.
+- **Held items:** the inventory icon key, whether the icon is a flat sprite (`!usesBlockLight`), and the item model's third-person transform for that hand, read through the `ItemRenderStateAccessor` and `ItemLayerRenderStateAccessor` mixins and mirrored for the left hand as `ItemTransform.apply` does. Arms follow `getMainArm()`.
+
+Any failure here (including a mixin that no longer applies) logs one warning and sends an empty appearance; the rest of the sample is unaffected.
+
+`model.js` draws it with plain WebGL (the page's CSP allows no outside scripts). Parts are built as `ModelPart.Cube` builds them: the same texture net, pivots and armor deformations (outer armor 1, leggings 0.5, legs 0.1 less, left limbs mirrored), with the wide or slim arms. Held items are the icon extruded as the item model generator does (a one-pixel slab with walls at opaque edges, at the sprite's own resolution), placed as `ItemInHandLayer` places them; block icons are drawings rather than sprites, so they are held as an upright card. Arms take the item-holding pose and the idle bob. Lighting is entity-like: 40% ambient plus two fixed lights, with cut-out transparency.
+
+The orientation is a swing (any tilt) times a twist about the spin axis. Dragging turns it about the screen's axes. While spinning, a released model waits 0.8 s, then speeds up over 2 s while the swing eases back to none, so it rights itself without changing which way it faces. With spinning off it stays where it was left. The model is redrawn with `requestAnimationFrame` only while its tile is visible; with reduced motion it doesn't spin or bob.
+
 ## Litematica build progress
 
 Schema version 4 adds the `build` detail field, replaced whole when it changes:

@@ -53,7 +53,10 @@ public final class LayoutStore {
     private static final Pattern ID = Pattern.compile("[a-z0-9-]{1,32}");
     private static final Pattern ITEM_ID = Pattern.compile("[a-z0-9_.-]+:[a-z0-9/._-]+");
     public static final List<String> TILE_IDS = List.of("player", "inventory", "statistics", "history", "map", "build",
-            "movement", "xp", "pickups", "advancements", "villagers", "performance", "afk");
+            "movement", "xp", "pickups", "advancements", "villagers", "performance", "afk", "model");
+    /** The 3D render panel's spin axes (vertical, head over heels, cartwheel) and speeds in degrees per second. */
+    public static final List<String> MODEL_AXES = List.of("y", "x", "z");
+    public static final List<Integer> MODEL_SPEEDS = List.of(15, 30, 60, 120);
     /** Version 1 condition types; version 2 types are in {@link LayoutRules}. */
     public static final List<String> V1_CONDITION_TYPES = List.of("world", "dimension", "biome", "time", "gameMode",
             "health", "food", "saturation", "effect", "movement", "elytra", "advancement", "combat");
@@ -344,6 +347,22 @@ public final class LayoutStore {
                 normalized.add("pinned", itemIds(advancements.getAsJsonArray("pinned")));
             }
             result.add("advancements", normalized);
+        }
+        if (source.has("model")) {
+            JsonObject model = source.getAsJsonObject("model");
+            JsonObject normalized = new JsonObject();
+            if (model.has("spin")) normalized.addProperty("spin", bool(model.get("spin")));
+            if (model.has("axis")) {
+                String axis = text(model.get("axis"), 1);
+                if (!MODEL_AXES.contains(axis)) throw new IllegalArgumentException("unknown spin axis");
+                normalized.addProperty("axis", axis);
+            }
+            if (model.has("speed")) {
+                int speed = integer(model.get("speed"), 1, 360);
+                if (!MODEL_SPEEDS.contains(speed)) throw new IllegalArgumentException("unknown spin speed");
+                normalized.addProperty("speed", speed);
+            }
+            result.add("model", normalized);
         }
         return result;
     }

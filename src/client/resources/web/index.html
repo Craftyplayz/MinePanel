@@ -13,6 +13,7 @@
   <script src="/app.js" defer></script>
   <script src="/player-links.js" defer></script>
   <script src="/features.js" defer></script>
+  <script src="/model.js" defer></script>
 </head>
 <body>
   <button type="button" class="brand-toggle" id="edit-toggle" aria-pressed="false" aria-label="Customize" title="Customize">M<span id="connection-dot" class="dot" aria-hidden="true"></span></button>
@@ -254,6 +255,21 @@
         </div>
         <p class="empty-note" id="villagers-empty">Trade with a villager to remember its trades.</p>
         <div class="villager-list scroll" id="villager-list" aria-label="Villagers"></div>
+      </div>
+    </article>
+    <article class="tile" id="tile-model" data-tile="model" aria-labelledby="model-title">
+      <header class="tile-head" id="head-model"><h2 id="model-title">3D render</h2>
+        <span class="head-actions"><span class="badge muted" id="model-status">Unavailable</span><button type="button" class="icon-button" id="model-settings" aria-label="3D render settings" title="3D render settings">⚙</button></span></header>
+      <div class="tile-body column model-body">
+        <form class="tile-settings" id="model-form" hidden>
+          <label class="option-toggle"><input id="model-spin" type="checkbox"> <span>Spin automatically</span></label>
+          <label>Around <select id="model-axis"></select></label>
+          <label>Speed <select id="model-speed"></select></label>
+        </form>
+        <div class="model-stage" id="model-stage">
+          <canvas class="model-canvas" id="model-canvas" aria-label="Your player in 3D. Drag to turn, scroll to zoom, double-click to reset." role="img"></canvas>
+          <p class="empty-note model-message" id="model-message">Join a world to see your player.</p>
+        </div>
       </div>
     </article>
   </main>
