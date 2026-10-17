@@ -63,7 +63,7 @@ Each entry has a line saying what it shows. Some sites have several pages and as
 
 ## Toggles
 
-If you've made [toggles](Rules.md#toggles) for your rules, they appear as buttons at the **top right** of the dashboard. Click one to flip it on or off; **All off** turns every toggle off. Their state is saved, so it survives restarting the game.
+If you've made [toggles](Rules.md#toggles) for your rules, flip them from the **Toggles** dropdown in the [Customize toolbar](Customizing.md#the-toolbar) (click **M**, then **Toggles**). Click one to flip it on or off; **All off** turns every toggle off. Their state is saved, so it survives restarting the game.
 
 ## Notifications
 

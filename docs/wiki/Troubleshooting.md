@@ -22,7 +22,7 @@ Rules that use *Dashboard width* or a **Force on/off** preview work per browser 
 ## Panels
 
 **A panel is missing.**
-It may be off: **M** → click its name under **Tiles**. If it's set to **Rules only**, it only appears when a rule shows it. The JourneyMap, Build progress and AFK panels are off by default.
+It may be off: **M** → open **Tiles** and click its name. If it's set to **Rules only**, it only appears when a rule shows it. The JourneyMap, Build progress and AFK panels are off by default.
 
 **My panel moved or changed size on its own.**
 A rule probably moved it, or made room for another panel. Open the rules editor as a **Side panel** and click the panel to see which rules claim it ([Inspector](Rules.md#inspector)).

@@ -147,7 +147,7 @@ On import, a place equal in every field to one already on the dashboard is reuse
 
 ### Toggle
 
-A switch you flip by hand. Every toggle appears as a button at the top right of the dashboard. **All off**, next to them, turns every toggle off at once.
+A switch you flip by hand. Every toggle appears as a button in the **Toggles** dropdown of the Customize toolbar. **All off**, next to them, turns every toggle off at once.
 
 | Field | Required | Value |
 |---|---|---|

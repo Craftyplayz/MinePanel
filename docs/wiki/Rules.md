@@ -148,7 +148,7 @@ A **place** is a saved, named location for the **Near place** condition, for exa
 
 A **toggle** is an on/off switch you flip by hand. Use one in a **Toggle** condition, for example to turn a "Building" mode on and off.
 
-- Make toggles in the **Toggles** section with **+ Toggle**. Each appears as a button at the top right of the dashboard, with **All off** beside them.
+- Make toggles in the **Toggles** section with **+ Toggle**. Flip them from the **Toggles** dropdown in the Customize toolbar, which also has **All off**.
 - Their state is saved, so it survives restarts.
 - Up to 16 toggles.
 

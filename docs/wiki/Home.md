@@ -32,7 +32,7 @@ The dashboard updates live. Nothing you do on it can change your game: it only r
 | I want to… | Do this |
 |---|---|
 | Rearrange the dashboard | Click the **M** button at the top left to enter **Customize**, drag a panel by its title bar, drag its bottom-right corner to resize, then click **Done** |
-| Turn a panel on or off | In Customize, click its name under **Tiles** |
+| Turn a panel on or off | In Customize, open **Tiles** and click its name |
 | Change a panel's settings | Click the **⚙** in its title bar (not every panel has one) |
 | Have a different layout for the Nether, farming, etc. | Make a [profile](Customizing.md#profiles) and a [rule](Rules.md) that switches to it |
 | Show a panel only sometimes | Set it to **Rules only** in Customize and add a rule that shows it ([example](Rules.md#your-first-rule)) |

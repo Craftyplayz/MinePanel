@@ -205,3 +205,11 @@ Run on Windows 11 on branch `rules-v2`, with Temurin 25.0.4.1 and Node 24.19.0:
   - Java: changing the minimum linger, or allowing a place together with a position, made `LayoutStoreTest` fail.
 
 **Not run.** Nothing was run in Minecraft. The checks use synthetic snapshots, not a live client.
+
+## Customize toolbar cleanup (2026-10-17)
+
+The toolbar no longer shows the game state ("Live") or the version. The tile chips moved into a **Tiles** dropdown, the rule toggles moved from the floating bar at the top right into a **Toggles** dropdown beside it, and **Reset** asks for confirmation (`window.confirm`).
+
+**Tested** (`node --test src/test/js/dashboard.test.js`, 115 passing): the dropdowns open and close (one at a time, on a click elsewhere, and on Done), the tile chips inside still toggle panels, the Toggles button counts the toggles that are on, an empty Toggles dropdown shows a note, and cancelling the Reset question leaves the layout unchanged.
+
+**Not run.** Not checked in a real browser or in Minecraft: dropdown positioning and look, and the browser's confirm window.

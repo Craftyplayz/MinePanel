@@ -1478,8 +1478,8 @@ $("#player-link-close").addEventListener("click", () => closePlayerPages());
 playerLinkDialog.addEventListener("click", event => { if (event.target === playerLinkDialog) closePlayerPages(); });
 
 /**
- * Clicking elsewhere or pressing Escape closes the unpinned window (and the player lookup menu and the XP and
- * performance window menus).
+ * Clicking elsewhere or pressing Escape closes the unpinned window (and the player lookup menu, the XP and
+ * performance window menus and the toolbar's Tiles and Toggles dropdowns).
  */
 function closeTransient(event) {
   const inside = element => element?.contains?.(event?.target);
@@ -1494,6 +1494,7 @@ function closeTransient(event) {
   if (!event || !inside(performanceParts.menu) && event.target !== performanceParts.window) {
     setHidden(performanceParts.menu, true);
   }
+  if (!event || !toolbarMenus.some(entry => inside(entry.menu) || inside(entry.button))) setToolbarMenu(null);
 }
 
 window.addEventListener("pointerdown", closeTransient);
@@ -3240,16 +3241,22 @@ function stopPlacing() {
 // ------------------------------------------------------------------------------------ Toggles and notifications
 
 const toggleBar = $("#rule-toggles");
+const togglesButton = $("#toggles-menu-button");
 const toastList = $("#rule-toasts");
 const TOAST_MILLIS = 6000;
 const MAX_TOASTS = 4;
 
 /**
- * Named toggles as buttons above the dashboard; clicking one flips it (saved with the layout). "All off" turns every
- * toggle off, so the dashboard goes back to what the other rules (or Default) show.
+ * Named toggles in the toolbar's Toggles dropdown; clicking one flips it (saved with the layout). "All off" turns
+ * every toggle off, so the dashboard goes back to what the other rules (or Default) show.
  */
 function renderToggleBar() {
-  setHidden(toggleBar, layout.toggles.length === 0);
+  const on = layout.toggles.filter(toggle => toggle.on).length;
+  writeText(togglesButton, on ? `Toggles (${on} on) ▾` : "Toggles ▾");
+  if (!layout.toggles.length) {
+    toggleBar.replaceChildren(create("span", "dropdown-note", "No toggles yet. Make them in Rules… → Toggles."));
+    return;
+  }
   const chips = layout.toggles.map(toggle => {
     const chip = button(toggle.name, () => changeLayout({ ...layout, toggles: layout.toggles.map(entry =>
       entry.id === toggle.id ? { ...entry, on: !entry.on } : entry) }), "chip small");

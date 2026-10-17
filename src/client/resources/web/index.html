@@ -19,8 +19,6 @@
   <button type="button" class="brand-toggle" id="edit-toggle" aria-pressed="false" aria-label="Customize" title="Customize">M<span id="connection-dot" class="dot" aria-hidden="true"></span></button>
   <section class="toolbar" id="edit-toolbar" hidden aria-label="Layout editing">
     <span class="connection"><span id="connection-status" role="status">Connecting</span></span>
-    <span class="game-state" id="state-message">Waiting for MinePanel.</span>
-    <span class="version" id="version">·</span>
     <span class="toolbar-label">Profile</span>
     <span class="profile-tools">
       <select id="profile-select" aria-label="Profile to edit"></select>
@@ -29,15 +27,21 @@
       <button type="button" class="button quiet" id="profile-delete">Delete</button>
       <button type="button" class="button quiet" id="rules-open" title="Switch profiles and show or hide tiles based on what happens in game">Rules…</button>
     </span>
-    <span class="toolbar-label">Tiles</span>
-    <span class="tile-toggles" id="tile-toggles"></span>
+    <span class="dropdown">
+      <button type="button" class="button quiet" id="tiles-menu-button" aria-expanded="false" aria-controls="tile-toggles">Tiles ▾</button>
+      <div class="dropdown-menu tile-toggles" id="tile-toggles" role="group" aria-label="Tiles" hidden></div>
+    </span>
+    <span class="dropdown">
+      <button type="button" class="button quiet" id="toggles-menu-button" aria-expanded="false" aria-controls="rule-toggles" title="Turn the toggles your rules use on or off">Toggles ▾</button>
+      <div class="dropdown-menu rule-toggles" id="rule-toggles" role="group" aria-label="Toggles" hidden></div>
+    </span>
     <span class="toolbar-label">Updates</span>
     <span class="profile-tools">
       <select id="update-rate" aria-label="Dashboard update rate" title="How often the game sends new player data; faster costs a little more game-thread time"></select>
     </span>
     <span class="spacer"></span>
     <span class="save-status" id="layout-status" role="status"></span>
-    <button type="button" class="button quiet" id="layout-reset">Reset</button>
+    <button type="button" class="button quiet" id="layout-reset" title="Put the profile you're editing back to the default arrangement and panel settings">Reset</button>
     <button type="button" class="button quiet" id="layout-export">Export</button>
     <button type="button" class="button quiet" id="layout-import">Import</button>
     <input type="file" id="layout-file" accept="application/json,.json" hidden>
@@ -287,7 +291,6 @@
   </div>
   <div class="advancement-popup" id="advancement-popup" role="status" hidden></div>
   <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
-  <div class="rule-toggles" id="rule-toggles" role="group" aria-label="Toggles" hidden></div>
   <div class="rule-toasts" id="rule-toasts" aria-live="polite"></div>
   <div class="dialog-backdrop" id="rules-dialog" hidden>
     <section class="dialog rules-editor" role="dialog" aria-modal="true" aria-labelledby="rules-dialog-title">

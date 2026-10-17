@@ -10,11 +10,12 @@ While you customize, **rules are paused** and you see the profile you're editing
 
 | Part | What it does |
 |---|---|
-| Connection, state and version | Whether the dashboard is connected, what the game is doing, and the MinePanel version |
+| Connection | Whether the dashboard is connected to the game |
 | **Profile** | Which profile you're editing, its name, **New**, **Delete** and **Rules…** (see [Profiles](#profiles)) |
-| **Tiles** | One button per panel. Click to turn it on or off |
+| **Tiles** | A dropdown with one button per panel. Click a panel to turn it on or off |
+| **Toggles** | A dropdown with your rule [toggles](Rules.md#toggles). Click one to flip it; **All off** turns them all off. Shows how many are on, for example **Toggles (1 on)** |
 | **Updates** | How often the game sends new data (see [Update rate](#update-rate)) |
-| **Reset** | Put the profile you're editing back to the default arrangement and settings |
+| **Reset** | Put the profile you're editing back to the default arrangement and settings (asks first) |
 | **Export** / **Import** | Save the whole layout to a file, or load one |
 | **Done** | Leave Customize mode |
 
@@ -29,7 +30,7 @@ Every panel has a minimum size (listed in [Panels](Panels.md#overview)). Make a 
 
 ## Turning panels on and off
 
-Click a panel's name under **Tiles** to turn it on or off. A panel that's off keeps its spot for when you turn it back on.
+Open the **Tiles** dropdown and click a panel's name to turn it on or off. The dropdown stays open so you can flip several; click anywhere else or press Escape to close it. A panel that's off keeps its spot for when you turn it back on.
 
 ## Always or Rules only
 
@@ -78,7 +79,7 @@ Faster looks smoother (speed, position, health) and costs a little more game-thr
 
 - **Export** downloads your whole layout (all profiles, panel settings, pinned windows, the update rate and every rule) as a JSON file.
 - **Import** loads such a file and **replaces** your current layout with it.
-- **Reset** puts the profile you're editing back to the default arrangement **and default panel settings**. Other profiles and your rules are left alone.
+- **Reset** asks for confirmation, then puts the profile you're editing back to the default arrangement **and default panel settings**. Other profiles and your rules are left alone.
 
 To share or back up only rules and profiles in a form you can read and edit, use **Rules → Import / export** instead (see [Templates and rule sets](Rule-Sets.md)).
 

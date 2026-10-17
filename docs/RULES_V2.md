@@ -380,7 +380,7 @@ The editor lives in `features.js` ("Rules editor", "Pickers", "Place on grid", "
 - **Inspector:** while docked, clicking a panel lists every rule claiming it (Then/Else, the action, Wins/Overridden). The panel's profile mode and current state are shown too.
 - **Place on grid:** "Set on grid" on a Place action docks the editor and draws the panel's ghost on the live grid. Drag it to move, drag its corner to resize, then Set or Cancel (Escape cancels).
 - **Pickers:** suggestions with names and icons from ids the dashboard has seen. That covers inventory and pickup items, effects, statistics, advancements, biomes, dimensions and worlds. They're kept in `localStorage` (`minepanel.knownIds`, 2000 per kind). Lists of values are chips with ×, plus a picker to add more. "+ current" fills in the world, dimension, biome and position; "+ held" fills in the item. **Entity types have no suggestions** until phase 4 (which added them, see below).
-- **Toggles** are chips at the top right of the dashboard (`#rule-toggles`, hidden when there are none). Clicking one flips and saves it.
+- **Toggles** are chips in the Customize toolbar's **Toggles** dropdown (`#rule-toggles`, with a note when there are none). Clicking one flips and saves it.
 - **Notify** shows a message at the bottom right for 6 s, at most 4 at once, with no sound (`featureHooks.notify`, fed by `evaluateView`).
 - **Settings** holds the global animation (duration and easing) and states the 1 s dwell.
 - Removing a place, toggle or rule also removes the conditions that refer to it.

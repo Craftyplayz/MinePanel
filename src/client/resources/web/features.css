@@ -292,9 +292,7 @@
 .tile.focused { position: fixed; inset: 16px; z-index: 16; box-shadow: 0 20px 60px #000c; }
 .rules-docked .tile.focused { right: calc(min(460px, 100vw) + 16px); }
 .tile-leaving { position: fixed; z-index: 14; margin: 0; pointer-events: none; }
-/* Toggles (buttons above the dashboard) and Notify messages (no sound) */
-.rule-toggles { position: fixed; top: 4px; right: 8px; z-index: 18; display: flex; flex-wrap: wrap; justify-content: end; gap: 4px; max-width: 60vw; }
-.rule-toggles .chip { background: #0e151af2; }
+/* Toggles (in the toolbar's Toggles dropdown) and Notify messages (no sound) */
 .rule-toggles .toggle-reset { margin-left: 6px; }
 .rule-toggles .toggle-reset:disabled { opacity: .45; cursor: default; }
 .rule-toasts { position: fixed; right: 16px; bottom: 16px; z-index: 45; display: flex; flex-direction: column; align-items: end; gap: 6px; pointer-events: none; }

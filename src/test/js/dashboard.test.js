@@ -177,6 +177,8 @@ function harness(fetchImpl = defaultFetch()) {
   const timers = new Map();
   const events = {};
   const downloads = [];
+  // window.confirm: every question asked, and the answer to give.
+  const confirms = { answer: true, asked: [] };
   let timerId = 0;
   const documentElement = new Element("html");
   const context = vm.createContext({
@@ -193,7 +195,8 @@ function harness(fetchImpl = defaultFetch()) {
       setTimeout(callback, delay) { timers.set(++timerId, { callback, delay }); return timerId; },
       clearTimeout(id) { timers.delete(id); },
       addEventListener(type, callback) { events[type] = callback; },
-      getComputedStyle: () => ({ paddingLeft: "14px", paddingRight: "14px", paddingTop: "12px" })
+      getComputedStyle: () => ({ paddingLeft: "14px", paddingRight: "14px", paddingTop: "12px" }),
+      confirm(message) { confirms.asked.push(message); return confirms.answer; }
     },
     Blob: class { constructor(parts, options) { this.parts = parts; this.type = options?.type; } },
     URL: { createObjectURL: blob => { downloads.push(blob); return "blob:layout"; }, revokeObjectURL() {} },
@@ -201,7 +204,7 @@ function harness(fetchImpl = defaultFetch()) {
   });
   for (const source of sources) vm.runInContext(source, context);
   return {
-    sockets, timers, elements, events, downloads, documentElement,
+    sockets, timers, elements, events, downloads, documentElement, confirms,
     get(selector) { return elements.get(selector); },
     apply(previous, message) {
       context.previousTestState = previous;
@@ -460,7 +463,6 @@ test("DOM rendering preserves telemetry and uses text-only efficient slot update
   assert.equal(h.get("#session-value").textContent, "1h 1m");
   assert.equal(h.get("#dimension-value").textContent, "minecraft:overworld");
   assert.equal(h.get("#position-value").textContent, "X 1.0 · Y 64.0 · Z -3.0");
-  assert.equal(h.get("#state-message").textContent, "Live");
   assert.equal(h.get("#held-value").textContent, "Holding Stone × 32");
   const slots = [...hotbar(h), ...main(h)];
   assert.equal(slots.length, 36);
@@ -486,7 +488,6 @@ test("unavailable and socket close clear all live values and reconnect needs fre
   assert.doesNotMatch(h.get("#held-value").textContent, /Stone/);
   socket.emit("close");
   assert.equal(h.state(), undefined);
-  assert.equal(h.get("#version").textContent, "·");
   assert.equal(h.timers.size, 1);
   await h.reconnect();
   const fresh = h.sockets[1];
@@ -1257,8 +1258,20 @@ test("customize mode toggles tiles, saves to the config file, resets, exports an
   assert.equal(h.get("#edit-toolbar").hidden, false);
   assert.equal(h.get("#grid").className, "grid editing");
   assert.equal(h.get("#edit-toggle").attributes["aria-pressed"], "true");
+  assert.equal(h.get("#tile-toggles").hidden, true, "the tile chips are in the closed Tiles dropdown");
+  h.get("#tiles-menu-button").emit("click");
+  assert.equal(h.get("#tile-toggles").hidden, false);
+  assert.equal(h.get("#tiles-menu-button").attributes["aria-expanded"], "true");
   h.get("#tile-toggles").children[4].emit("click");
   assert.equal(h.get("#tile-map").hidden, false);
+  assert.equal(h.get("#tile-toggles").hidden, false, "it stays open to flip several tiles");
+  h.get("#toggles-menu-button").emit("click");
+  assert.equal(h.get("#tile-toggles").hidden, true, "opening Toggles closes Tiles");
+  assert.equal(h.get("#rule-toggles").hidden, false);
+  assert.equal(h.get("#rule-toggles").children[0].textContent, "No toggles yet. Make them in Rules… → Toggles.");
+  h.events.pointerdown({ target: h.get("#grid") });
+  assert.equal(h.get("#rule-toggles").hidden, true, "a click elsewhere closes it");
+  assert.equal(h.get("#toggles-menu-button").attributes["aria-expanded"], "false");
   assert.equal(h.get("#layout-status").textContent, "Saving…");
   h.get("#tile-toggles").children[0].emit("click");
   await h.runTimers(400);
@@ -1274,6 +1287,11 @@ test("customize mode toggles tiles, saves to the config file, resets, exports an
   assert.equal(h.downloads.length, 1);
   assert.deepEqual(JSON.parse(h.downloads[0].parts[0]), saved);
 
+  h.confirms.answer = false;
+  h.get("#layout-reset").emit("click");
+  assert.match(h.confirms.asked[0], /^Reset the “Default” profile/);
+  assert.equal(h.get("#tile-player").hidden, true, "cancelling the question keeps the layout");
+  h.confirms.answer = true;
   h.get("#layout-reset").emit("click");
   assert.equal(h.get("#tile-player").hidden, false);
   assert.equal(h.get("#tile-map").hidden, true);
@@ -3314,7 +3332,7 @@ test("rules on the dashboard: Place moves a panel, the others make room, and Foc
   assert.equal(h.get("#grid").classList.contains("has-focus"), false);
 });
 
-test("rules on the dashboard: toggles are buttons that flip and save, and Notify shows a message", async () => {
+test("rules on the dashboard: toggles are toolbar buttons that flip and save, and Notify shows a message", async () => {
   const requests = [];
   const h = harness(defaultFetch({ version: 2, tiles: defaultTiles(), toggles: [{ id: "afk", name: "AFK", on: false }],
     rules: [{ ...inWorld, when: [{ type: "toggle", toggle: "afk" }], then: [{ do: "notify", text: "Away" }] }] },
@@ -3322,11 +3340,16 @@ test("rules on the dashboard: toggles are buttons that flip and save, and Notify
   await h.flush();
   h.sockets[0].message(initial(snapshot()));
   const bar = h.get("#rule-toggles");
+  assert.equal(bar.hidden, true, "toggles are only in the Customize toolbar's dropdown");
+  h.get("#edit-toggle").emit("click");
+  h.get("#toggles-menu-button").emit("click");
   assert.equal(bar.hidden, false);
+  assert.equal(h.get("#toggles-menu-button").textContent, "Toggles ▾");
   assert.equal(bar.children[0].textContent, "AFK");
   assert.equal(h.get("#rule-toasts").children.length, 0);
   bar.children[0].emit("click");
   assert.equal(bar.children[0].attributes["aria-pressed"], "true");
+  assert.equal(h.get("#toggles-menu-button").textContent, "Toggles (1 on) ▾");
   assert.deepEqual(h.get("#rule-toasts").children.map(toast => toast.textContent), ["Away"]);
   await h.runTimers(400);
   assert.equal(savedLayout(requests).toggles[0].on, true);
@@ -3338,6 +3361,8 @@ test("rules on the dashboard: toggles are buttons that flip and save, and Notify
   assert.equal(bar.children[bar.children.length - 1].disabled, true, "and greyed out once every toggle is off");
   await h.runTimers(400);
   assert.equal(savedLayout(requests).toggles[0].on, false, "turning them all off is saved");
+  h.get("#edit-done").emit("click");
+  assert.equal(bar.hidden, true, "Done closes the dropdown");
 });
 
 test("rules editor: it leaves customizing while open, previews a rule, and docks to inspect panels", async () => {

@@ -6,8 +6,6 @@ const $ = selector => document.querySelector(selector);
 const connection = $("#connection-status");
 const dot = $("#connection-dot");
 const gameStatus = $("#game-status");
-const stateMessage = $("#state-message");
-const version = $("#version");
 const healthValue = $("#health-value");
 const healthFill = $("#health-fill");
 const absorptionFill = $("#absorption-fill");
@@ -663,8 +661,6 @@ function clearLiveData() {
   currentPlayerState = undefined;
   renderPlayer(null);
   writeText(gameStatus, "Unavailable");
-  writeText(stateMessage, "Waiting for a fresh MinePanel snapshot.");
-  writeText(version, "·");
 }
 
 // ---------------------------------------------------------------------------------------------------- Layout
@@ -686,6 +682,22 @@ let viewKey;
 // Set when the stored layout could not be read or converted: it stays untouched on disk, so nothing is saved.
 let layoutLocked = false;
 const tileElements = Object.fromEntries(TILE_IDS.map(id => [id, $(`#tile-${id}`)]));
+
+// Toolbar dropdowns (Tiles, Toggles): they stay open for several clicks and close on a click elsewhere or Escape
+// (closeTransient in features.js).
+const toolbarMenus = [["#tiles-menu-button", "#tile-toggles"], ["#toggles-menu-button", "#rule-toggles"]]
+  .map(([buttonSelector, menuSelector]) => ({ button: $(buttonSelector), menu: $(menuSelector) }));
+
+function setToolbarMenu(open) {
+  for (const entry of toolbarMenus) {
+    setHidden(entry.menu, entry !== open);
+    entry.button.setAttribute("aria-expanded", String(entry === open));
+  }
+}
+
+for (const entry of toolbarMenus) {
+  entry.button.addEventListener("click", () => setToolbarMenu(entry.menu.hidden ? entry : null));
+}
 const tileToggles = Object.fromEntries(TILE_IDS.map(id => {
   const chip = create("button", "chip", TILE_LABELS[id]);
   chip.type = "button";
@@ -1001,6 +1013,7 @@ function setEditing(value) {
   editing = value;
   grid.className = editing ? "grid editing" : "grid";
   setHidden(editToolbar, !editing);
+  if (!editing) setToolbarMenu(null);
   editToggle.setAttribute("aria-pressed", String(editing));
   if (!editing && !layoutLocked) setLayoutStatus("");
   refreshLayout();
@@ -1057,10 +1070,15 @@ $("#profile-delete").addEventListener("click", () => {
 
 editToggle.addEventListener("click", () => setEditing(!editing));
 $("#edit-done").addEventListener("click", () => setEditing(false));
-$("#layout-reset").addEventListener("click", () => changeProfile(() => {
-  const defaults = defaultLayout();
-  return { tiles: defaults.tiles, settings: defaults.settings };
-}));
+$("#layout-reset").addEventListener("click", () => {
+  const name = getProfile(layout, shownProfileId()).name;
+  if (!window.confirm(`Reset the “${name}” profile to the default arrangement and panel settings? `
+    + "Other profiles, rules and toggles are kept. This can't be undone.")) return;
+  changeProfile(() => {
+    const defaults = defaultLayout();
+    return { tiles: defaults.tiles, settings: defaults.settings };
+  });
+});
 $("#layout-export").addEventListener("click", () => {
   const link = create("a");
   link.href = URL.createObjectURL(new Blob([JSON.stringify(layout, null, 2)], { type: "application/json" }));
@@ -1186,9 +1204,7 @@ async function connect() {
         const message = JSON.parse(event.data);
         currentPlayerState = applyMessage(currentPlayerState, message);
         setConnection(true);
-        writeText(stateMessage, currentPlayerState.available ? "Live" : "Not in a world");
         renderPlayer(currentPlayerState);
-        writeText(version, `v${message.modVersion || "0.1.0"}`);
       } catch {
         rejected = true;
         clearLiveData();

@@ -17,7 +17,7 @@ The **JourneyMap** panel embeds JourneyMap's web map, so you can see the map on 
 
 ### Setting it up
 
-1. Turn the panel on: **M** → under **Tiles**, click **JourneyMap**.
+1. Turn the panel on: **M** → **Tiles** → **JourneyMap**.
 2. If Webmap isn't at the default address `http://127.0.0.1:8080/`, click **⚙** on the panel and enter the address Webmap shows in chat or its settings. Click **Save**.
 3. The panel shows the map. While it can't reach it, it says so and keeps retrying.
 
@@ -40,7 +40,7 @@ The **Build progress** panel shows how far along you are with a Litematica schem
 
 ### Setting it up
 
-1. Turn the panel on: **M** → under **Tiles**, click **Build progress**.
+1. Turn the panel on: **M** → **Tiles** → **Build progress**.
 2. In Litematica, load a schematic and **select its placement** (and keep the placement enabled). The panel follows whichever placement is selected.
 
 ### What it shows
