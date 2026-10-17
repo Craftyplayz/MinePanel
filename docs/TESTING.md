@@ -213,3 +213,11 @@ The toolbar no longer shows the game state ("Live") or the version. The tile chi
 **Tested** (`node --test src/test/js/dashboard.test.js`, 115 passing): the dropdowns open and close (one at a time, on a click elsewhere, and on Done), the tile chips inside still toggle panels, the Toggles button counts the toggles that are on, an empty Toggles dropdown shows a note, and cancelling the Reset question leaves the layout unchanged.
 
 **Not run.** Not checked in a real browser or in Minecraft: dropdown positioning and look, and the browser's confirm window.
+
+## Drag to reorder rules (2026-10-17)
+
+Rules and folders in the rules editor's list can be dragged (HTML drag and drop) to reorder them, and rules can be dragged into and out of folders. The order logic is in `dropRule` and `dropFolder` in `layout.js`; neither ever splits a folder's rules.
+
+**Tested** (`node --test src/test/js/dashboard.test.js`, 116 passing): `dropRule` and `dropFolder` on their own (into, out of and between folders, onto itself, a drop that would split a folder, empty folders), and in the editor test, drag events on the list rows: a rule onto the bottom half of a folder (into it), onto the end zone (out of it), onto the top half of a folder (above it), and a folder with its rules onto a rule.
+
+**Not run.** Not checked in a real browser or in Minecraft: real mouse dragging, the drop marks and grip look, and Firefox starting a drag from a row's name button.

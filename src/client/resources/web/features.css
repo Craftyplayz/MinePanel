@@ -254,6 +254,17 @@
 .rules-nav-item.folder .rules-nav-name { font-weight: 650; }
 .rules-nav-item.in-folder { margin-left: 14px; padding-left: 8px; border-left: 1px solid #2c363c; border-radius: 0 6px 6px 0; }
 .folder-caret { width: 22px; }
+/* Dragging rules and folders in the rule list */
+.rules-nav-item.draggable { cursor: grab; }
+.rules-nav-grip { flex: none; width: 10px; color: var(--muted); font-size: 11px; line-height: 1; opacity: .5; user-select: none; }
+.rules-nav-item.draggable:hover .rules-nav-grip { opacity: 1; }
+.rules-nav-item.dragged { opacity: .4; }
+.rules-nav-item.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+.rules-nav-item.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+.rules-nav-item.drop-into { background: #73e0b124; box-shadow: inset 0 0 0 1px var(--accent); }
+.rules-nav-end { display: none; margin-top: 4px; padding: 6px; border: 1px dashed #2c363c; border-radius: 6px; color: var(--muted); font-size: 11px; text-align: center; }
+.rules-nav.dragging .rules-nav-end { display: block; }
+.rules-nav-end.drop-into { border-color: var(--accent); color: var(--accent); }
 .row-select { flex: none; margin: 0; accent-color: var(--accent); cursor: pointer; }
 .rule-section-tools { display: inline-flex; gap: 4px; margin-left: auto; }
 .share-box { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }

@@ -52,6 +52,11 @@ Before finishing, grep the wiki for the old name, value or behaviour you changed
 - Plain, short sentences; tables for settings and options; one topic per section. Start each page with the breadcrumb line (`[Home](Home.md) › …`). Link between pages with relative `Page.md#anchor` links (the publish workflow turns them into wiki links); link to files outside `docs/wiki/` with full GitHub URLs.
 - Be honest: if a feature isn't verified in game, a short note is fine; never claim behaviour the code doesn't have.
 
+## Git
+
+- Make changes directly on the `main` branch. Don't create feature branches, worktrees or pull requests.
+- Don't commit or push on your own. Leave changes in the working tree and commit or push only when asked.
+
 ## Other rules
 
 - Follow the constraints in `docs/ARCHITECTURE.md` and `docs/web-handover.md`: read-only, loopback-only, no gameplay mutation, nothing slow on the client thread, Litematica imports only in `dev.craftyplayz.minepanel.litematica`.

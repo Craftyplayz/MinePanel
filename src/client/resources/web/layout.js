@@ -868,6 +868,44 @@ function fileRule(rules, rule, folder) {
   return rest;
 }
 
+/**
+ * Drops a dragged rule just before the rule {@code before} (null: at the end), in {@code folder} (null: none).
+ * Sets {@code rule.folder} and returns the reordered list. A drop that would split a folder's run is moved to keep
+ * it together: joining a folder away from its rules files the rule as fileRule does, and a rule without a folder
+ * dropped inside a run goes just after it.
+ */
+function dropRule(rules, id, before, folder) {
+  const rule = rules.find(entry => entry.id === id);
+  if (!rule) return rules;
+  const rest = rules.filter(entry => entry !== rule);
+  let at = before == null ? rest.length : before === id ? rules.indexOf(rule) : rest.findIndex(entry => entry.id === before);
+  if (at < 0) return rules;
+  if (folder) {
+    const joins = rest[at - 1]?.folder === folder || rest[at]?.folder === folder || !rest.some(entry => entry.folder === folder);
+    if (!joins) return fileRule(rules, rule, folder);
+  } else {
+    while (at < rest.length && rest[at].folder && rest[at - 1]?.folder === rest[at].folder) at++;
+  }
+  rule.folder = folder;
+  rest.splice(at, 0, rule);
+  return rest;
+}
+
+/**
+ * Drops a dragged folder's rules, as one run, just before the rule {@code before} (null: at the end). Dropped inside
+ * another folder's run, it goes before that run. A drop inside its own run changes nothing. Returns a new list.
+ */
+function dropFolder(rules, folderId, before) {
+  const run = rules.filter(rule => rule.folder === folderId);
+  if (!run.length) return rules;
+  const rest = rules.filter(rule => rule.folder !== folderId);
+  let at = before == null ? rest.length : rest.findIndex(rule => rule.id === before);
+  if (at < 0) return rules;
+  while (at > 0 && rest[at]?.folder && rest[at - 1].folder === rest[at].folder) at--;
+  rest.splice(at, 0, ...run);
+  return rest;
+}
+
 /** Where a new rule in {@code folder} goes: after the folder's last rule, else (or without a folder) at the end. */
 function newRuleIndex(rules, folder) {
   const last = folder ? rules.findLastIndex(rule => rule.folder === folder) : -1;

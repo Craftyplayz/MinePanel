@@ -2953,10 +2953,15 @@ function ruleNavItem(rule, inFolder) {
   item.appendChild(dot);
   item.appendChild(name);
   moveButtons(item, by => moveRuleInList(rulesDraft.rules, rule.id, by), inFolder ? " (within the folder)" : "");
+  const next = rulesDraft.rules[rulesDraft.rules.indexOf(rule) + 1]?.id ?? null;
+  navDraggable(item, { rule: rule.id }, (top, drag) => drag.rule
+    ? { mark: top ? "before" : "after", drop: rules => dropRule(rules, drag.rule, top ? rule.id : next, rule.folder) }
+    : { mark: top ? "before" : "after", drop: rules => dropFolder(rules, drag.folder, top ? rule.id : next) });
   return item;
 }
 
-function folderNavItem(folder, segmentIndex, empty) {
+function folderNavItem(folder, segmentIndex, segment) {
+  const empty = segment.rules.length === 0;
   const selected = rulesSelection?.kind === "folder" && rulesSelection.id === folder.id;
   const item = create("div", `rules-nav-item folder${selected ? " selected" : ""}`);
   const caret = keyed(button(folder.collapsed ? "▸" : "▾", () => editRules(() => { folder.collapsed = !folder.collapsed; }),
@@ -2977,13 +2982,89 @@ function folderNavItem(folder, segmentIndex, empty) {
   item.appendChild(enabled);
   item.appendChild(name);
   if (!empty) moveButtons(item, by => moveSegment(rulesDraft.rules, segmentIndex, by), " (the whole folder)");
+  const first = segment.rules[0]?.id ?? null;
+  const after = empty ? null : rulesDraft.rules[rulesDraft.rules.indexOf(segment.rules.at(-1)) + 1]?.id ?? null;
+  // A rule dropped on the top half goes above the folder; on the bottom half, into it at the top.
+  navDraggable(item, empty ? null : { folder: folder.id }, (top, drag) => drag.rule
+    ? { mark: top ? "before" : "into", drop: rules => dropRule(rules, drag.rule, first, top ? null : folder.id) }
+    : { mark: top ? "before" : "after", drop: rules => dropFolder(rules, drag.folder, top ? first : after) });
   return item;
+}
+
+// Dragging in the rule list: a rule (into or out of folders) or a folder with its rules. The ↑ / ↓ buttons do the
+// same one step at a time.
+let navDrag = null;
+let navList = null;
+let dropMark = null;
+
+function markDrop(element, mark) {
+  if (dropMark?.element === element && dropMark.mark === mark) return;
+  clearDropMark();
+  element.classList.add(`drop-${mark}`);
+  dropMark = { element, mark };
+}
+
+function clearDropMark() {
+  dropMark?.element.classList.remove(`drop-${dropMark.mark}`);
+  dropMark = null;
+}
+
+/**
+ * Makes a rule list row draggable (as {@code drag}, or not at all if null) and a drop target: {@code target(top,
+ * drag)} gives the mark to draw and the function that reorders the rule list, for a drop on its top or bottom half.
+ */
+function navDraggable(item, drag, target) {
+  if (drag) {
+    item.draggable = true;
+    item.classList.add("draggable");
+    item.prepend(create("span", "rules-nav-grip", "⠿"));
+    item.title = "Drag to reorder";
+    item.addEventListener("dragstart", event => {
+      navDrag = drag;
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", "");
+      item.classList.add("dragged");
+      navList?.classList.add("dragging");
+    });
+    item.addEventListener("dragend", () => {
+      navDrag = null;
+      item.classList.remove("dragged");
+      clearDropMark();
+      navList?.classList.remove("dragging");
+    });
+  }
+  navDropTarget(item, (event, dragged) => {
+    const box = item.getBoundingClientRect();
+    return target(event.clientY < box.top + box.height / 2, dragged);
+  });
+}
+
+/** Lets the dragged rule or folder be dropped on {@code element}; {@code place(event, drag)} says where. */
+function navDropTarget(element, place) {
+  element.addEventListener("dragover", event => {
+    if (!navDrag) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    markDrop(element, place(event, navDrag).mark);
+  });
+  element.addEventListener("dragleave", event => {
+    if (dropMark?.element === element && !element.contains(event.relatedTarget)) clearDropMark();
+  });
+  element.addEventListener("drop", event => {
+    if (!navDrag) return;
+    event.preventDefault();
+    const { drop } = place(event, navDrag);
+    navDrag = null;
+    dropMark = null;
+    editRules(() => { rulesDraft.rules = drop(rulesDraft.rules); });
+  });
 }
 
 /** The left column: rules in priority order (grouped in folders), then places, toggles and recent activity. */
 function renderRuleList() {
   liveRefs.rules = new Map();
   const list = create("div", "rules-nav");
+  navList = list;
   const head = create("div", "rules-nav-head");
   head.appendChild(create("span", "rule-label", "Rules"));
   const add = button("+ New rule", () => addRule(blankRule()), "button small");
@@ -3014,9 +3095,15 @@ function renderRuleList() {
       list.appendChild(ruleNavItem(segment.rules[0], false));
       return;
     }
-    list.appendChild(folderNavItem(folder, index, segment.rules.length === 0));
+    list.appendChild(folderNavItem(folder, index, segment));
     if (!folder.collapsed) segment.rules.forEach(rule => list.appendChild(ruleNavItem(rule, true)));
   });
+  if (rulesDraft.rules.length) {
+    const end = create("div", "rules-nav-end", "Drop here to put it last, outside any folder");
+    navDropTarget(end, (event, drag) => ({ mark: "into",
+      drop: rules => drag.rule ? dropRule(rules, drag.rule, null, null) : dropFolder(rules, drag.folder, null) }));
+    list.appendChild(end);
+  }
   for (const [kind, label] of [["places", `Places (${rulesDraft.places.length})`],
     ["toggles", `Toggles (${rulesDraft.toggles.length})`], ["settings", "Settings"]]) {
     const item = create("div", rulesSelection?.kind === kind ? "rules-nav-item selected section" : "rules-nav-item section");

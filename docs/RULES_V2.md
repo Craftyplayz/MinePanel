@@ -370,7 +370,7 @@ Decisions made while building it:
 
 The editor lives in `features.js` ("Rules editor", "Pickers", "Place on grid", "Toggles and notifications"), with styles in `features.css`. It **covers nearly the whole screen** (the maintainer asked for that instead of a side panel). **Side panel** in its header docks it beside the live dashboard, which is needed for preview, the inspector and Place on grid.
 
-- **Layout:** on the left, rules in priority order (live active dot, outlined while forced; ↑/↓ to reorder; + New rule), Places, Toggles, Settings and the activity log (the last 20). On the right, the selected item.
+- **Layout:** on the left, rules in priority order (live active dot, outlined while forced; drag or ↑/↓ to reorder; + New rule), Places, Toggles, Settings and the activity log (the last 20). On the right, the selected item.
 - **Rule:** name, enabled, Preview (Auto / Force on / Force off; only in this browser, ended when the editor closes), duplicate and delete. Then:
   - The When list: AND/OR per row; OR rows start a new boxed block; each block shows green or red. There's `not`, a type picker grouped by family, parameters per kind, and the `for`/`within` modifier. Each row has a live green/red edge and value; an empty When list gets a warning.
   - Then and Else action lists.
@@ -437,7 +437,7 @@ Decisions made while building it:
 Decisions made while building it:
 
 - **Folders and priority.** A folder's rules are kept next to each other in the list, so the drawn list is the priority order. ↑/↓ on a rule in a folder swaps it with the folder's own rules; on a rule without a folder it jumps past a whole folder; ↑/↓ on a folder moves its rules as a block. Choosing a folder under a rule's **Folder** puts the rule after the folder's last rule (or leaves it in place if the folder is empty); choosing None puts it just after the folder. A layout whose folder rules aren't together (hand-edited) is drawn as it is, with the folder shown once per run. Nothing reorders it on its own.
-- **Folder state** (enabled, collapsed) is saved with the layout. Turning a folder off turns its rules off; a rule in a disabled folder says so. Deleting a folder keeps its rules, without a folder, where they are. Reordering is still with ↑/↓ rather than dragging.
+- **Folder state** (enabled, collapsed) is saved with the layout. Turning a folder off turns its rules off; a rule in a disabled folder says so. Deleting a folder keeps its rules, without a folder, where they are. Rules and folders can also be dragged (`dropRule`, `dropFolder` in `layout.js`): a rule takes the folder of the row it lands next to, the top half of a folder's row is above the folder and the bottom half is into it, an end zone puts it last outside any folder, and a dragged folder never lands inside another folder's run.
 - **Templates** are the table above. Show only reveals a panel that's off or rules-only in the profile in use, so each template notes which panel to set to Rules only. Phone layout switches to the first profile, or Default if there's none, for you to change.
 - **Share strings** are `minepanel-rules:1:` plus base64url of UTF-8 JSON (`version`, `folder`, `rules`, `places`, `toggles`, `profiles`). They carry the rules a shared rule reads through "Rule active" (in any folder), the places and toggles used, and profile names. Importing adds everything with fresh ids and never replaces anything:
   - A place equal in every field to an existing one is reused, and so is a toggle with the same name.
@@ -468,7 +468,6 @@ State on 2026-10-16, branch `rules-v2`: phases 1–5 are done, and their code is
 - The fixed 1 s dwell could become a setting (it would need a new stored field in both validators).
 - The inspector lists claims but not why a panel moved because of a neighbour (solver steps aren't reported).
 - Grow/shrink only looks at direct neighbours: a gap with no exact edge falls back to the settle step, as the design says.
-- Rules are reordered with ↑/↓, not by dragging as the design says.
 - Distance from spawn uses the client's respawn data, which a server may not keep exact (marked uncertain in the design).
 - Statistic pickers suggest only general statistics; per-block, per-item and per-mob statistics could be built from the block, item and entity lists.
 

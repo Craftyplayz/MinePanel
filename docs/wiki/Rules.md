@@ -82,7 +82,7 @@ The order of the rule list is the priority, highest first. Each action **claims*
 - When two active rules claim the same thing, the higher rule wins and the other is **overridden**.
 - Claims on different things combine. One rule can switch the profile while another hides a panel in it.
 
-Reorder rules with **↑** and **↓**.
+Reorder rules by dragging them in the rule list, or one step at a time with **↑** and **↓**.
 
 ## What happens on the dashboard
 
@@ -104,7 +104,7 @@ If your system asks for **reduced motion**, panels cross-fade instead of sliding
 ### Rule list (left)
 
 - Rules in priority order. A **dot** marks each rule that's active right now; an outlined dot means it's being previewed.
-- **↑ / ↓** reorder rules.
+- Drag a rule or folder by its row (the **⠿** grip marks what can be dragged) to move it. A line or outline shows where it will land. **↑ / ↓** move it one step.
 - **+ New rule**, **+ Folder**, **From template** and **Import / export**.
 - Below the rules: **Places**, **Toggles**, **Settings** and the **activity log**.
 
@@ -158,6 +158,9 @@ Folders group rules.
 
 - A folder's **checkbox** turns all of its rules on or off; **▸ / ▾** collapses it.
 - A folder's rules stay together in the list. ↑/↓ on a folder moves the whole folder; ↑/↓ on a rule moves it within its folder.
+- Drag a rule onto a rule inside a folder to put it in that folder there. Drop it on the bottom half of a folder's row to put it at the top of the folder, or on the top half to put it just above the folder, outside it.
+- To take a rule out of a folder, drop it next to a rule that isn't in one, on the top half of a folder's row, or on **Drop here to put it last, outside any folder**, which shows at the end of the list while you drag.
+- Drag a folder's row to move the folder with all its rules. Dropped on another folder's rules, it goes above that folder. An empty folder can't be dragged.
 - Deleting a folder keeps its rules, just without a folder.
 - Up to 32 folders.
 

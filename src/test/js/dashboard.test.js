@@ -144,6 +144,7 @@ function harness(fetchImpl = defaultFetch()) {
     set textContent(value) { this.text = value; this.children = []; this.writes++; }
     set innerHTML(value) { throw new Error(`Unsafe HTML: ${value}`); }
     appendChild(child) { this.children.push(child); }
+    prepend(...children) { this.children.unshift(...children); }
     replaceChildren(...children) { this.children = children; this.text = ""; this.replacements++; }
     setAttribute(key, value) { this.attributes[key] = String(value); }
     getBoundingClientRect() { return this.rect; }
@@ -1720,7 +1721,7 @@ const docLayout = () => ({ version: 2, tiles: [], profiles: [{ id: "nether", nam
 function rulesApi() {
   return harness().run(`({ normalizeLayout, migrateLayoutV1, normalizeLayoutV1, createRuleEngine, effectiveView,
     evaluateCondition, ruleBlocks, defaultLayout, removeProfile, ruleSegments, moveRuleInList, moveSegment, fileRule,
-    newRuleIndex, RULE_TEMPLATES, ruleFromTemplate, shareRules, importShare, importRuleSet, exportRuleSet })`);
+    dropRule, dropFolder, newRuleIndex, RULE_TEMPLATES, ruleFromTemplate, shareRules, importShare, importRuleSet, exportRuleSet })`);
 }
 
 const ruleLayout = (R, rules, extra = {}) => R.normalizeLayout({ version: 2, tiles: [], ...extra, rules });
@@ -2300,6 +2301,27 @@ test("rules v2: folders keep their rules together, and moves never split them", 
   assert.equal(R.newRuleIndex(rules, "a"), 3);
   assert.equal(R.newRuleIndex(rules, "c"), 5);
   assert.equal(R.newRuleIndex(rules, null), 5);
+});
+
+test("rules v2: dragging a rule or folder drops it in place without splitting folders", () => {
+  const R = rulesApi();
+  const list = folders => folders.split(" ").map((folder, index) => ({ id: `r${index}`, folder: folder === "-" ? null : folder }));
+  const shape = rules => rules.map(rule => `${rule.id}:${rule.folder ?? "-"}`).join(" ");
+  const drop = (folders, ...args) => shape(R.dropRule(list(folders), ...args));
+  assert.equal(drop("- a a - b", "r3", "r1", null), "r0:- r3:- r1:a r2:a r4:b", "above a folder, outside it");
+  assert.equal(drop("- a a - b", "r0", "r2", "a"), "r1:a r0:a r2:a r3:- r4:b", "into the middle of a folder");
+  assert.equal(drop("- a a - b", "r1", "r4", "b"), "r0:- r2:a r3:- r1:b r4:b", "from one folder to another");
+  assert.equal(drop("- a a - b", "r2", null, null), "r0:- r1:a r3:- r4:b r2:-", "to the end, out of its folder");
+  assert.equal(drop("- a a - b", "r1", "r1", "a"), "r0:- r1:a r2:a r3:- r4:b", "onto itself changes nothing");
+  assert.equal(drop("- a a - b", "r0", "r2", null), "r1:a r2:a r0:- r3:- r4:b", "never inside a run without the folder");
+  assert.equal(drop("- a a - b", "r0", "r4", "a"), "r1:a r2:a r0:a r3:- r4:b", "joins its folder's rules if dropped away");
+  assert.equal(drop("- a a - b", "r3", null, "c"), "r0:- r1:a r2:a r4:b r3:c", "into an empty folder");
+  const move = (folders, ...args) => shape(R.dropFolder(list(folders), ...args));
+  assert.equal(move("- a a - b", "a", "r0"), "r1:a r2:a r0:- r3:- r4:b", "a folder moves as a whole");
+  assert.equal(move("- a a - b", "a", null), "r0:- r3:- r4:b r1:a r2:a", "to the end");
+  assert.equal(move("- b b a a", "a", "r2"), "r0:- r3:a r4:a r1:b r2:b", "inside another folder's run it goes before it");
+  assert.equal(move("- a a - b", "a", "r2"), "r0:- r1:a r2:a r3:- r4:b", "inside its own run changes nothing");
+  assert.equal(shape(R.dropFolder(list("- a a"), "c", "r0")), "r0:- r1:a r2:a", "an empty folder has nothing to move");
 });
 
 test("rules v2: every template adds a valid rule", () => {
@@ -3000,6 +3022,29 @@ test("rules editor: templates, folders, copy and paste, share and import", async
   assert.equal(byKey(sidebar, "nav.combat"), undefined, "a collapsed folder hides its rules");
   setValue(byKey(sidebar, "nav.folder.folder-1.0.enabled"), false);
   assert.equal(live().folders[0].enabled, false);
+  setValue(byKey(sidebar, "nav.folder.folder-1.0.enabled"), true);
+  byKey(sidebar, "nav.folder.folder-1.0.caret").emit("click");
+  // Dragging: a rule onto the bottom half of the folder goes into it, and onto the end zone back out.
+  const row = key => findAll(sidebar, element => element.children.includes(byKey(sidebar, key)))[0];
+  const drag = (from, to, clientY) => {
+    const dataTransfer = { setData() {} };
+    from.emit("dragstart", { dataTransfer });
+    to.emit("dragover", { dataTransfer, clientY });
+    to.emit("drop", { dataTransfer, clientY });
+    from.emit("dragend", { dataTransfer });
+  };
+  drag(row("nav.xp-gain"), row("nav.folder.folder-1.0"), 30);
+  assert.deepEqual(live().rules.map(rule => [rule.id, rule.folder]), [["xp-gain", "folder-1"], ["combat", "folder-1"]]);
+  const end = () => findAll(sidebar, element => element.className === "rules-nav-end")[0];
+  drag(row("nav.xp-gain"), end());
+  assert.deepEqual(live().rules.map(rule => [rule.id, rule.folder]), [["combat", "folder-1"], ["xp-gain", null]]);
+  drag(row("nav.xp-gain"), row("nav.folder.folder-1.0"), 10);
+  assert.deepEqual(live().rules.map(rule => [rule.id, rule.folder]), [["xp-gain", null], ["combat", "folder-1"]],
+    "the top half of a folder is above it");
+  drag(row("nav.folder.folder-1.1"), row("nav.xp-gain"), 10);
+  assert.deepEqual(live().rules.map(rule => rule.id), ["combat", "xp-gain"], "a folder is dragged with its rules");
+  byKey(sidebar, "nav.folder.folder-1.0.caret").emit("click");
+  setValue(byKey(sidebar, "nav.folder.folder-1.0.enabled"), false);
   // Copy two conditions from one rule and paste them into another.
   byKey(sidebar, "nav.xp-gain").emit("click");
   buttonNamed(detail, "+ OR condition").emit("click");
