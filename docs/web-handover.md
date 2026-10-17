@@ -1,6 +1,6 @@
 # Handover: continuing MinePanel in Claude Code on the web
 
-Written 2026-10-15 for the next session (human or Claude Code on the web). Read this, then
+Written 2026-10-15 for the next session (human or Claude Code on the web). Read [`AGENTS.md`](../AGENTS.md), this, then
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) — its **Litematica build progress** section is the agreed plan and
 is the source of truth. Do not redesign it; ask the maintainer before changing any decision listed below.
 
@@ -55,6 +55,8 @@ Updated 2026-10-15 by the web session on branch `ccr-c833f2be-mqcc2v` (see [TEST
   tasks (they add HUD renderers and chat messages).
 - Protocol changes bump `PlayerSnapshot.SCHEMA_VERSION` (3 → 4) and need matching validation in `protocol.js`.
 - Docs must separate tested from unverified behaviour; never claim in-game checks that were not performed.
+- Every player-visible change (new or changed feature, setting, default, label or message) must update the user wiki in
+  [`docs/wiki/`](wiki/Home.md) in the same change. [`AGENTS.md`](../AGENTS.md) says which page covers what.
 - Build access: `maven.fabricmc.net` has been blocked by DNS/firewall in earlier agent environments, so a full Loom
   build may fail there (see [TESTING.md](TESTING.md)). `masa.dy.fi` was reachable from the maintainer's machine; check
   it from the web environment and from CI before relying on it.

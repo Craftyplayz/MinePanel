@@ -1,5 +1,7 @@
 # Architecture
 
+Developer reference. What players see is documented in the [wiki](wiki/Home.md); update it alongside any user-visible change here (see [`AGENTS.md`](../AGENTS.md)).
+
 MinePanel is a client-only Fabric mod, a loopback-only local service, and a static browser application embedded in the mod JAR. Minecraft APIs belong in the client adapter; the browser consumes versioned snapshots and never issues gameplay mutations.
 
 The client adapter owns lifecycle and reads Minecraft state on the client thread. It copies state into immutable snapshots before publishing to bounded background service workers. The service serves only bundled resources and narrowly scoped authenticated read-only data. Optional integrations are separate adapters; absence or failure is reported as unavailable and does not prevent startup.

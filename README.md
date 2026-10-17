@@ -1,5 +1,7 @@
 # MinePanel
 
+**Using MinePanel? See the [wiki](docs/wiki/Home.md)** for every panel, setting and rule. This README covers building and releasing.
+
 MinePanel is a client-side Fabric companion dashboard targeting Minecraft Java Edition 26.1.2. It includes a bundled offline dashboard, lifecycle-managed loopback service, player position/health/session telemetry, read-only inventory/equipment, vanilla statistics counters, and bounded session event history over authenticated WebSocket updates. Minecraft compilation and runtime compatibility are still **unverified**, not release-ready claims.
 
 ## Requirements and build
