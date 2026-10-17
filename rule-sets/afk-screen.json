@@ -1,0 +1,30 @@
+{
+  "format": "minepanel-rules",
+  "version": 1,
+  "profiles": [
+    {
+      "id": "afk",
+      "name": "AFK",
+      "panels": {
+        "afk":          { "x": 0, "y": 0,  "w": 4, "h": 18 },
+        "model":        { "x": 4, "y": 0,  "w": 4, "h": 7 },
+        "advancements": { "x": 8, "y": 0,  "w": 4, "h": 18 },
+        "performance":  { "x": 4, "y": 7,  "w": 4, "h": 4 },
+        "inventory":    { "x": 4, "y": 11, "w": 4, "h": 7 }
+      }
+    }
+  ],
+  "rules": [
+    {
+      "id": "afk-screen",
+      "name": "AFK screen",
+      "when": [
+        { "type": "afk", "compare": ">=", "value": 2 }
+      ],
+      "then": [
+        { "do": "profile", "profile": "afk" }
+      ],
+      "timing": { "delayMs": 0, "lingerMs": 2000 }
+    }
+  ]
+}

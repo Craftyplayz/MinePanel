@@ -69,7 +69,7 @@ A rule that matches becomes **active** through its **Timing**:
 | **Delay** | 0 ms | How long the rule must match before it becomes active |
 | **Linger** | 2000 ms (minimum 500) | How long it stays active after it stops matching |
 
-Linger stops panels blinking when a value hovers around a threshold. For rules that detect a farm from a kill or item rate, use a long linger such as 20 000 ms so the layout stays up through short gaps.
+You can enter these in ms, s, min or h (see [Time units](#time-units)); they're saved in milliseconds. Linger stops panels blinking when a value hovers around a threshold. For rules that detect a farm from a kill or item rate, use a long linger such as 20 000 ms so the layout stays up through short gaps.
 
 While a rule is **active**, its **Then** actions apply. While it's enabled but **not active**, its **Else** actions apply. A disabled rule does nothing.
 
@@ -115,6 +115,10 @@ If your system asks for **reduced motion**, panels cross-fade instead of sliding
 - **When**: one row per condition, added with **+ AND condition** or **+ OR condition**. The type list is grouped by family (World, Position, Player, …). Each row has an AND/OR choice, Not, its parameters and the For/Within modifier. Each row shows its **live value** (for example "speed 4.3 b/s") and a green (true) or red (false) edge, and each block shows whether it's true as a whole.
 - **Then** and **Else** action lists, added to with **+ Action**.
 - **Timing**: delay, linger, and an optional animation of its own.
+
+### Time units
+
+Every time field in the editor (For/Within, an amount's window, Portal linking's "for up to", a message's cooldown, Delay, Linger and animation durations) has a unit choice next to it: **ms**, **s**, **min** or **h**. Changing the unit only changes how the value is shown; the time stays the same. Each field still keeps its own precision and limits: For, Within, windows and cooldowns are whole seconds, Portal linking is whole minutes, and Delay, Linger and animations are whole milliseconds, so a value that doesn't fit is rounded (for example 1500 ms in a seconds field becomes 2 s). When a rule is shown, each field starts in the largest unit that shows its value as a whole number.
 
 ### Pickers
 

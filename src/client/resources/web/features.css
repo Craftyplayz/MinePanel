@@ -69,11 +69,13 @@
 .afk-timer { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .afk-timer-label { color: var(--muted); font-size: 11px; }
 .afk-timer strong { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.1; }
-.afk-crawl { position: relative; flex: 1; min-height: 0; margin: 2px 6px 6px; overflow: hidden;
+.afk-crawl { position: relative; flex: 1; min-height: 0; margin: 2px 6px 6px; overflow: hidden; cursor: grab; touch-action: none; user-select: none;
   -webkit-mask-image: linear-gradient(transparent, #000 14%, #000 86%, transparent);
   mask-image: linear-gradient(transparent, #000 14%, #000 86%, transparent); }
-.afk-crawl-item { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: baseline; gap: 10px; padding: 3px 0; font-size: 13px; will-change: transform; }
-.afk-crawl-item .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Each statistic sits on its own faint card, with a dotted leader from its name to its number */
+.afk-crawl-item { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: baseline; gap: 6px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: #ffffff08; font-size: 13px; will-change: transform; }
+.afk-crawl-item .label { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.afk-crawl-leader { flex: 1 0 12px; align-self: center; margin-top: 6px; border-bottom: 1px dotted #8b989f66; }
 .afk-crawl-item .stat-category { margin-right: 6px; color: var(--muted); font-size: 11px; }
 .afk-crawl-item .total { font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .afk-crawl-empty { margin: 0; color: var(--muted); font-size: 12px; }

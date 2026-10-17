@@ -221,3 +221,11 @@ Rules and folders in the rules editor's list can be dragged (HTML drag and drop)
 **Tested** (`node --test src/test/js/dashboard.test.js`, 116 passing): `dropRule` and `dropFolder` on their own (into, out of and between folders, onto itself, a drop that would split a folder, empty folders), and in the editor test, drag events on the list rows: a rule onto the bottom half of a folder (into it), onto the end zone (out of it), onto the top half of a folder (above it), and a folder with its rules onto a rule.
 
 **Not run.** Not checked in a real browser or in Minecraft: real mouse dragging, the drop marks and grip look, and Firefox starting a drag from a row's name button.
+
+## Scrolling the AFK crawl (2026-10-17)
+
+The AFK panel's statistics crawl can be scrolled either way with the mouse wheel or by dragging. After a scroll it eases to a stop over 0.5 s, holds for 3 s (from letting go when dragging), then eases back to full speed over 2 s (`afkCrawlPace` in `features.js`). Scrolling up fills lines in below the bottom; wheel scrolling glides over a few frames.
+
+**Tested** (`node --test src/test/js/dashboard.test.js`, 116 passing): the existing AFK panel test still passes. No new automated test covers the scrolling.
+
+**Not run.** Not checked in a real browser or in Minecraft: wheel and drag feel, the stop/resume easing, touch dragging, and reduced-motion behaviour while scrolling.

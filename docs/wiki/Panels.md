@@ -201,7 +201,8 @@ How long you've been away, over a slow crawl of your statistics.
 
 - **AFK for**: time since you last moved more than ¼ block, turned, or moved the mouse cursor in game.
 - The badge says **Active** for the first 10 seconds, then **AFK**.
-- Below it, random statistics with non-zero values drift slowly down the panel. With reduced motion, they stand still and change every few seconds.
+- Below it, random statistics with non-zero values drift slowly down the panel. Each one sits on its own small card, with a dotted line joining its name to its number. With reduced motion, they stand still and change every few seconds.
+- Scroll the list up or down with the mouse wheel, or drag it. It glides to a stop, stays still for about 3 seconds after you stop scrolling (or let go), then speeds back up over 2 seconds.
 
 The panel is off by default. A good way to use it is the **AFK screen** template, which shows it nearly full screen after two minutes AFK (see [Templates](Rule-Sets.md#templates)).
 

@@ -1,0 +1,71 @@
+{
+  "format": "minepanel-rules",
+  "version": 1,
+  "profiles": [
+    {
+      "id": "adv-hunting",
+      "name": "Advancement hunting",
+      "panels": {
+        "map":          { "x": 0,  "y": 0,  "w": 4, "h": 9 },
+        "advancements": { "x": 4,  "y": 0,  "w": 4, "h": 18 },
+        "inventory":    { "x": 8,  "y": 0,  "w": 4, "h": 6 },
+        "statistics":   { "x": 8,  "y": 6,  "w": 2, "h": 8 },
+        "pickups":      { "x": 10, "y": 6,  "w": 2, "h": 8 },
+        "movement":     { "x": 0,  "y": 9,  "w": 2, "h": 5 },
+        "player":       { "x": 2,  "y": 9,  "w": 2, "h": 5 },
+        "xp":           { "x": 8,  "y": 14, "w": 4, "h": 4 },
+        "performance":  { "x": 0,  "y": 14, "w": 4, "h": 4 },
+        "villagers":    { "x": 6,  "y": 18, "w": 4, "h": 7, "mode": "rules" }
+      }
+    }
+  ],
+  "folders": [
+    { "id": "adv-hunting", "name": "Advancement hunting" }
+  ],
+  "toggles": [
+    { "id": "adv-hunting", "name": "Advancement hunting" }
+  ],
+  "rules": [
+    {
+      "id": "adv-hunting-on",
+      "name": "Advancement hunting layout",
+      "folder": "adv-hunting",
+      "when": [
+        { "type": "toggle", "toggle": "adv-hunting" }
+      ],
+      "then": [
+        { "do": "profile", "profile": "adv-hunting" }
+      ],
+      "timing": { "lingerMs": 500 }
+    },
+    {
+      "id": "adv-trading-hall",
+      "name": "Hunting: villagers at a trading hall",
+      "folder": "adv-hunting",
+      "when": [
+        { "type": "ruleActive", "rule": "adv-hunting-on" },
+        { "join": "and", "type": "villagersNearby", "radius": 24, "compare": ">=", "value": 6 }
+      ],
+      "then": [
+        { "do": "hide", "panel": "statistics" },
+        { "do": "hide", "panel": "pickups" },
+        { "do": "show", "panel": "villagers" },
+        { "do": "place", "panel": "villagers", "x": 8, "y": 6, "w": 4, "h": 8 }
+      ],
+      "timing": { "delayMs": 3000, "lingerMs": 20000 }
+    },
+    {
+      "id": "adv-standing-still",
+      "name": "Hunting: hide movement when still",
+      "folder": "adv-hunting",
+      "when": [
+        { "type": "ruleActive", "rule": "adv-hunting-on" },
+        { "join": "and", "type": "still", "for": 15 }
+      ],
+      "then": [
+        { "do": "hide", "panel": "movement", "fill": "player" }
+      ],
+      "timing": { "lingerMs": 1000 }
+    }
+  ]
+}

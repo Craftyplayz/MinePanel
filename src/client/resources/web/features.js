@@ -537,7 +537,8 @@ function drawPerformance(graph) {
 
 // How long the player has stood still without turning or moving the cursor (afkSeconds in rules.js), above a crawl
 // of random non-zero statistics: each line enters at the top of an inset area, slides slowly down and leaves at the
-// bottom. With reduced motion the lines stand still and a fresh set is shown every few seconds instead.
+// bottom. With reduced motion the lines stand still and a fresh set is shown every few seconds instead. The player can
+// scroll the crawl either way with the wheel or by dragging; the crawl then eases to a stop, waits, and eases back.
 const afkParts = { tile: $("#tile-afk"), status: $("#afk-status"), timer: $("#afk-timer"), crawl: $("#afk-crawl") };
 /** Pixels per second: slow enough to read every line while it crosses the panel. */
 const AFK_CRAWL_SPEED = 20;
@@ -546,7 +547,13 @@ const AFK_CRAWL_GAP = 16;
 /** Below this many seconds the badge says Active rather than AFK. */
 const AFK_BADGE_SECONDS = 10;
 const AFK_STATIC_MILLIS = 8000;
-const afkCrawl = { items: [], bag: [], frame: null, drawn: null, shownAt: 0, empty: null };
+/** After the player scrolls: time to ease to a stop, time standing still, then time to ease back up to speed. */
+const AFK_SCROLL_STOP_MILLIS = 500;
+const AFK_SCROLL_HOLD_MILLIS = 3000;
+const AFK_SCROLL_RESUME_MILLIS = 2000;
+// Lines are kept in order from the bottom one to the top one. pending is wheel scrolling not yet shown.
+const afkCrawl = { items: [], bag: [], frame: null, drawn: null, shownAt: 0, empty: null,
+  scrolledAt: null, scrolledPace: 1, pending: 0, drag: null };
 
 function formatAfk(seconds) {
   const value = Math.floor(seconds);
@@ -582,17 +589,19 @@ function nextAfkStatistic(entries) {
   return null;
 }
 
-function addAfkLine(entry, y) {
+function addAfkLine(entry, y, atBottom = false) {
   const element = create("div", "afk-crawl-item");
   const label = create("span", "label");
   if (entry.category !== "General") label.appendChild(create("span", "stat-category", entry.category));
   label.appendChild(create("span", "", entry.label));
   element.appendChild(label);
+  element.appendChild(create("span", "afk-crawl-leader"));
   element.appendChild(create("span", "total", entry.display));
   element.title = `${entry.label}: ${entry.display}`;
   afkParts.crawl.appendChild(element);
   const item = { id: entry.id, element, y, height: element.offsetHeight || 24 };
-  afkCrawl.items.push(item);
+  if (atBottom) afkCrawl.items.unshift(item);
+  else afkCrawl.items.push(item);
   return item;
 }
 
@@ -602,26 +611,77 @@ function placeAfkLine(item) {
 
 function clearAfkCrawl(message = null) {
   afkCrawl.items = [];
+  afkCrawl.pending = 0;
   afkCrawl.shownAt = 0;
   afkCrawl.empty = message;
   afkParts.crawl.replaceChildren(...message ? [create("p", "afk-crawl-empty", message)] : []);
 }
 
-/** Moves every line down by {@code elapsed} ms, drops those past the bottom and starts the next above the top. */
-function stepAfkCrawl(entries, elapsed) {
+/**
+ * Moves every line down by {@code distance} px (up when negative), drops those that left the area, starts the next
+ * above the top and, when moving up, the next below the bottom.
+ */
+function stepAfkCrawl(entries, distance) {
   const height = afkParts.crawl.clientHeight;
-  for (const item of afkCrawl.items) item.y += elapsed / 1000 * AFK_CRAWL_SPEED;
-  for (const item of afkCrawl.items) if (item.y >= height) item.element.remove?.();
-  afkCrawl.items = afkCrawl.items.filter(item => item.y < height);
-  const last = afkCrawl.items.at(-1);
-  if (!last || last.y >= AFK_CRAWL_GAP) {
+  for (const item of afkCrawl.items) item.y += distance;
+  const inside = item => item.y < height && item.y + item.height >= 0;
+  for (const item of afkCrawl.items) if (!inside(item)) item.element.remove?.();
+  afkCrawl.items = afkCrawl.items.filter(inside);
+  const top = afkCrawl.items.at(-1);
+  if (!top || top.y >= AFK_CRAWL_GAP) {
     const entry = nextAfkStatistic(entries);
     if (entry) {
       const item = addAfkLine(entry, 0);
-      item.y = (last ? last.y - AFK_CRAWL_GAP : 0) - item.height;
+      item.y = (top ? top.y - AFK_CRAWL_GAP : 0) - item.height;
     }
   }
+  const bottom = afkCrawl.items[0];
+  if (distance < 0 && bottom && bottom.y + bottom.height + AFK_CRAWL_GAP < height) {
+    const entry = nextAfkStatistic(entries);
+    if (entry) addAfkLine(entry, bottom.y + bottom.height + AFK_CRAWL_GAP, true);
+  }
+}
+
+/** Moves the lines in small steps, so a long scroll never jumps past the point where the next line should start. */
+function moveAfkCrawl(entries, distance) {
+  let left = distance;
+  do {
+    const step = clamp(left, -8, 8);
+    stepAfkCrawl(entries, step);
+    left -= step;
+  } while (left !== 0);
   afkCrawl.items.forEach(placeAfkLine);
+}
+
+const afkEase = t => t * t * (3 - 2 * t);
+
+/** The share of AFK_CRAWL_SPEED the crawl moves at, from 0 to 1, given when the player last scrolled it. */
+function afkCrawlPace(now) {
+  if (afkCrawl.scrolledAt === null) return 1;
+  const since = now - afkCrawl.scrolledAt;
+  if (since < AFK_SCROLL_STOP_MILLIS) return afkCrawl.scrolledPace * (1 - afkEase(since / AFK_SCROLL_STOP_MILLIS));
+  // Holding the crawl keeps it still; the wait counts from letting go.
+  const resumed = since - AFK_SCROLL_STOP_MILLIS - AFK_SCROLL_HOLD_MILLIS;
+  if (afkCrawl.drag || resumed < 0) return 0;
+  if (resumed < AFK_SCROLL_RESUME_MILLIS) return afkEase(resumed / AFK_SCROLL_RESUME_MILLIS);
+  afkCrawl.scrolledAt = null;
+  return 1;
+}
+
+function pauseAfkCrawl(now) {
+  afkCrawl.scrolledPace = afkCrawlPace(now);
+  afkCrawl.scrolledAt = now;
+  // Reduced motion: keep the lines being read rather than swapping in a fresh set.
+  afkCrawl.shownAt = now;
+}
+
+/** Scrolls the lines by the player's {@code distance} px; wheel scrolling glides there over a few frames. */
+function scrollAfkCrawl(distance, glide) {
+  const entries = afkStatistics(currentPlayerState);
+  if (!entries.length || afkCrawl.empty !== null || afkParts.tile.hidden) return;
+  pauseAfkCrawl(Date.now());
+  if (glide && afkCrawl.frame !== null) afkCrawl.pending += distance;
+  else moveAfkCrawl(entries, distance);
 }
 
 /** Reduced motion: fills the area from the top with a fresh set of lines every AFK_STATIC_MILLIS. */
@@ -632,7 +692,7 @@ function showStaticAfkLines(entries, now) {
   const height = afkParts.crawl.clientHeight || 0;
   let y = 0;
   for (let entry = nextAfkStatistic(entries); entry; entry = y < height ? nextAfkStatistic(entries) : null) {
-    const item = addAfkLine(entry, y);
+    const item = addAfkLine(entry, y, true);
     placeAfkLine(item);
     y += item.height + AFK_CRAWL_GAP;
   }
@@ -650,10 +710,39 @@ function animateAfk() {
   }
   const now = Date.now();
   // A long gap (a hidden tab) resumes where the lines were rather than jumping.
-  stepAfkCrawl(entries, afkCrawl.drawn === null ? 0 : Math.min(100, now - afkCrawl.drawn));
+  const elapsed = afkCrawl.drawn === null ? 0 : Math.min(100, now - afkCrawl.drawn);
+  const scrolled = Math.abs(afkCrawl.pending) < 0.5 ? afkCrawl.pending : afkCrawl.pending * (1 - Math.exp(-elapsed / 60));
+  afkCrawl.pending -= scrolled;
+  moveAfkCrawl(entries, elapsed / 1000 * AFK_CRAWL_SPEED * afkCrawlPace(now) + scrolled);
   afkCrawl.drawn = now;
   afkCrawl.frame = window.requestAnimationFrame(animateAfk);
 }
+
+afkParts.crawl.addEventListener("wheel", event => {
+  event.preventDefault();
+  const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? afkParts.crawl.clientHeight : 1;
+  // Scrolling down brings the lines below into view, so the lines move up.
+  scrollAfkCrawl(-event.deltaY * unit, true);
+}, { passive: false });
+afkParts.crawl.addEventListener("pointerdown", event => {
+  if (event.button > 0 || afkCrawl.empty !== null) return;
+  afkParts.crawl.setPointerCapture?.(event.pointerId);
+  afkCrawl.drag = { id: event.pointerId, y: event.clientY };
+  pauseAfkCrawl(Date.now());
+});
+afkParts.crawl.addEventListener("pointermove", event => {
+  const drag = afkCrawl.drag;
+  if (!drag || drag.id !== event.pointerId) return;
+  scrollAfkCrawl(event.clientY - drag.y, false);
+  drag.y = event.clientY;
+});
+function endAfkDrag(event) {
+  if (!afkCrawl.drag || afkCrawl.drag.id !== event.pointerId) return;
+  afkCrawl.drag = null;
+  pauseAfkCrawl(Date.now());
+}
+afkParts.crawl.addEventListener("pointerup", endAfkDrag);
+afkParts.crawl.addEventListener("pointercancel", endAfkDrag);
 
 function renderAfk(player, now = Date.now()) {
   const seconds = afkSeconds(player, now);
@@ -1657,6 +1746,50 @@ function numberInput(key, value, onChange, { min, max, step = 1 } = {}) {
   return input;
 }
 
+const TIME_UNITS = [["ms", "ms", 1], ["s", "s", 1000], ["min", "min", 60000], ["h", "h", 3600000]];
+const unitMillis = unit => TIME_UNITS.find(([id]) => id === unit)[2];
+// The unit last picked for each duration control, kept while the value it was picked for is unchanged.
+const durationUnits = new Map();
+
+/** The unit a duration is shown in: the one picked for it, else the largest that shows it as a whole number. */
+function durationUnit(key, millis) {
+  const picked = durationUnits.get(key);
+  if (picked && picked.millis === millis) return picked.unit;
+  if (!Number.isFinite(millis) || millis === 0) return "s";
+  return TIME_UNITS.findLast(([, , size]) => millis % size === 0)?.[0] ?? "ms";
+}
+
+/**
+ * A number with a unit picker (ms, s, min, h). The value is stored in {@code base} (a unit id) as a whole number;
+ * min and max are in that unit too.
+ */
+function durationInput(key, value, base, onChange, { min, max } = {}) {
+  const row = create("span", "rule-inline");
+  const baseMillis = unitMillis(base);
+  let millis = value * baseMillis;
+  let unit = durationUnit(key, millis);
+  const input = numberInput(key, NaN, number => {
+    const stored = Number.isFinite(number) ? Math.round(number * unitMillis(unit) / baseMillis) : NaN;
+    millis = stored * baseMillis;
+    durationUnits.set(key, { unit, millis });
+    onChange(stored);
+  }, { step: "any" });
+  const show = () => {
+    const size = unitMillis(unit);
+    input.value = Number.isFinite(millis) ? String(Number((millis / size).toPrecision(6))) : "";
+    if (min !== undefined) input.min = String(min * baseMillis / size);
+    if (max !== undefined) input.max = String(max * baseMillis / size);
+  };
+  show();
+  row.appendChild(input);
+  row.appendChild(selectInput(`${key}.unit`, TIME_UNITS.map(([id, label]) => [id, label]), unit, next => {
+    unit = next;
+    durationUnits.set(key, { unit, millis });
+    show();
+  }));
+  return row;
+}
+
 function selectInput(key, options, value, onChange) {
   const select = keyed(create("select", "rule-input"), key);
   for (const option of options) {
@@ -2084,9 +2217,8 @@ function conditionControls(condition, key) {
         }, false), SUBJECT_PICKERS[spec.subject], { placeholder: spec.required ? "minecraft:custom/minecraft:jump" : "any" })));
       }
       box.appendChild(compare());
-      box.appendChild(field("in the last", numberInput(`${key}.window`, condition.window, set("window"),
+      box.appendChild(field("in the last", durationInput(`${key}.window`, condition.window, "s", set("window"),
         { min: 1, max: 3600 })));
-      box.appendChild(create("span", "rule-muted", "s"));
       break;
     case "event":
       if (spec.subject) {
@@ -2137,9 +2269,8 @@ function conditionControls(condition, key) {
       box.appendChild(create("span", "rule-muted", "blocks"));
       break;
     case "portal":
-      box.appendChild(field("for up to", numberInput(`${key}.minutes`, condition.minutes, set("minutes"),
+      box.appendChild(field("for up to", durationInput(`${key}.minutes`, condition.minutes, "min", set("minutes"),
         { min: 1, max: 120 })));
-      box.appendChild(create("span", "rule-muted", "min"));
       break;
     case "toggle":
       if (!rulesDraft.toggles.length) box.appendChild(create("span", "rule-muted", "Add a toggle under Toggles first."));
@@ -2241,9 +2372,8 @@ function modifierControls(condition, key) {
     })));
   }
   if (mode !== "now") {
-    row.appendChild(numberInput(`${key}.seconds`, condition[mode], value => editRules(() => { condition[mode] = value; },
-      false), { min: 1, max: 3600 }));
-    row.appendChild(create("span", "rule-muted", "s"));
+    row.appendChild(durationInput(`${key}.seconds`, condition[mode], "s",
+      value => editRules(() => { condition[mode] = value; }, false), { min: 1, max: 3600 }));
   }
   return row;
 }
@@ -2493,9 +2623,8 @@ function actionParams(action, key) {
       break;
     case "notify":
       box.appendChild(field("", textInput(`${key}.text`, action.text, set("text"), { maxLength: 128 }), "rule-field grow"));
-      box.appendChild(field("at most every", numberInput(`${key}.cooldown`, action.cooldown, set("cooldown"),
+      box.appendChild(field("at most every", durationInput(`${key}.cooldown`, action.cooldown, "s", set("cooldown"),
         { min: 0, max: 3600 })));
-      box.appendChild(create("span", "rule-muted", "s"));
       break;
   }
   return box;
@@ -2583,11 +2712,9 @@ function ruleDetail(rule) {
     "Delay: how long the When list must match first. Linger: how long the rule stays active after it stops matching."));
   timing.appendChild(timingHead);
   const row = create("div", "rule-row");
-  for (const [name, label, min] of [["delayMs", "Delay", 0], ["lingerMs", "Linger", 0.5]]) {
-    row.appendChild(field(label, numberInput(`rule.${name}`, rule.timing[name] / 1000,
-      value => editRules(() => { rule.timing[name] = Math.round(value * 1000); }, false),
-      { min, max: 600, step: 0.1 })));
-    row.appendChild(create("span", "rule-muted", "s"));
+  for (const [name, label, min] of [["delayMs", "Delay", 0], ["lingerMs", "Linger", MIN_LINGER_MILLIS]]) {
+    row.appendChild(field(label, durationInput(`rule.${name}`, rule.timing[name], "ms",
+      value => editRules(() => { rule.timing[name] = value; }, false), { min, max: MAX_TIMING_MILLIS })));
   }
   timing.appendChild(row);
   const animation = create("div", "rule-row");
@@ -2603,10 +2730,8 @@ function ruleDetail(rule) {
 
 /** Duration and easing of an animation (the global one or a rule's override). */
 function animationControls(key, animation, row) {
-  row.appendChild(field("Duration", numberInput(`${key}.duration`, animation.durationMs / 1000,
-    value => editRules(() => { animation.durationMs = Math.round(value * 1000); }, false),
-    { min: 0, max: MAX_ANIMATION_MILLIS / 1000, step: 0.05 })));
-  row.appendChild(create("span", "rule-muted", "s"));
+  row.appendChild(field("Duration", durationInput(`${key}.duration`, animation.durationMs, "ms",
+    value => editRules(() => { animation.durationMs = value; }, false), { min: 0, max: MAX_ANIMATION_MILLIS })));
   row.appendChild(field("Easing", selectInput(`${key}.easing`, EASINGS.map(easing => [easing, easing]),
     animation.easing, value => editRules(() => { animation.easing = value; }, false))));
 }
