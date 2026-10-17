@@ -1,0 +1,1 @@
+This wiki is published automatically from [`docs/wiki/`](https://github.com/Craftyplayz/MinePanel/tree/main/docs/wiki) in the MinePanel repository. To suggest a change, edit the files there; edits made here are overwritten.

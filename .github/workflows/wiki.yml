@@ -1,0 +1,63 @@
+name: Publish wiki
+
+# Copies docs/wiki/ to the repository's GitHub wiki (a separate git repo, <repo>.wiki.git) whenever it changes on
+# main. docs/wiki/ is the source of truth: edits made directly on GitHub's wiki pages are overwritten.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docs/wiki/**'
+      - '.github/workflows/wiki.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: minepanel-wiki
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Clone the wiki
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" wiki; then
+            echo "::error::Could not clone the wiki. Enable it under Settings → Features → Wikis and create any first page once on GitHub, then re-run this workflow."
+            exit 1
+          fi
+
+      - name: Copy pages
+        run: |
+          # Replace everything except the wiki's own git data, so deleted or renamed pages disappear too.
+          find wiki -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -R docs/wiki/. wiki/
+          # In the repo, pages link as Page.md so they work when browsing files; the wiki serves them as /wiki/Page.
+          find wiki -name '*.md' -exec sed -i -E 's/\]\(([A-Za-z0-9_-]+)\.md(#[^)]*)?\)/](\1\2)/g' {} +
+
+      - name: Commit and push
+        working-directory: wiki
+        run: |
+          git add -A
+          if git diff --cached --quiet; then
+            echo "The wiki is already up to date."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Sync wiki from ${GITHUB_REPOSITORY}@${GITHUB_SHA::7}"
+          git push origin HEAD

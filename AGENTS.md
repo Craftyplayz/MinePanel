@@ -18,7 +18,7 @@ MinePanel is a client-only Fabric mod (Minecraft 26.1.2, Java 25) that serves a 
 
 ## Keep the wiki up to date
 
-**Any change that a player could notice must update `docs/wiki/` in the same change.** That includes:
+**Any change that a player could notice must update `docs/wiki/` in the same change.** `docs/wiki/` is the only source: the [Publish wiki](.github/workflows/wiki.yml) workflow copies it to the repository's GitHub wiki on every push to `main` that touches it. Never edit the GitHub wiki directly (it is overwritten) and never push to the `.wiki.git` repository yourself. That includes:
 
 - adding, removing or renaming a panel, setting, button, menu, dialog or message
 - changing a default, limit, range or choice list
@@ -40,7 +40,7 @@ Where to put it:
 | JourneyMap or Litematica behaviour | `wiki/Integrations.md` |
 | Files written, browser storage, anything sent off the PC | `wiki/Files-and-Privacy.md` |
 | A new common failure or a user-visible error message | `wiki/Troubleshooting.md` |
-| A new wiki page | `wiki/Home.md` (Pages table) and `wiki/_Sidebar.md` |
+| A new wiki page | `wiki/Home.md` (Pages table) and `wiki/_Sidebar.md`. The file name becomes the page's URL (`Rule-Sets.md` → `/wiki/Rule-Sets`); keep names to letters, digits and `-`, and don't use subfolders |
 
 Before finishing, grep the wiki for the old name, value or behaviour you changed and fix every hit.
 
@@ -49,7 +49,7 @@ Before finishing, grep the wiki for the old name, value or behaviour you changed
 - Write for a player who already has the mod running and wants to use or configure it. **Never add installation, build, release or developer instructions to the wiki**; those belong in `README.md` and the other `docs/` files.
 - Describe what the player sees and does. Use the exact labels from the UI, in **bold** (check `index.html`, `CONDITION_LABELS`, `ACTION_LABELS` and the `button(...)` calls in `features.js`). Give ids (`afk`, `showArmor`) only where rule set files need them.
 - Check every fact against the code: defaults, ranges and choices come from `layout.js` (`SETTING_RULES`, `defaultSettings`, `*_CHOICES`, `MAX_*`). Don't copy from other docs without checking; they can be stale.
-- Plain, short sentences; tables for settings and options; one topic per section. Start each page with the breadcrumb line (`[Home](Home.md) › …`). Link between pages with relative `Page.md#anchor` links; link to files outside `docs/wiki/` with full GitHub URLs, so the pages also work as a GitHub wiki.
+- Plain, short sentences; tables for settings and options; one topic per section. Start each page with the breadcrumb line (`[Home](Home.md) › …`). Link between pages with relative `Page.md#anchor` links (the publish workflow turns them into wiki links); link to files outside `docs/wiki/` with full GitHub URLs.
 - Be honest: if a feature isn't verified in game, a short note is fine; never claim behaviour the code doesn't have.
 
 ## Other rules
