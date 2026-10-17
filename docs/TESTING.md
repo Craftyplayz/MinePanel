@@ -1,6 +1,6 @@
 # Testing
 
-`./gradlew releaseBuild` runs the Gradle build, `serviceTest`, `frontendSyntax`, and `frontendTest`, then validates mod metadata, the client entrypoint class, and bundled dashboard assets in the production JAR before copying it to `build/release/minepanel-0.1.0.jar`. Static assets are already source files: `processClientResources` packages them without a separate frontend compilation step. No lint or type-check configuration exists.
+`./gradlew releaseBuild` runs the Gradle build, `serviceTest`, `frontendSyntax`, and `frontendTest`, then validates mod metadata, the client entrypoint class, and bundled dashboard assets in the production JAR before copying it to `build/release/minepanel-<mod_version>.jar`. Static assets are already source files: `processClientResources` packages them without a separate frontend compilation step. No lint or type-check configuration exists.
 
 Baseline pure Java service tests passed with both the default Java 17 and installed Java 25; the mod itself requires Java 25. Baseline frontend syntax passed. The existing snapshot/delta checks were described in earlier work but were not committed as a reusable test runner; this milestone adds the Node regression suite without deleting any existing tests.
 

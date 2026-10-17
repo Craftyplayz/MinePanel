@@ -1,4 +1,8 @@
-name: Build MinePanel
+name: Build and release MinePanel
+
+# Every push to main builds, tests and publishes a GitHub release. Versions count up by one minor step per push:
+# v0.1, v0.2, ... v0.9, v0.10, v0.11 ... The next number comes from the highest existing vMAJOR.MINOR tag.
+# Pushes to other branches and pull requests only build and upload the JAR as a workflow artifact.
 
 on:
   push:
@@ -11,21 +15,51 @@ permissions:
   contents: read
 
 concurrency:
+  # Releases queue rather than cancel, so two quick pushes can't claim the same version number.
   group: minepanel-build-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release: ${{ steps.version.outputs.release }}
     defaults:
       run:
         shell: bash
+    env:
+      RELEASE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     steps:
       - name: Check out source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
+          fetch-depth: 0
           persist-credentials: false
+
+      - name: Pick the version
+        id: version
+        run: |
+          if [[ "$RELEASE" != true ]]; then
+            version="$(grep '^mod_version=' gradle.properties | cut -d= -f2)-${GITHUB_SHA::7}"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          existing=$(git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+$' | head -n1 || true)
+          if [[ -n "$existing" ]]; then
+            # A re-run of a commit that was already released: rebuild it, don't publish a second version.
+            echo "::notice::This commit is already released as $existing; skipping publication."
+            echo "version=${existing#v}" >> "$GITHUB_OUTPUT"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          latest=$(git tag --list 'v0.*' | grep -E '^v0\.[0-9]+$' | sed 's/^v0\.//' | sort -n | tail -n1)
+          version="0.$(( ${latest:-0} + 1 ))"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "release=true" >> "$GITHUB_OUTPUT"
+          echo "### MinePanel v$version from \`$GITHUB_SHA\`" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install Java 25
         uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
@@ -39,19 +73,61 @@ jobs:
           node-version: '22'
 
       - name: Build, test, and package with the Gradle wrapper
-        run: ./gradlew --no-daemon --stacktrace --console=plain releaseBuild
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: ./gradlew --no-daemon --stacktrace --console=plain "-Pmod_version=$VERSION" releaseBuild
 
-      - name: Name JAR after the commit
+      - name: Validate and name the JAR
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          version=$(grep '^mod_version=' gradle.properties | cut -d= -f2)
-          mkdir -p build/ci-jar
-          cp "build/release/minepanel-$version.jar" "build/ci-jar/MinePanel-$version-${GITHUB_SHA::7}.jar"
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import zipfile
+
+          version = os.environ["VERSION"]
+          source = pathlib.Path("build/release") / f"minepanel-{version}.jar"
+          candidates = sorted(pathlib.Path("build/release").glob("*.jar"))
+          if candidates != [source] or source.stat().st_size == 0:
+              raise SystemExit(f"Expected exactly one nonempty release JAR: {source}; found {candidates}")
+          with zipfile.ZipFile(source) as jar:
+              if jar.testzip() is not None:
+                  raise SystemExit("JAR integrity check failed")
+              metadata = json.loads(jar.read("fabric.mod.json"))
+          if metadata["id"] != "minepanel" or metadata["version"] != version:
+              raise SystemExit(f"Packaged mod identity/version {metadata['version']} does not match {version}")
+          compatibility = metadata["depends"]
+
+          output = pathlib.Path("build/ci-jar")
+          output.mkdir(parents=True, exist_ok=True)
+          destination = output / f"MinePanel-v{version}.jar"
+          data = source.read_bytes()
+          destination.write_bytes(data)
+          notes = (
+              f"MinePanel v{version}\n\n"
+              f"Built from Git commit `{os.environ['GITHUB_SHA']}`.\n\n"
+              f"- Minecraft: `{compatibility['minecraft']}`\n"
+              f"- Fabric Loader: `{compatibility['fabricloader']}`\n"
+              f"- Fabric API: `{compatibility['fabric-api']}`\n"
+              f"- Java: `{compatibility['java']}`\n\n"
+              f"Download `{destination.name}` and place it in your Fabric client's `mods` directory.\n\n"
+              f"JAR SHA-256: `{hashlib.sha256(data).hexdigest()}`\n\n"
+              "Compilation, automated tests, and packaging passed. "
+              "No in-game testing is performed; runtime compatibility is not certified.\n"
+          )
+          (pathlib.Path("build") / "release-notes.md").write_text(notes)
+          PY
 
       - name: Upload JAR
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: MinePanel-${{ github.sha }}
-          path: build/ci-jar/*.jar
+          path: |
+            build/ci-jar/*.jar
+            build/release-notes.md
           if-no-files-found: error
           retention-days: 30
 
@@ -65,3 +141,41 @@ jobs:
             build/test-results/
           if-no-files-found: warn
           retention-days: 14
+
+  release:
+    needs: build
+    if: needs.build.outputs.release == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    env:
+      TAG: v${{ needs.build.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Download the validated JAR
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: MinePanel-${{ github.sha }}
+          path: release
+
+      - name: Create the release
+        run: |
+          jar=$(find release -name "MinePanel-$TAG.jar")
+          notes=$(find release -name release-notes.md)
+          test -s "$jar"
+          test -s "$notes"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "::error::Release $TAG already exists; refusing to overwrite it."
+            exit 1
+          fi
+          # Stay a draft until the JAR has uploaded, then publish.
+          gh release create "$TAG" "$jar" \
+            --target "$GITHUB_SHA" --draft --generate-notes \
+            --title "MinePanel $TAG" --notes-file "$notes"
+          gh release edit "$TAG" --draft=false --latest
+          echo "Published MinePanel $TAG." >> "$GITHUB_STEP_SUMMARY"

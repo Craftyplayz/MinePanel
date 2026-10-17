@@ -18,34 +18,24 @@ Windows:
 gradlew.bat releaseBuild
 ```
 
-The configured release artifact is `build/release/minepanel-0.1.0.jar`. This is an expected output, not a claim that it has been generated here. Node.js is also required for frontend syntax and regression checks. Static assets are copied by Gradle into the JAR; there is no framework, transpilation step, or CDN. The build requires access to the configured Gradle/Fabric repositories the first time.
+The configured release artifact is `build/release/minepanel-0.1.jar`. This is an expected output, not a claim that it has been generated here. Node.js is also required for frontend syntax and regression checks. Static assets are copied by Gradle into the JAR; there is no framework, transpilation step, or CDN. The build requires access to the configured Gradle/Fabric repositories the first time.
 
 ## GitHub Releases
 
-The [release workflow](.github/workflows/release.yml) runs on Ubuntu 24.04 with Java 25 and Node 22. It checks out the exact version tag and records its commit SHA. Existing Gradle tasks run in diagnostic stages:
+The [build workflow](.github/workflows/build.yml) runs on Ubuntu 24.04 with Java 25 and Node 22 and runs `./gradlew releaseBuild` (which includes `check`, service tests and frontend tests). It then checks the JAR's integrity and that the packaged `fabric.mod.json` has the expected id and version.
 
-```sh
-./gradlew --no-daemon --stacktrace --console=plain classes clientClasses testClasses
-./gradlew --no-daemon --stacktrace --console=plain check
-./gradlew --no-daemon --stacktrace --console=plain releaseBuild
-```
+**Every push to `main` publishes a release.** The version counts up by one per push: `v0.1`, `v0.2`, … `v0.9`, `v0.10`, `v0.11` and so on. The workflow finds the highest existing `v0.N` tag, adds one, builds with `-Pmod_version=0.N`, and creates the release and its tag on the pushed commit. Nothing is tagged or edited by hand; `mod_version` in `gradle.properties` is only used for local builds.
 
-`releaseBuild` already depends on `build`, including `check`, service tests and frontend tests, and validates/copies the production `jar`. Dashboard files are packaged directly from client resources, with no separate frontend build. The workflow additionally checks JAR integrity, nonempty metadata/assets/classes, mod identity and version before copying `build/release/minepanel-<mod_version>.jar` unchanged to `build/verified-release/MinePanel-v<mod_version>.jar`.
-
-To publish, first merge the workflow into the default branch, set `mod_version` in `gradle.properties` to the release version, and commit all release changes. Tag that commit (not an uncommitted working tree), then push the tag:
-
-```sh
-git tag -a v0.1.0 -m "MinePanel 0.1.0"
-git push origin v0.1.0
-```
-
-Use `vMAJOR.MINOR.PATCH`, or an explicit prerelease such as `v0.1.0-beta.1` with `mod_version=0.1.0-beta.1`. The workflow rejects tags that do not match the packaged version. Tags with a prerelease suffix create prereleases. Do not move published tags. Existing releases, including drafts, are rejected rather than overwritten. Upload happens while the release is draft; a publication failure may leave a draft for a maintainer to inspect and remove before retrying.
-
-Open **Actions → Build and release MinePanel** to inspect runs. **Run workflow** accepts an existing version tag for troubleshooting and builds/uploads it without publishing any release. Logs identify compilation/dependency resolution, tests, and packaging; `build-diagnostics` preserves available Gradle logs, test results and reports even on failure. Dependency/DNS errors fail the build normally; no placeholder JAR or bypassed tests are used. Only a successful build and artifact validation enable the tag-only publication job, which uses `GITHUB_TOKEN` with `contents: write`; the build job has read-only repository access.
+- One push is one release, however many commits it contains.
+- Pushes to other branches and pull requests only build; the JAR (`MinePanel-v<mod_version>-<sha>.jar`) is kept as a workflow artifact for 30 days.
+- Release runs queue instead of cancelling each other, so two quick pushes can't take the same number. GitHub keeps only one queued run per group, so a third push while one is queued replaces the queued one.
+- Re-running the workflow for a commit that already has a version tag rebuilds it without publishing again. An existing release with the same tag is never overwritten.
+- The release stays a draft until the JAR has uploaded; a failed upload may leave a draft to remove by hand.
+- Only the release job has `contents: write`; the build job has read-only repository access. `build-diagnostics` keeps Gradle reports and test results when a build fails.
 
 Download the compiled `MinePanel-v<version>.jar` under **Assets** on the [GitHub Releases page](https://github.com/Craftyplayz/MinePanel/releases), not GitHub's automatically generated source archives. Release notes include generated change notes, the build commit, SHA-256, and Minecraft/Fabric/Java requirements read from the packaged `fabric.mod.json`. Install the JAR in the appropriate Fabric client's `mods` directory.
 
-**Verification status:** automatic publication, release notes generation, hosted-runner dependency access, and the actual packaged JAR have not yet been verified by a successful release workflow run. Local full builds have been blocked by DNS/firewall access to `maven.fabricmc.net` (see [testing](docs/TESTING.md)); a successful agent run is not a successful mod release. The existing Loom SNAPSHOT and wrapper versions remain unchanged: exact tagged source is enforced, but byte-for-byte reproducibility across changing upstream SNAPSHOT dependencies is not guaranteed. This workflow does not run Minecraft or certify in-game compatibility.
+**Verification status:** automatic publication, release notes generation, hosted-runner dependency access, and the actual packaged JAR have not yet been verified by a successful workflow run. Local full builds have been blocked by DNS/firewall access to `maven.fabricmc.net` (see [testing](docs/TESTING.md)); a successful agent run is not a successful mod release. The existing Loom SNAPSHOT and wrapper versions remain unchanged: byte-for-byte reproducibility across changing upstream SNAPSHOT dependencies is not guaranteed. This workflow does not run Minecraft or certify in-game compatibility.
 
 ## Run
 
