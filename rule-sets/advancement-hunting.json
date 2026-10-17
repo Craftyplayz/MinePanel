@@ -55,6 +55,19 @@
       "timing": { "delayMs": 3000, "lingerMs": 20000 }
     },
     {
+      "id": "adv-no-villagers",
+      "name": "Hunting: no villagers away from a hall",
+      "folder": "adv-hunting",
+      "when": [
+        { "type": "ruleActive", "rule": "adv-hunting-on" },
+        { "join": "and", "type": "ruleActive", "rule": "adv-trading-hall", "not": true }
+      ],
+      "then": [
+        { "do": "hide", "panel": "villagers" }
+      ],
+      "timing": { "lingerMs": 500 }
+    },
+    {
       "id": "adv-standing-still",
       "name": "Hunting: hide movement when still",
       "folder": "adv-hunting",

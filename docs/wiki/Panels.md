@@ -2,7 +2,7 @@
 
 [Home](Home.md) › Panels
 
-Every panel, what it shows and how to configure it. Settings marked **⚙** are changed with the panel's own settings button; all settings can also be changed by a rule's [Set panel setting](Rule-Actions.md#set-panel-setting) action, and are saved per [profile](Customizing.md#profiles).
+Every panel, what it shows and how to configure it. Settings marked **⚙** are changed with the panel's own settings button; all settings can also be changed by a rule's [Set panel setting](Rule-Actions.md#set-panel-setting) action, and are saved per [profile](Customizing.md#profiles) (except Recent pickups, whose settings every profile shares).
 
 ## Overview
 
@@ -19,7 +19,7 @@ Every panel, what it shows and how to configure it. Settings marked **⚙** are 
 | [Advancements](#advancements) | `advancements` | yes | 3 × 3 | ⚙ |
 | [Villager trades](#villager-trades) | `villagers` | yes | 3 × 3 | — |
 | [3D render](#3d-render) | `model` | yes | 2 × 3 | ⚙ |
-| [AFK](#afk) | `afk` | no | 3 × 3 | — |
+| [AFK](#afk) | `afk` | no | 3 × 3 | ⚙ |
 | [JourneyMap](#journeymap) | `map` | no | 2 × 2 | ⚙ |
 | [Build progress](#build-progress) | `build` | no | 2 × 2 | — |
 
@@ -143,6 +143,8 @@ Frame time is measured over whole frames, including menus, loading screens and f
 
 Items that were added to or removed from your inventory, and how: picked up, mined (including mods that put drops straight into your inventory), crafted, traded, taken from or put into a chest, placed, dropped, used, and so on.
 
+The game keeps one list for the whole session, whichever profile is on screen. This panel's settings, hidden items included, are shared by every [profile](Customizing.md#profiles), so a rule that switches profile doesn't change which pickups you see.
+
 - **×** on a row hides that item from the list for good. Hidden items are listed in ⚙, where you can bring them back.
 - **⚙ settings:**
 
@@ -203,6 +205,16 @@ How long you've been away, over a slow crawl of your statistics.
 - The badge says **Active** for the first 10 seconds, then **AFK**.
 - Below it, random statistics with non-zero values drift slowly down the panel. Each one sits on its own small card, with a dotted line joining its name to its number. With reduced motion, they stand still and change every few seconds.
 - Scroll the list up or down with the mouse wheel, or drag it. It glides to a stop, stays still for about 3 seconds after you stop scrolling (or let go), then speeds back up over 2 seconds.
+- Hover over a statistic and click **×** to stop showing it. The statistic is added to the **Hidden** list in the settings.
+- **⚙ settings:**
+
+| Setting | Control | Values | Default |
+|---|---|---|---|
+| `fontSize` | Text size | 11, 13, 16, 20, 24 or 32 px | 13 |
+| `speed` | Speed | **Slow**, **Normal**, **Fast** or **Very fast** (`10`, `20`, `40`, `80`) | **Normal** (`20`) |
+| `hidden` | Hidden | statistics the panel never shows; click one to show it again | none |
+
+If you hide every statistic you have, the panel says *Every statistic is hidden.*
 
 The panel is off by default. A good way to use it is the **AFK screen** template, which shows it nearly full screen after two minutes AFK (see [Templates](Rule-Sets.md#templates)).
 

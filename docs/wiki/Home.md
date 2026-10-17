@@ -23,6 +23,7 @@ The dashboard updates live. Nothing you do on it can change your game: it only r
 | [Rule conditions](Rule-Conditions.md) | Every condition a rule can test |
 | [Rule actions](Rule-Actions.md) | Every action a rule can take |
 | [Templates and rule sets](Rule-Sets.md) | Ready-made rules, sharing rules, importing and exporting whole setups |
+| [Ready-made rule sets](Ready-Made-Rule-Sets.md) | Every rule set file you can download and import: farms, AFK, advancement hunting, trading and more |
 | [Integrations](Integrations.md) | JourneyMap web map and Litematica build progress |
 | [Files and privacy](Files-and-Privacy.md) | What MinePanel saves, where, and what leaves your PC |
 | [Troubleshooting](Troubleshooting.md) | Common problems and questions |

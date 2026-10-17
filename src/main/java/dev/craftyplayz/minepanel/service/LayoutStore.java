@@ -57,6 +57,9 @@ public final class LayoutStore {
     /** The 3D render panel's spin axes (vertical, head over heels, cartwheel) and speeds in degrees per second. */
     public static final List<String> MODEL_AXES = List.of("y", "x", "z");
     public static final List<Integer> MODEL_SPEEDS = List.of(15, 30, 60, 120);
+    /** The AFK panel's statistics text sizes in px and crawl speeds in px a second. */
+    public static final List<Integer> AFK_FONT_SIZES = List.of(11, 13, 16, 20, 24, 32);
+    public static final List<Integer> AFK_SPEEDS = List.of(10, 20, 40, 80);
     /** Version 1 condition types; version 2 types are in {@link LayoutRules}. */
     public static final List<String> V1_CONDITION_TYPES = List.of("world", "dimension", "biome", "time", "gameMode",
             "health", "food", "saturation", "effect", "movement", "elytra", "advancement", "combat");
@@ -363,6 +366,22 @@ public final class LayoutStore {
                 normalized.addProperty("speed", speed);
             }
             result.add("model", normalized);
+        }
+        if (source.has("afk")) {
+            JsonObject afk = source.getAsJsonObject("afk");
+            JsonObject normalized = new JsonObject();
+            if (afk.has("fontSize")) {
+                int size = integer(afk.get("fontSize"), 1, 100);
+                if (!AFK_FONT_SIZES.contains(size)) throw new IllegalArgumentException("unknown AFK text size");
+                normalized.addProperty("fontSize", size);
+            }
+            if (afk.has("speed")) {
+                int speed = integer(afk.get("speed"), 1, 1000);
+                if (!AFK_SPEEDS.contains(speed)) throw new IllegalArgumentException("unknown AFK speed");
+                normalized.addProperty("speed", speed);
+            }
+            if (afk.has("hidden")) normalized.add("hidden", statisticIds(afk.getAsJsonArray("hidden")));
+            result.add("afk", normalized);
         }
         return result;
     }

@@ -2457,6 +2457,23 @@ test("rules v2: rule set files fill in defaults, link their own parts, warn abou
   assert.throws(() => R.importShare(target, "{ not json"), /Not valid JSON/);
 });
 
+test("pickup settings are shared by every profile, so switching profile keeps showing the same log", () => {
+  const api = harness().run("({ normalizeLayout, getProfile, withProfile, withSettings })");
+  const layout = api.normalizeLayout({ version: 2, tiles: [], settings: { pickups: { lifetime: 0, ignored: ["minecraft:dirt"] } },
+    profiles: [{ id: "mine", name: "Mining", tiles: [], settings: { pickups: { lifetime: 10 }, xp: { window: 10 } } }],
+    rules: [] });
+  const mining = api.getProfile(layout, "mine");
+  assert.equal(mining.settings.pickups.lifetime, 0, "the Default profile's pickup settings apply");
+  assert.deepEqual(plain(mining.settings.pickups.ignored), ["minecraft:dirt"]);
+  assert.equal(mining.settings.xp.window, 10, "other settings stay per profile");
+  const changed = api.withProfile(layout, "mine", api.withSettings(mining, "pickups", { maxRows: 20 }));
+  assert.equal(changed.settings.pickups.maxRows, 20, "a change made in another profile is shared");
+  assert.equal(api.getProfile(changed, "default").settings.pickups.maxRows, 20);
+  const xp = api.withProfile(layout, "mine", api.withSettings(mining, "xp", { window: 300 }));
+  assert.equal(api.getProfile(xp, "mine").settings.xp.window, 300);
+  assert.equal(xp.settings.xp.window, 60);
+});
+
 test("rules v2: rule sets arrange profiles: Default, existing ones by name and new ones, with warnings", () => {
   const R = rulesApi();
   const target = R.normalizeLayout({ version: 2, tiles: [{ id: "player", enabled: true, x: 0, y: 0, w: 4, h: 4 }],
@@ -2531,6 +2548,23 @@ test("rules v2: the examples in docs/RULE_SETS.md import as described", () => {
   assert.equal(full.layout.tiles.find(tile => tile.id === "history").rulesOnly, true);
   assert.equal(full.layout.settings.xp.window, 300);
   assert.equal(full.layout.profiles[0].tiles.find(tile => tile.id === "map").w, 12);
+});
+
+test("rules v2: every rule-sets/ file imports cleanly and is listed on the wiki", () => {
+  const R = rulesApi();
+  const root = path.join(__dirname, "../../..");
+  const files = fs.readdirSync(path.join(root, "rule-sets")).filter(name => name.endsWith(".json")).sort();
+  const page = fs.readFileSync(path.join(root, "docs/wiki/Ready-Made-Rule-Sets.md"), "utf8");
+  const listed = [...page.matchAll(/\*\*File:\*\* `([^`]+)` · \[Download\]\(([^)]+)\)/g)];
+  const empty = R.normalizeLayout({ version: 2, tiles: [] });
+  for (const name of files) {
+    const set = JSON.parse(fs.readFileSync(path.join(root, "rule-sets", name), "utf8"));
+    assert.deepEqual(plain(R.importRuleSet(empty, set).warnings), [], `${name} imports without warnings`);
+  }
+  assert.deepEqual(listed.map(match => match[1]).sort(), files, "each rule-sets/ file has exactly one wiki section");
+  for (const [, name, url] of listed) {
+    assert.equal(url, `https://raw.githubusercontent.com/Craftyplayz/MinePanel/main/rule-sets/${name}`);
+  }
 });
 
 test("detail fields and item contents are validated", () => {
@@ -2624,6 +2658,22 @@ test("the AFK panel times how long the player has been idle and lists non-zero s
     motion: { ...details().motion, idleSince: Date.now() - 2_000 } }));
   assert.equal(h.get("#afk-timer").textContent, "0:02");
   assert.equal(h.get("#afk-status").textContent, "Active");
+
+  assert.equal(h.get("#afk-crawl").style.fontSize, "13px");
+  assert.deepEqual(h.get("#afk-speed").children.map(option => option.textContent), ["Slow", "Normal", "Fast", "Very fast"]);
+  setValue(h.get("#afk-font-size"), "20");
+  setValue(h.get("#afk-speed"), "40");
+  assert.equal(h.get("#afk-crawl").style.fontSize, "20px");
+  assert.deepEqual(plain(h.run("layout.settings.afk")), { fontSize: 20, speed: 40, hidden: [] });
+  h.get("#afk-crawl").children[0].children.at(-1).emit("click");
+  assert.deepEqual(plain(h.run("layout.settings.afk.hidden")), ["minecraft:custom/minecraft:jump"], "× hides a statistic");
+  assert.equal(h.get("#afk-crawl").children[0].textContent, "Every statistic is hidden.");
+  const [, chip] = h.get("#afk-hidden").children;
+  assert.equal(chip.textContent, "Jumps ×");
+  chip.emit("click");
+  assert.deepEqual(plain(h.run("layout.settings.afk.hidden")), [], "the chip shows it again");
+  assert.throws(() => h.run(`normalizeSettings({ afk: { fontSize: 14 } })`), /Invalid afk settings/);
+  assert.throws(() => h.run(`normalizeSettings({ afk: { speed: 25 } })`), /Invalid afk settings/);
 });
 
 test("experience shows XP/h for the chosen window and the time to the next level and next hundred", async () => {

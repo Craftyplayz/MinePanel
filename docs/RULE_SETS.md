@@ -203,7 +203,7 @@ A **profile** is a whole dashboard arrangement: where each panel is, how big it 
 | `name` | yes | 1–64 characters. **`"Default"`** (any case) means the Default arrangement |
 | `id` | no | id. Lets Switch profile actions in the file name the profile by id. `"default"` also means Default |
 | `panels` | no | The arrangement (see below). Left out, the profile keeps the panels it has, and a new profile gets the arrangement of a new dashboard (see [Panels](#panels)) |
-| `settings` | no | Panel settings, as `{ "<panel>": { "<setting>": value } }` with the settings listed under [Panel settings](#panel-settings). Settings it leaves out get their **defaults**. Left out entirely, the profile keeps the settings it has, and a new profile gets the defaults |
+| `settings` | no | Panel settings, as `{ "<panel>": { "<setting>": value } }` with the settings listed under [Panel settings](#panel-settings). Settings it leaves out get their **defaults**. Left out entirely, the profile keeps the settings it has, and a new profile gets the defaults. `pickups` settings are shared by every profile, so only the Default profile's are used |
 
 On import, each profile in the file is handled by its name:
 
@@ -468,6 +468,9 @@ The default spots are what a profile gets when the file leaves `panels` out for 
 | `model` | `spin` | `true` / `false`: turn on its own (the model still holds still when the system asks for reduced motion) | `true` |
 | `model` | `axis` | `"y"` (turntable), `"x"` (head over heels) or `"z"` (cartwheel) | `"y"` |
 | `model` | `speed` | One of `15`, `30`, `60`, `120`: degrees a second | `30` |
+| `afk` | `fontSize` | One of `11`, `13`, `16`, `20`, `24`, `32`: text size of the statistics in px | `13` |
+| `afk` | `speed` | One of `10` (slow), `20` (normal), `40` (fast), `80` (very fast): px a second the statistics move | `20` |
+| `afk` | `hidden` | List of up to 512 statistic ids the panel never shows | `[]` |
 
 ## Importing and exporting
 
@@ -552,6 +555,7 @@ Tips for agents:
 - Use `for` or the rule's `delayMs` against flickering on noisy values. Use `within` or `lingerMs` to keep a panel up for a while after something happens. For farm detection rules (a kill rate or another amount), use `"lingerMs": 20000`.
 - `"="` on decimal values (speed, distance, light combined with others) rarely matches. Use `"between"`.
 - Places are tied to one world and dimension, and the world name must match exactly as the Player panel shows it.
+- In the MinePanel repository, a rule set saved to `rule-sets/` must also be listed on the wiki's [Ready-made rule sets](wiki/Ready-Made-Rule-Sets.md) page, and its entry updated whenever the file changes. `AGENTS.md` describes the entry's form.
 
 ## Full example
 

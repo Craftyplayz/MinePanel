@@ -1,0 +1,22 @@
+#!/bin/sh
+# After every commit, build MinePanel and copy it into the mods folder set by minepanelModsDir
+# (see "Testing locally" in README.md). Runs in the background so the commit isn't held up;
+# the result goes to build/install-mod.log. Enable once with: git config core.hooksPath .githooks
+
+root=$(git rev-parse --show-toplevel) || exit 0
+sha=$(git rev-parse --short HEAD)
+version=$(grep '^mod_version=' "$root/gradle.properties" | cut -d= -f2)
+log="$root/build/install-mod.log"
+mkdir -p "$root/build"
+
+(
+  cd "$root" || exit 1
+  echo "== $(date '+%Y-%m-%d %H:%M:%S') installing $version-$sha"
+  if ./gradlew --console=plain installMod "-Pmod_version=$version-$sha"; then
+    echo "== OK"
+  else
+    echo "== FAILED (is Minecraft running? It locks the old JAR)"
+  fi
+) > "$log" 2>&1 < /dev/null &
+
+exit 0

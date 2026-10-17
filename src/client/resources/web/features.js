@@ -539,9 +539,9 @@ function drawPerformance(graph) {
 // of random non-zero statistics: each line enters at the top of an inset area, slides slowly down and leaves at the
 // bottom. With reduced motion the lines stand still and a fresh set is shown every few seconds instead. The player can
 // scroll the crawl either way with the wheel or by dragging; the crawl then eases to a stop, waits, and eases back.
-const afkParts = { tile: $("#tile-afk"), status: $("#afk-status"), timer: $("#afk-timer"), crawl: $("#afk-crawl") };
-/** Pixels per second: slow enough to read every line while it crosses the panel. */
-const AFK_CRAWL_SPEED = 20;
+// The text size, the speed (px a second) and statistics never shown are settings.
+const afkParts = { tile: $("#tile-afk"), status: $("#afk-status"), timer: $("#afk-timer"), crawl: $("#afk-crawl"),
+  form: $("#afk-form"), fontSize: $("#afk-font-size"), speed: $("#afk-speed"), hidden: $("#afk-hidden") };
 /** Pixels between one line and the next. */
 const AFK_CRAWL_GAP = 16;
 /** Below this many seconds the badge says Active rather than AFK. */
@@ -552,8 +552,42 @@ const AFK_SCROLL_STOP_MILLIS = 500;
 const AFK_SCROLL_HOLD_MILLIS = 3000;
 const AFK_SCROLL_RESUME_MILLIS = 2000;
 // Lines are kept in order from the bottom one to the top one. pending is wheel scrolling not yet shown.
+// fontSize is the text size the lines on screen were measured at.
 const afkCrawl = { items: [], bag: [], frame: null, drawn: null, shownAt: 0, empty: null,
-  scrolledAt: null, scrolledPace: 1, pending: 0, drag: null };
+  scrolledAt: null, scrolledPace: 1, pending: 0, drag: null, fontSize: null };
+
+afkParts.fontSize.replaceChildren(...AFK_FONT_SIZE_CHOICES.map(size => optionElement(String(size), `${size} px`)));
+afkParts.speed.replaceChildren(...AFK_SPEED_CHOICES.map(speed => optionElement(String(speed), AFK_SPEED_LABELS[speed])));
+stopDrag($("#afk-settings"));
+$("#afk-settings").addEventListener("click", () => {
+  setHidden(afkParts.form, !afkParts.form.hidden);
+  renderAfkSettings();
+});
+afkParts.fontSize.addEventListener("change", () => changeSettings("afk", { fontSize: Number(afkParts.fontSize.value) }));
+afkParts.speed.addEventListener("change", () => changeSettings("afk", { speed: Number(afkParts.speed.value) }));
+
+/** A statistic's name as the crawl shows it, from the latest statistics; the id if it isn't known. */
+function afkStatisticName(id) {
+  const entry = currentPlayerState?.statistics?.entries?.find(value => value.id === id);
+  if (!entry) return id;
+  return entry.category === "General" ? entry.label : `${entry.category} ${entry.label}`;
+}
+
+function renderAfkSettings() {
+  const settings = displaySettings().afk;
+  afkParts.fontSize.value = String(settings.fontSize);
+  afkParts.speed.value = String(settings.speed);
+  const chips = settings.hidden.map(id => {
+    const chip = create("button", "chip small", `${afkStatisticName(id)} ×`);
+    chip.type = "button";
+    chip.title = "Show this statistic again";
+    chip.addEventListener("click", () =>
+      changeSettings("afk", { hidden: displaySettings().afk.hidden.filter(value => value !== id) }));
+    return chip;
+  });
+  afkParts.hidden.replaceChildren(...(chips.length ? [create("span", "", "Hidden: "), ...chips]
+    : [create("span", "", "Hover over a statistic and click × to stop showing it.")]));
+}
 
 function formatAfk(seconds) {
   const value = Math.floor(seconds);
@@ -563,8 +597,11 @@ function formatAfk(seconds) {
   return hours ? `${hours}:${pad(minutes)}:${pad(value % 60)}` : `${minutes}:${pad(value % 60)}`;
 }
 
-const afkStatistics = player => (player?.available ? player.statistics?.entries ?? [] : [])
-  .filter(entry => entry.value > 0);
+function afkStatistics(player) {
+  const hidden = displaySettings().afk.hidden;
+  return (player?.available ? player.statistics?.entries ?? [] : [])
+    .filter(entry => entry.value > 0 && !hidden.includes(entry.id));
+}
 
 function shuffled(values) {
   const result = [...values];
@@ -597,6 +634,14 @@ function addAfkLine(entry, y, atBottom = false) {
   element.appendChild(label);
   element.appendChild(create("span", "afk-crawl-leader"));
   element.appendChild(create("span", "total", entry.display));
+  const hide = create("button", "icon-button afk-crawl-hide", "×");
+  hide.type = "button";
+  hide.setAttribute("aria-label", `Stop showing ${entry.label}`);
+  hide.title = `Stop showing ${entry.label}`;
+  // Not the start of a drag to scroll the crawl.
+  hide.addEventListener("pointerdown", event => event.stopPropagation());
+  hide.addEventListener("click", () => changeSettings("afk", { hidden: [...displaySettings().afk.hidden, entry.id] }));
+  element.appendChild(hide);
   element.title = `${entry.label}: ${entry.display}`;
   afkParts.crawl.appendChild(element);
   const item = { id: entry.id, element, y, height: element.offsetHeight || 24 };
@@ -713,7 +758,7 @@ function animateAfk() {
   const elapsed = afkCrawl.drawn === null ? 0 : Math.min(100, now - afkCrawl.drawn);
   const scrolled = Math.abs(afkCrawl.pending) < 0.5 ? afkCrawl.pending : afkCrawl.pending * (1 - Math.exp(-elapsed / 60));
   afkCrawl.pending -= scrolled;
-  moveAfkCrawl(entries, elapsed / 1000 * AFK_CRAWL_SPEED * afkCrawlPace(now) + scrolled);
+  moveAfkCrawl(entries, elapsed / 1000 * displaySettings().afk.speed * afkCrawlPace(now) + scrolled);
   afkCrawl.drawn = now;
   afkCrawl.frame = window.requestAnimationFrame(animateAfk);
 }
@@ -749,13 +794,25 @@ function renderAfk(player, now = Date.now()) {
   writeText(afkParts.timer, seconds === null ? "—" : formatAfk(seconds));
   writeText(afkParts.status, seconds === null ? "Unavailable" : seconds >= AFK_BADGE_SECONDS ? "AFK" : "Active");
   afkParts.status.classList.toggle("muted", seconds === null || seconds < AFK_BADGE_SECONDS);
+  const fontSize = displaySettings().afk.fontSize;
+  if (afkCrawl.fontSize !== fontSize) {
+    // Lines are measured when they are added, so a new size starts the crawl over.
+    afkParts.crawl.style.fontSize = `${fontSize}px`;
+    afkCrawl.fontSize = fontSize;
+    if (afkCrawl.empty === null) clearAfkCrawl();
+  }
   const entries = afkStatistics(player);
   if (!entries.length) {
-    const message = player?.available ? "No statistics yet." : "Unavailable";
+    const hiddenAll = (player?.statistics?.entries ?? []).some(entry => entry.value > 0);
+    const message = !player?.available ? "Unavailable" : hiddenAll ? "Every statistic is hidden." : "No statistics yet.";
     if (afkCrawl.empty !== message) clearAfkCrawl(message);
     return;
   }
   if (afkCrawl.empty !== null) clearAfkCrawl();
+  // Lines of statistics just hidden leave at once.
+  const shown = new Set(entries.map(entry => entry.id));
+  for (const item of afkCrawl.items) if (!shown.has(item.id)) item.element.remove?.();
+  afkCrawl.items = afkCrawl.items.filter(item => shown.has(item.id));
   if (afkParts.tile.hidden) return;
   if (reducedMotion?.matches || typeof window.requestAnimationFrame !== "function") {
     showStaticAfkLines(entries, now);
@@ -2549,10 +2606,13 @@ function settingAction(panel, setting) {
 function settingValueControl(action, key) {
   const value = action.value;
   const change = next => editRules(() => { action.value = next; }, false);
-  const choices = { xp: { window: XP_WINDOW_CHOICES }, performance: { window: PERFORMANCE_WINDOW_CHOICES },
-    model: { speed: MODEL_SPEED_CHOICES } }[action.panel]?.[action.setting];
-  const unit = action.panel === "model" ? "°/s" : " s";
-  if (choices) return selectInput(`${key}.value`, choices.map(choice => [String(choice), `${choice}${unit}`]),
+  const seconds = choice => `${choice} s`;
+  const choices = { xp: { window: [XP_WINDOW_CHOICES, seconds] },
+    performance: { window: [PERFORMANCE_WINDOW_CHOICES, seconds] },
+    model: { speed: [MODEL_SPEED_CHOICES, choice => `${choice}°/s`] },
+    afk: { fontSize: [AFK_FONT_SIZE_CHOICES, choice => `${choice} px`],
+      speed: [AFK_SPEED_CHOICES, choice => AFK_SPEED_LABELS[choice]] } }[action.panel]?.[action.setting];
+  if (choices) return selectInput(`${key}.value`, choices[0].map(choice => [String(choice), choices[1](choice)]),
     String(value), next => change(Number(next)));
   if (action.panel === "model" && action.setting === "axis") {
     return selectInput(`${key}.value`, MODEL_AXIS_CHOICES.map(axis => [axis, MODEL_AXIS_LABELS[axis]]), value, change);
@@ -3524,6 +3584,7 @@ featureHooks.layout.push(() => {
   renderXpSettings();
   renderPerformance(currentPlayerState);
   renderAfk(currentPlayerState);
+  renderAfkSettings();
   renderPickups(currentPlayerState);
   renderPickupSettings();
   renderBuild(currentPlayerState);

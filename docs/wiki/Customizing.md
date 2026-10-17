@@ -59,7 +59,7 @@ To manage profiles in Customize mode:
 
 You can have up to **16 profiles** besides Default. **New** copies the profile you're editing, so start from the one closest to what you want.
 
-Panel settings (⚙, and choices like the Experience window) are saved **per profile**: changing one changes it in the profile currently on screen. So if a rule has switched you to "Mining", a setting you change is saved in Mining, not Default.
+Panel settings (⚙, and choices like the Experience window) are saved **per profile**: changing one changes it in the profile currently on screen. So if a rule has switched you to "Mining", a setting you change is saved in Mining, not Default. The exception is **Recent pickups**: its settings are shared by every profile, so the pickup list looks the same whichever profile is shown.
 
 ## Update rate
 

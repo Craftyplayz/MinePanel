@@ -28,6 +28,10 @@ const PERFORMANCE_WINDOW_CHOICES = [10, 30, 60, 600];
 const MODEL_AXIS_CHOICES = ["y", "x", "z"];
 const MODEL_SPEED_CHOICES = [15, 30, 60, 120];
 const MODEL_AXIS_LABELS = { y: "Turntable", x: "Head over heels", z: "Cartwheel" };
+// The AFK panel's statistics: text size in px, and how fast they crawl down in px a second.
+const AFK_FONT_SIZE_CHOICES = [11, 13, 16, 20, 24, 32];
+const AFK_SPEED_CHOICES = [10, 20, 40, 80];
+const AFK_SPEED_LABELS = { 10: "Slow", 20: "Normal", 40: "Fast", 80: "Very fast" };
 const MAX_XP_GOALS = 8;
 const MAX_XP_GOAL_LEVEL = 10000;
 const MAX_PROFILES = 16;
@@ -60,7 +64,9 @@ function defaultSettings() {
     // Tabs (advancement roots) left out, e.g. ones datapacks only use to list themselves;
     // pinned advancements are listed first, in the order they were pinned.
     advancements: { popupSeconds: 10, hiddenTabs: [], pinned: [] },
-    model: { spin: true, axis: "y", speed: 30 }
+    model: { spin: true, axis: "y", speed: 30 },
+    // hidden: statistics the AFK crawl never shows.
+    afk: { fontSize: 13, speed: 20, hidden: [] }
   };
 }
 
@@ -97,7 +103,10 @@ const SETTING_RULES = [
   ["advancements", "pinned", validItemIds],
   ["model", "spin", value => typeof value === "boolean"],
   ["model", "axis", value => MODEL_AXIS_CHOICES.includes(value)],
-  ["model", "speed", value => MODEL_SPEED_CHOICES.includes(value)]
+  ["model", "speed", value => MODEL_SPEED_CHOICES.includes(value)],
+  ["afk", "fontSize", value => AFK_FONT_SIZE_CHOICES.includes(value)],
+  ["afk", "speed", value => AFK_SPEED_CHOICES.includes(value)],
+  ["afk", "hidden", validStatisticIds]
 ];
 
 /** Copies only known, valid settings out of {@code value}; rejects present-but-malformed ones. */
@@ -1458,17 +1467,26 @@ function migrateLayoutV1(layout) {
 
 // ------------------------------------------------------------------------------------------------- Profiles
 
+// Settings every profile shares, kept in the Default profile: the game keeps one pickup log, so switching profile
+// mustn't make it look reset by showing it with another lifetime or hidden-items list.
+const SHARED_SETTING_TILES = ["pickups"];
+const sharedSettings = settings => Object.fromEntries(SHARED_SETTING_TILES.map(tile => [tile, settings[tile]]));
+
 /** The tiles and settings of a profile; "default" is the top-level layout. */
 function getProfile(layout, id) {
   if (id === "default") return { id: "default", name: "Default", tiles: layout.tiles, settings: layout.settings };
-  return layout.profiles.find(profile => profile.id === id) ?? getProfile(layout, "default");
+  const profile = layout.profiles.find(entry => entry.id === id);
+  if (!profile) return getProfile(layout, "default");
+  return { ...profile, settings: { ...profile.settings, ...sharedSettings(layout.settings) } };
 }
 
-/** Replaces a profile's tiles and/or settings. */
+/** Replaces a profile's tiles and/or settings; shared settings are written to the Default profile. */
 function withProfile(layout, id, profile) {
   if (id === "default") return { ...layout, tiles: profile.tiles, settings: profile.settings };
-  return { ...layout, profiles: layout.profiles.map(entry => entry.id === id
-    ? { ...entry, tiles: profile.tiles, settings: profile.settings } : entry) };
+  return { ...layout, settings: { ...layout.settings, ...sharedSettings(profile.settings) },
+    profiles: layout.profiles.map(entry => entry.id === id
+      ? { ...entry, tiles: profile.tiles, settings: { ...profile.settings, ...sharedSettings(entry.settings) } }
+      : entry) };
 }
 
 /** Copies a profile under a new name; returns the layout and the new profile's id. */

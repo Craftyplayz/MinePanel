@@ -202,8 +202,14 @@
       </div>
     </article>
     <article class="tile" id="tile-afk" data-tile="afk" aria-labelledby="afk-title">
-      <header class="tile-head" id="head-afk"><h2 id="afk-title">AFK</h2><span class="badge muted" id="afk-status">Unavailable</span></header>
+      <header class="tile-head" id="head-afk"><h2 id="afk-title">AFK</h2>
+        <span class="head-actions"><span class="badge muted" id="afk-status">Unavailable</span><button type="button" class="icon-button" id="afk-settings" aria-label="AFK settings" title="AFK settings">⚙</button></span></header>
       <div class="tile-body column afk-body">
+        <form class="tile-settings" id="afk-form" hidden>
+          <label>Text size <select id="afk-font-size"></select></label>
+          <label>Speed <select id="afk-speed"></select></label>
+          <p class="hint" id="afk-hidden"></p>
+        </form>
         <div class="afk-timer"><span class="afk-timer-label">AFK for</span><strong id="afk-timer">—</strong></div>
         <div class="afk-crawl" id="afk-crawl" aria-label="Random statistics"></div>
       </div>

@@ -10,6 +10,7 @@
 - [Rule conditions](Rule-Conditions.md)
 - [Rule actions](Rule-Actions.md)
 - [Templates and rule sets](Rule-Sets.md)
+- [Ready-made rule sets](Ready-Made-Rule-Sets.md)
 
 **More**
 - [Integrations](Integrations.md)

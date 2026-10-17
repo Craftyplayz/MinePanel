@@ -36,7 +36,8 @@ Where to put it:
 | Rule evaluation, timing, priority, the solver, the rules editor, places, toggles, folders | `wiki/Rules.md` |
 | A condition type (`CONDITION_TYPES`, `CONDITION_LABELS`, `evaluateCondition`) | `wiki/Rule-Conditions.md` and `docs/RULE_SETS.md` Conditions |
 | An action type (`ACTION_TYPES`, `normalizeAction`) | `wiki/Rule-Actions.md` and `docs/RULE_SETS.md` Actions |
-| Templates (`RULE_TEMPLATES`), share strings, rule set import/export, `rule-sets/*.json` | `wiki/Rule-Sets.md` (and RULE_SETS.md if the format changed) |
+| Templates (`RULE_TEMPLATES`), share strings, rule set import/export | `wiki/Rule-Sets.md` (and RULE_SETS.md if the format changed) |
+| A file in `rule-sets/` (added, changed, renamed or removed) | `wiki/Ready-Made-Rule-Sets.md` (see [Ready-made rule sets](#ready-made-rule-sets)) |
 | JourneyMap or Litematica behaviour | `wiki/Integrations.md` |
 | Files written, browser storage, anything sent off the PC | `wiki/Files-and-Privacy.md` |
 | A new common failure or a user-visible error message | `wiki/Troubleshooting.md` |
@@ -51,6 +52,16 @@ Before finishing, grep the wiki for the old name, value or behaviour you changed
 - Check every fact against the code: defaults, ranges and choices come from `layout.js` (`SETTING_RULES`, `defaultSettings`, `*_CHOICES`, `MAX_*`). Don't copy from other docs without checking; they can be stale.
 - Plain, short sentences; tables for settings and options; one topic per section. Start each page with the breadcrumb line (`[Home](Home.md) › …`). Link between pages with relative `Page.md#anchor` links (the publish workflow turns them into wiki links); link to files outside `docs/wiki/` with full GitHub URLs.
 - Be honest: if a feature isn't verified in game, a short note is fine; never claim behaviour the code doesn't have.
+
+## Ready-made rule sets
+
+`rule-sets/*.json` are rule set files players download and import. Every one is listed on [`docs/wiki/Ready-Made-Rule-Sets.md`](docs/wiki/Ready-Made-Rule-Sets.md), and `dashboard.test.js` fails if a file isn't listed there, if the page names a file that doesn't exist, or if a file doesn't import cleanly.
+
+- **New rule set** (including one written for the user from `docs/RULE_SETS.md`): add a row to the page's table and a section in the same form as the others: a `**File:** \`name.json\` · [Download](raw GitHub URL)` line, then what it adds, its rules, when they fire, what they do, the profiles it adds and anything to set up first. Keep the page's list in the recommended import order (higher priority first).
+- **Changed rule set**: update its section in the same change. Check every threshold, timing, panel and setting against the file, and redraw any layout diagram.
+- **Renamed or removed**: update or remove its row, section and links, and grep the wiki for the old file name.
+- Every file must import into an empty dashboard with no errors and no warnings (the check is in `docs/RULE_SETS.md` and `dashboard.test.js`).
+- When the user gives their exported setup (`minepanel-rules.json`), compare it with `rule-sets/`: update files that differ, add files for rule groups that have none, and update the wiki to match. Don't commit their whole export as one file; split it into one file per rule set. Leave out the Default profile unless they ask, since importing it overwrites the player's own Default.
 
 ## Git
 

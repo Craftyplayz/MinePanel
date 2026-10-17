@@ -229,3 +229,11 @@ The AFK panel's statistics crawl can be scrolled either way with the mouse wheel
 **Tested** (`node --test src/test/js/dashboard.test.js`, 116 passing): the existing AFK panel test still passes. No new automated test covers the scrolling.
 
 **Not run.** Not checked in a real browser or in Minecraft: wheel and drag feel, the stop/resume easing, touch dragging, and reduced-motion behaviour while scrolling.
+
+## AFK panel settings (2026-10-17)
+
+The AFK panel has a ⚙ settings form: **Text size** (`afk.fontSize`, 11–32 px), **Speed** (`afk.speed`, 10/20/40/80 px a second) and a **Hidden** list of statistics (`afk.hidden`), filled by the × on each line. Validated in `layout.js` (`SETTING_RULES`) and `LayoutStore.settings` in Java; shared fixture cases in `src/test/fixtures/layouts-v2.json`.
+
+**Tested** (`node --test src/test/js/dashboard.test.js`): the AFK panel test changes text size and speed, checks the saved settings and the crawl's font size, hides the only statistic with × (the panel then says every statistic is hidden), shows it again from its chip, and rejects sizes and speeds that aren't choices. The fixtures add one valid and three invalid AFK settings cases for both validators.
+
+**Not run.** Not checked in a real browser or in Minecraft: the form's look, the × hover button, how the lines look at each text size.

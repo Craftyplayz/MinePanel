@@ -11,6 +11,10 @@
         "advancements": { "x": 8, "y": 0,  "w": 4, "h": 18 },
         "performance":  { "x": 4, "y": 7,  "w": 4, "h": 4 },
         "inventory":    { "x": 4, "y": 11, "w": 4, "h": 7 }
+      },
+      "settings": {
+        "inventory": { "showArmor": false },
+        "model": { "speed": 120 }
       }
     }
   ],

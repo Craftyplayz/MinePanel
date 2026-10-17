@@ -1,0 +1,18 @@
+{
+  "format": "minepanel-rules",
+  "version": 1,
+  "rules": [
+    {
+      "id": "default-screen",
+      "name": "default screen",
+      "when": [
+        { "type": "inGame", "not": true }
+      ],
+      "then": [
+        { "do": "notify", "text": "Not Currently in a world", "cooldown": 5 },
+        { "do": "profile", "profile": "default" }
+      ],
+      "timing": { "lingerMs": 2000 }
+    }
+  ]
+}

@@ -87,13 +87,7 @@ The ids to use are listed in [Panels](Panels.md#overview) (panels and their sett
 
 ### Example rule sets
 
-The MinePanel repository has ready-to-import examples in its [`rule-sets`](https://github.com/Craftyplayz/MinePanel/tree/main/rule-sets) folder. Each adds a profile for a farm and a rule that switches to it while the farm is running, detected by kill rate (30 kills in 30 seconds), and stays up for 20 seconds after the kills stop.
-
-| File | Profiles | Switches when |
-|---|---|---|
-| `nether-farms.json` | Wither skeleton farm, Piglin farm | Killing wither skeletons, or zombified piglins |
-| `raid-farm.json` | Raid farm | Killing pillagers |
-| `trading.json` | Trading Panel | 5 or more known villagers within 10 blocks (after 3 s) |
+The MinePanel repository has ready-to-import rule sets in its [`rule-sets`](https://github.com/Craftyplayz/MinePanel/tree/main/rule-sets) folder: farm layouts, an AFK screen, advancement hunting, trading and more. [Ready-made rule sets](Ready-Made-Rule-Sets.md) lists every one, what it does and how to import it.
 
 ### Writing rule sets with an AI assistant
 

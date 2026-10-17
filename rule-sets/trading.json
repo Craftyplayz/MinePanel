@@ -8,13 +8,12 @@
       "panels": {
         "villagers": { "x": 0, "y": 0,  "w": 8, "h": 12, "mode": "rules" },
         "player":    { "x": 8, "y": 0,  "w": 4, "h": 4 },
-        "xp":        { "x": 8, "y": 4,  "w": 4, "h": 4 },
-        "pickups":   { "x": 8, "y": 8,  "w": 4, "h": 4 },
-        "inventory": { "x": 0, "y": 12, "w": 8, "h": 8 },
-        "history":   { "x": 8, "y": 12, "w": 4, "h": 8 }
+        "pickups":   { "x": 8, "y": 4,  "w": 4, "h": 10 },
+        "inventory": { "x": 0, "y": 12, "w": 4, "h": 6 },
+        "history":   { "x": 4, "y": 12, "w": 4, "h": 6 },
+        "xp":        { "x": 8, "y": 14, "w": 4, "h": 4 }
       },
       "settings": {
-        "inventory": { "showArmor": true },
         "xp": { "window": 300 }
       }
     }

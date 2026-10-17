@@ -1,0 +1,17 @@
+{
+  "format": "minepanel-rules",
+  "version": 1,
+  "rules": [
+    {
+      "id": "idle-movement",
+      "name": "Hide idle movement",
+      "when": [
+        { "type": "still", "for": 30 }
+      ],
+      "then": [
+        { "do": "hide", "panel": "movement" }
+      ],
+      "timing": { "lingerMs": 2000 }
+    }
+  ]
+}

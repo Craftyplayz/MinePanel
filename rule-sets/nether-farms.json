@@ -18,11 +18,9 @@
           "shown": [
             "minecraft:killed/minecraft:wither_skeleton",
             "minecraft:used/minecraft:netherite_sword",
-            "minecraft:broken/minecraft:netherite_sword",
             "minecraft:custom/minecraft:walk_one_cm",
             "minecraft:custom/minecraft:deaths",
-            "minecraft:custom/minecraft:mob_kills",
-            "minecraft:custom/minecraft:player_kills"
+            "minecraft:custom/minecraft:mob_kills"
           ]
         },
         "inventory": { "showArmor": false },
@@ -46,15 +44,13 @@
           "shown": [
             "minecraft:killed/minecraft:zombified_piglin",
             "minecraft:used/minecraft:netherite_sword",
-            "minecraft:broken/minecraft:netherite_sword",
-            "minecraft:custom/minecraft:walk_one_cm",
-            "minecraft:custom/minecraft:deaths",
             "minecraft:custom/minecraft:mob_kills",
-            "minecraft:custom/minecraft:player_kills"
+            "minecraft:killed/minecraft:chicken",
+            "minecraft:killed/minecraft:piglin"
           ]
         },
         "inventory": { "showArmor": false },
-        "xp": { "window": 600 },
+        "xp": { "window": 300, "goals": [6767] },
         "performance": { "window": 600 }
       }
     }
@@ -64,7 +60,7 @@
       "id": "wither-skeleton-farm",
       "name": "Wither skeleton farm",
       "when": [
-        { "type": "killedMob", "entity": "minecraft:wither_skeleton", "window": 30, "compare": ">=", "value": 30 }
+        { "type": "killedMob", "entity": "minecraft:wither_skeleton", "window": 120, "compare": ">=", "value": 15 }
       ],
       "then": [
         { "do": "profile", "profile": "wither-skeleton-farm" }

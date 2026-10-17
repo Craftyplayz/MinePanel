@@ -24,6 +24,7 @@ The configured release artifact is `build/release/minepanel-0.1.jar`. This is an
 
 - `./gradlew runClient` starts a development Minecraft client with MinePanel loaded, without copying anything anywhere.
 - `./gradlew installMod` builds the JAR (without running tests) and copies it into a real instance's `mods` folder, first deleting any other `minepanel-*.jar` there. Set the folder once in `~/.gradle/gradle.properties`, for example `minepanelModsDir=D:/Minecraft/Instances/26.1.2/minecraft/mods`, or pass `-PminepanelModsDir=...` or set `MINEPANEL_MODS_DIR`. Close Minecraft first; Windows locks loaded JARs.
+- To run `installMod` automatically after every commit, enable the repo's hook once with `git config core.hooksPath .githooks`. It builds in the background as version `<mod_version>-<commit>` (for example `minepanel-0.1-4144bfd.jar`) and writes the result to `build/install-mod.log`. If the log ends in `FAILED`, Minecraft was probably running; close it and run `./gradlew installMod`.
 - `scripts/download-latest-release.ps1 -ModsDir <mods folder>` downloads the newest GitHub release JAR into a mods folder and removes older MinePanel JARs. It does nothing if that version is already there. `-ModsDir` defaults to `MINEPANEL_MODS_DIR`.
 
 ## GitHub Releases
