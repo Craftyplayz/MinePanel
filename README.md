@@ -2,11 +2,19 @@
 
 **Using MinePanel? See the [wiki](https://github.com/Craftyplayz/MinePanel/wiki)** for every panel, setting and rule. This README covers building and releasing. The wiki is published automatically from [`docs/wiki/`](docs/wiki/Home.md); edit it there.
 
-MinePanel is a client-side Fabric companion dashboard targeting Minecraft Java Edition 26.1.2. It includes a bundled offline dashboard, lifecycle-managed loopback service, player position/health/session telemetry, read-only inventory/equipment, vanilla statistics counters, and bounded session event history over authenticated WebSocket updates. Minecraft compilation and runtime compatibility are still **unverified**, not release-ready claims.
+MinePanel is a client-side companion dashboard for Minecraft Java Edition: Fabric 26.1.2, Fabric 1.21.1 and NeoForge 1.21.1. It includes a bundled offline dashboard, lifecycle-managed loopback service, player position/health/session telemetry, read-only inventory/equipment, vanilla statistics counters, and bounded session event history over authenticated WebSocket updates. Minecraft compilation and runtime compatibility are still **unverified**, not release-ready claims.
 
 ## Requirements and build
 
-MinePanel builds with Java 25, Fabric Loader 0.19.3, Fabric API 0.154.0+26.1.2, Loom 1.18-SNAPSHOT, and Gradle 9.7.1, and requires at least that Loader and Fabric API at runtime. Build and test the release with:
+MinePanel builds one JAR per Minecraft version and loader from one source tree with [Stonecutter](https://stonecutter.kikugie.dev/) 0.9.8 and Gradle 9.7.1. Fabric nodes use Loom 1.18-SNAPSHOT (through `loom-back-compat`, which applies the remapping Loom on obfuscated versions) and Fabric Loader 0.19.3; the NeoForge node uses ModDevGradle 2.0.147. Each JAR requires at least the loader and API it was built with:
+
+| Node | Java | Loader / API | Litematica / MaLiLib (optional) | Other optional |
+|---|---|---|---|---|
+| `26.1.2-fabric` | 25 | Fabric API 0.154.0+26.1.2 | 0.27.14 / 0.28.12 | |
+| `1.21.1-fabric` | 21 | Fabric API 0.116.17+1.21.1 | 0.19.61 / 0.21.10 (from Modrinth's maven) | |
+| `1.21.1-neoforge` | 21 | NeoForge 21.1.221 | Forgematica / MaFgLib 0.4.3+mc1.21.1 (Modrinth) | Sophisticated Backpacks 3.25.34 / Core 1.4.11 (Modrinth) |
+
+Per-node pins live in `versions/<minecraft>-<loader>/gradle.properties`. `build.gradle` is the Fabric build script, `build.neoforge.gradle` the NeoForge one, and `gradle/shared.gradle` holds the tests, checks, `releaseBuild` and `installMod` for both. Code that differs between versions or loaders uses Stonecutter's `//? if >=26.1 { … }` and `//? if neoforge { … }` comments; `src/` always holds the `26.1.2-fabric` side active (`vcsVersion`), so commit with that node active. The `ResourceLocation`/`Identifier` rename is handled by a replacement in `stonecutter.gradle`. Gradle downloads a missing JDK through the foojay toolchain resolver. Build and test every node with:
 
 ```sh
 ./gradlew releaseBuild
@@ -18,35 +26,35 @@ Windows:
 gradlew.bat releaseBuild
 ```
 
-The configured release artifact is `build/release/minepanel-0.1.jar`. This is an expected output, not a claim that it has been generated here. Node.js is also required for frontend syntax and regression checks. Static assets are copied by Gradle into the JAR; there is no framework, transpilation step, or CDN. The build requires access to the configured Gradle/Fabric repositories the first time.
+The release artifacts are `build/release/minepanel-<loader>-<mod_version>+<minecraft>.jar`, one per node. `./gradlew :1.21.1-neoforge:releaseBuild` builds just one. Node.js is also required for frontend syntax and regression checks. Static assets are copied by Gradle into the JAR; there is no framework, transpilation step, or CDN. The build requires access to the configured Gradle/Fabric/NeoForge repositories the first time.
 
 ## Testing locally
 
-- `./gradlew runClient` starts a development Minecraft client with MinePanel loaded, without copying anything anywhere.
-- `./gradlew installMod` builds the JAR (without running tests) and copies it into a real instance's `mods` folder, first deleting any other `minepanel-*.jar` there. Set the folder once in `~/.gradle/gradle.properties`, for example `minepanelModsDir=D:/Minecraft/Instances/26.1.2/minecraft/mods`, or pass `-PminepanelModsDir=...` or set `MINEPANEL_MODS_DIR`. Close Minecraft first; Windows locks loaded JARs.
-- To run `installMod` automatically after every commit, enable the repo's hook once with `git config core.hooksPath .githooks`. It builds in the background as version `<mod_version>-<commit>` (for example `minepanel-0.1-4144bfd.jar`) and writes the result to `build/install-mod.log`. If the log ends in `FAILED`, Minecraft was probably running; close it and run `./gradlew installMod`.
-- `scripts/download-latest-release.ps1 -ModsDir <mods folder>` downloads the newest GitHub release JAR into a mods folder and removes older MinePanel JARs. It does nothing if that version is already there. `-ModsDir` defaults to `MINEPANEL_MODS_DIR`.
+- `./gradlew :1.21.1-fabric:runClient`, `:26.1.2-fabric:runClient` or `:1.21.1-neoforge:runClient` starts a development Minecraft client with MinePanel loaded, without copying anything anywhere (NeoForge runs in `run/neoforge`).
+- `./gradlew installMod` builds the JAR (without running tests) and copies it into a real instance's `mods` folder, first deleting any other `minepanel-*.jar` there. Set the folder once in `~/.gradle/gradle.properties`, for example `minepanelModsDir=D:/Minecraft/Instances/ATM10/minecraft/mods`, or pass `-PminepanelModsDir=...` or set `MINEPANEL_MODS_DIR`. Only one node installs: set `minepanelTarget=1.21.1-neoforge` next to it (or pass `-PminepanelTarget=...`); without it, the Stonecutter active node (`26.1.2-fabric`) installs. Close Minecraft first; Windows locks loaded JARs.
+- To run `installMod` automatically after every commit, enable the repo's hook once with `git config core.hooksPath .githooks`. It builds in the background as version `<mod_version>-<commit>` and writes the result to `build/install-mod.log`. If the log ends in `FAILED`, Minecraft was probably running; close it and run `./gradlew installMod`.
+- `scripts/download-latest-release.ps1 -ModsDir <mods folder> -Loader neoforge -Minecraft 1.21.1` downloads the newest GitHub release JAR for that loader (default `fabric`) and Minecraft version (default 26.1.2) into a mods folder and removes older MinePanel JARs. It does nothing if that version is already there. `-ModsDir` defaults to `MINEPANEL_MODS_DIR`.
 
 ## GitHub Releases
 
-The [build workflow](.github/workflows/build.yml) runs on Ubuntu 24.04 with Java 25 and Node 22 and runs `./gradlew releaseBuild` (which includes `check`, service tests and frontend tests). It then checks the JAR's integrity and that the packaged `fabric.mod.json` has the expected id and version.
+The [build workflow](.github/workflows/build.yml) runs on Ubuntu 24.04 with Java 21 and 25 and Node 22 and runs `./gradlew releaseBuild` (which includes `check`, service tests and frontend tests) for every Stonecutter node in `settings.gradle`. It then checks each JAR's integrity and that its packaged `fabric.mod.json` or `META-INF/neoforge.mods.toml` has the expected id and version (`<version>+<minecraft>`), and attaches every JAR to the release as `MinePanel-v<version>-<loader>-mc<minecraft>.jar`.
 
 **Every push to `main` publishes a release.** The version counts up by one per push: `v0.1`, `v0.2`, … `v0.9`, `v0.10`, `v0.11` and so on. The workflow finds the highest existing `v0.N` tag, adds one, builds with `-Pmod_version=0.N`, and creates the release and its tag on the pushed commit. Nothing is tagged or edited by hand; `mod_version` in `gradle.properties` is only used for local builds.
 
 - One push is one release, however many commits it contains.
-- Pushes to other branches and pull requests only build; the JAR (`MinePanel-v<mod_version>-<sha>.jar`) is kept as a workflow artifact for 30 days.
+- Pushes to other branches and pull requests only build; the JARs (`MinePanel-v<mod_version>-<sha>-<loader>-mc<minecraft>.jar`) are kept as a workflow artifact for 30 days.
 - Release runs queue instead of cancelling each other, so two quick pushes can't take the same number. GitHub keeps only one queued run per group, so a third push while one is queued replaces the queued one.
 - Re-running the workflow for a commit that already has a version tag rebuilds it without publishing again. An existing release with the same tag is never overwritten.
 - The release stays a draft until the JAR has uploaded; a failed upload may leave a draft to remove by hand.
 - Only the release job has `contents: write`; the build job has read-only repository access. `build-diagnostics` keeps Gradle reports and test results when a build fails.
 
-Download the compiled `MinePanel-v<version>.jar` under **Assets** on the [GitHub Releases page](https://github.com/Craftyplayz/MinePanel/releases), not GitHub's automatically generated source archives. Release notes include generated change notes, the build commit, SHA-256, and Minecraft/Fabric/Java requirements read from the packaged `fabric.mod.json`. Install the JAR in the appropriate Fabric client's `mods` directory.
+Download the compiled `MinePanel-v<version>-<loader>-mc<minecraft>.jar` for your loader and Minecraft version under **Assets** on the [GitHub Releases page](https://github.com/Craftyplayz/MinePanel/releases), not GitHub's automatically generated source archives. Release notes include generated change notes, the build commit, SHA-256, and Minecraft/loader/Java requirements read from the packaged metadata. Install the JAR in the matching client's `mods` directory.
 
 **Verification status:** automatic publication, release notes generation, hosted-runner dependency access, and the actual packaged JAR have not yet been verified by a successful workflow run. Local full builds have been blocked by DNS/firewall access to `maven.fabricmc.net` (see [testing](docs/TESTING.md)); a successful agent run is not a successful mod release. The existing Loom SNAPSHOT and wrapper versions remain unchanged: byte-for-byte reproducibility across changing upstream SNAPSHOT dependencies is not guaranteed. This workflow does not run Minecraft or certify in-game compatibility.
 
 ## Run
 
-Once a real release JAR has been built, install it in a Fabric 26.1.2 instance's `mods` directory and start the client. MinePanel serves the dashboard at **http://127.0.0.1:57262/** (loopback only; if that port is busy it falls back to a random port) and posts a clickable link in chat whenever you join a world. Open it on the same PC.
+Once a real release JAR has been built, install the one for your loader and version in a Fabric 26.1.2, Fabric 1.21.1 or NeoForge 1.21.1 instance's `mods` directory and start the client. MinePanel serves the dashboard at **http://127.0.0.1:57262/** (loopback only; if that port is busy it falls back to a random port) and posts a clickable link in chat whenever you join a world. Open it on the same PC.
 
 The inventory tile shows the hotbar, 27 main slots, armour and offhand with icons rendered by the game itself, so resource packs, block models and tinted items look exactly as they do in game. Icons are shown without the enchantment glint. Hovering an item shows its full in-game tooltip (with advanced F3+H details: ID, durability and component count). No dashboard action can change inventory.
 

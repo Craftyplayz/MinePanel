@@ -1,5 +1,7 @@
 package dev.craftyplayz.minepanel.mixin;
 
+// 26.1 only: older versions read the transform from the BakedModel, and build.gradle leaves this out of the mixin config.
+//? if >=26.1 {
 import net.minecraft.client.renderer.item.ItemStackRenderState;
 import net.minecraft.client.resources.model.cuboid.ItemTransform;
 import org.spongepowered.asm.mixin.Mixin;
@@ -11,3 +13,4 @@ public interface ItemLayerRenderStateAccessor {
     @Accessor("itemTransform")
     ItemTransform minepanel$itemTransform();
 }
+//?}

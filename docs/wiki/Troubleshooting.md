@@ -33,6 +33,9 @@ The server hasn't sent statistics. Some servers restrict them. MinePanel keeps a
 **The ender chest is empty or says to open it.**
 MinePanel only knows your ender chest's contents from the last time you opened it in this world. Open it once.
 
+**A backpack says "Contents not known yet".**
+On a server, MinePanel only knows a backpack's contents from the last time you opened it. Open it once. In singleplayer it fills in within a second or two. See [Sophisticated Backpacks](Integrations.md#sophisticated-backpacks).
+
 **The 3D render shows a default skin or nothing.**
 Your skin may still be downloading; it appears once the game has it.
 

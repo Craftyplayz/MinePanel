@@ -1,6 +1,6 @@
 # Testing
 
-`./gradlew releaseBuild` runs the Gradle build, `serviceTest`, `frontendSyntax`, and `frontendTest`, then validates mod metadata, the client entrypoint class, and bundled dashboard assets in the production JAR before copying it to `build/release/minepanel-<mod_version>.jar`. Static assets are already source files: `processClientResources` packages them without a separate frontend compilation step. No lint or type-check configuration exists.
+`./gradlew releaseBuild` runs the Gradle build, `serviceTest`, `frontendSyntax`, and `frontendTest`, then validates mod metadata, the client entrypoint class, and bundled dashboard assets in the production JAR before copying it to `build/release/minepanel-<mod_version>+<minecraft>.jar`; it runs once per Minecraft version. Static assets are already source files: `processClientResources` packages them without a separate frontend compilation step. No lint or type-check configuration exists.
 
 Baseline pure Java service tests passed with both the default Java 17 and installed Java 25; the mod itself requires Java 25. Baseline frontend syntax passed. The existing snapshot/delta checks were described in earlier work but were not committed as a reusable test runner; this milestone adds the Node regression suite without deleting any existing tests.
 
@@ -237,3 +237,78 @@ The AFK panel has a ⚙ settings form: **Text size** (`afk.fontSize`, 11–32 px
 **Tested** (`node --test src/test/js/dashboard.test.js`): the AFK panel test changes text size and speed, checks the saved settings and the crawl's font size, hides the only statistic with × (the panel then says every statistic is hidden), shows it again from its chip, and rejects sizes and speeds that aren't choices. The fixtures add one valid and three invalid AFK settings cases for both validators.
 
 **Not run.** Not checked in a real browser or in Minecraft: the form's look, the × hover button, how the lines look at each text size.
+
+## Minecraft 1.21.1 build (2026-10-22)
+
+Stonecutter 0.9.8 builds a JAR for Minecraft 1.21.1 (Java 21, Fabric API 0.116.17, Litematica 0.19.61 / MaLiLib 0.21.10 from Modrinth's maven) beside 26.1.2, from the same sources. See `docs/ARCHITECTURE.md` "Multiple Minecraft versions".
+
+**Tested:**
+
+- `./gradlew releaseBuild` passed for both versions: client and main sources compiled against each Minecraft, `serviceTest`, `frontendSyntax`, `frontendTest` (118 passing) and `litematicaIsolation` ran for each, and both release JARs were validated (`build/release/minepanel-0.1+1.21.1.jar`, `minepanel-0.1+26.1.2.jar`).
+- The 1.21.1 JAR's `fabric.mod.json` says `minecraft ~1.21.1`, `java >=21`, `fabric-api >=0.116.17`, `suggests litematica >=0.19.61`; its mixin config is `JAVA_21` and leaves out the two item-render-state accessors.
+- Every mixin class in the remapped 1.21.1 JAR has its targets remapped to intermediary names (so Loom found each target method or field in 1.21.1), and each handler's parameters were compared by hand with the 1.21.1 target signatures in the decompiled sources.
+- `installMod` with `-PminepanelMinecraft=1.21.1` installs only the 1.21.1 JAR, and with no property only the active (26.1.2) one.
+
+**Not run.**
+
+- The 1.21.1 JAR has not been started in Minecraft. Unverified: mixins applying at runtime, item icon rendering through `TextureTarget` and the `NativeImage` read-back (orientation and premultiplied alpha), skin/cape GPU read-back, armor layers and held-item transforms in the 3D render panel, villager profession names, moon phase, spawn distance, time of day, and the Litematica 0.19 adapter.
+- The updated GitHub workflow (two JDKs, one JAR per version, per-version asset names) has not run; its Python validation step wasn't executed locally (no Python here).
+- `scripts/download-latest-release.ps1 -Minecraft` hasn't been run against a release with the new asset names.
+
+## Sophisticated Backpacks contents (2026-10-22)
+
+Backpack contents in item windows and Build progress *Have* on the NeoForge 1.21.1 build. See `docs/ARCHITECTURE.md` "Container contents and Sophisticated Backpacks" for the storage facts, which were read from the 3.25.34.1604 / Core 1.4.11.1559 JARs with `javap`.
+
+**Tested:**
+
+- `:26.1.2-fabric:releaseBuild` and `:1.21.1-fabric:releaseBuild` passed (frontend tests 119 passing, service tests, isolation check, JAR validation). `:1.21.1-neoforge:compileJava`, `:1.21.1-neoforge:test` and `:1.21.1-neoforge:litematicaIsolation` passed.
+- The NeoForge sources of `Backpacks`, `backpacks/SophisticatedBackpacks`, `MinecraftInventoryCollector` and `WorldDataCollector` compiled with `javac` against the NeoForge client classpath without errors or warnings. The full `:1.21.1-neoforge:compileClientJava` still fails, only in `MinePanelClient` and `BuildProgressCollector` (Fabric API, ported separately).
+- New tests: `contentsUnknown` serialization and validation and its extraction (`WorldFeaturesTest`); stored backpacks, dedupe, the 64-backpack limit, validation and restart (`LocalDashboardServerTest`); protocol rejection of bad `contentsUnknown` values and the "Contents not known yet" window (`dashboard.test.js`).
+
+**Not run.**
+
+- Nothing has been run in Minecraft. Unverified in game: the ModList version check and modproperty lookup; singleplayer reads from the integrated server (contents appear within about 3 s, update after changes, no world changes or dirty marks); `BackpackContainer.realInventorySlots` and `getContentsUuid()` on the client recording the right backpack in multiplayer; remembered contents surviving a rejoin; stack-upgraded counts; loot backpacks showing as unknown; Build progress *Have* including backpack contents.
+- `:1.21.1-neoforge:serviceTest` fails at "protocol.js is served" (the NeoForge test classpath lacks the client web resources), independent of this change.
+
+## NeoForge 1.21.1 build (2026-10-22)
+
+A third Stonecutter node, `1.21.1-neoforge` (ModDevGradle 2.0.147, NeoForge 21.1.221, Java 21), builds `minepanel-neoforge-<version>+1.21.1.jar` beside the two Fabric JARs; the Fabric nodes were renamed `26.1.2-fabric` and `1.21.1-fabric`. Optional on NeoForge: Forgematica/MaFgLib 0.4.3 and Sophisticated Backpacks 3.25.34 / Core 1.4.11 (compile-only). See `docs/ARCHITECTURE.md` "Multiple Minecraft versions".
+
+**Tested:**
+
+- A clean `./gradlew clean releaseBuild` passed for all three nodes: each compiled, ran `serviceTest`, `frontendSyntax`, `frontendTest` (119 passing) and `litematicaIsolation` (which now also keeps `net.p3pp3rf1y.*` imports in the `backpacks` package), and validated its JAR. `node --test src/test/js/dashboard.test.js` passes 119 of 119 on its own.
+- The NeoForge JAR has `META-INF/neoforge.mods.toml` (no `fabric.mod.json`), the `@Mod`-annotated `MinePanelClient` with no Fabric references, Java 21 class files, the Litematica and backpack adapters, and a `JAVA_21` mixin config without the two 26.1-only accessors.
+- Every mixin target, injection point and accessor field was compared with the NeoForge-patched 1.21.1 sources and the merged game JAR (no changes needed), and the mixin configs of Sodium 0.6.13, Iris 1.8.12, ModernFix 5.26.1, Lithium 0.15.3 and FerriteCore 7.0.3 from ATM10 To the Sky were searched for overlapping targets: none overwrite or redirect a MinePanel injection point; Sodium also injects at `Minecraft.runTick` HEAD/RETURN, which coexists with MinePanel's RETURN inject.
+- Every Litematica member `LitematicaBuildSource` uses exists with the same signature in Forgematica 0.4.3 (javap).
+- The held-item transform decomposition (NeoForge `applyTransform`) was checked outside the game against joml 1.10.5 for tool, block, non-uniform, mirrored and ±90° transforms in both hands.
+- Sophisticated Backpacks: the storage layout and read path were read from the 3.25.34 / 1.4.11 bytecode; Java and JS tests cover the `contentsUnknown` protocol field, remembered backpacks in `WorldStore` (persistence, limits, validation, per-world) and the item window's "not known yet" note.
+
+**Not run.** Nothing has been run in game on NeoForge. Unverified: that the mod loads in NeoForge and in ATM10 To the Sky (328 mods), that every mixin applies at runtime, the NeoForge event mapping and timing (join/leave, block-break emulation, screen close, shutdown), item icons for mods with custom renderers with Sodium/Iris (and shaders) installed, the restored GL state, modded armor textures/tints and held-item poses, spawn-egg icons, backpack contents in singleplayer (server-thread read) and on servers (screen capture), stack-upgraded counts, loot backpacks showing as unknown, Build progress "Have" with backpacks, Forgematica's runtime behaviour and that FML gives its `litematica` stub a container. The updated workflow (three JARs, `tomllib` parsing of `neoforge.mods.toml`) and `download-latest-release.ps1 -Loader` have not run.
+
+## Curios slots and live backpack windows (2026-10-22)
+
+The user confirmed the NeoForge JAR loads in ATM10 To the Sky and the dashboard works there (first in-game result for that build). Their backpack is worn in a Curios slot, which MinePanel didn't read, so: Curios 9.5.1 support (`Accessories` / `curios.CuriosSlots`, NeoForge only, compile-only API from maven.theillusivec4.top), `InventorySnapshot.accessories` in Java and `protocol.js`, an accessories row in the Inventory panel, `accessory` as a pinned-window source in both layout validators, accessories counted in Build progress *Have*, and singleplayer backpack contents read every 1 s instead of 3 s.
+
+**Tested:** `./gradlew releaseBuild` passed for all three nodes (120 dashboard tests, service tests, isolation check now also covering `top.theillusivec4.*`, JAR validation). New tests: the accessories row appears only when something is worn, a ring has no window, a worn backpack opens a window that follows the next update, bad accessories lists are rejected; Java: accessories JSON, delta and limits, worn backpack contents counted as carried, and an `accessory` pin round-trips through `LayoutStore`.
+
+**Not run:** the Curios row and the worn backpack window in game (the Curios capability read, slot order, the 1 s refresh), and the layout of the accessories row at small panel sizes in a real browser.
+
+## Backpack panel (2026-10-22)
+
+A `backpack` panel (off by default, 3 × 3 minimum, default spot 0, 43, 6, 6) draws the worn backpack (first container in the Curios accessories, else the chest slot) slot by slot, 9 columns (12 above 81 slots). Backpack contents are now positional with empty slots kept and padded to the backpack's size, and the contents limit is 128 (was 64) in `ItemSnapshot`, `protocol.js` and `WorldStore`. The panel is only offered on Minecraft 1.21.1: the dashboard reads the version from the `modVersion` it gets on connect (`TILE_VERSIONS` in `app.js`); on other versions it is left out of the solver, hidden and missing from **Tiles** (unknown versions, e.g. development runs, keep it).
+
+**Tested:** `./gradlew releaseBuild` for all three nodes; 121 dashboard tests, including the panel (54 slots drawn with empties in place, status name, "None worn"), the 26.1.2 version gate, updated tile counts and chip list; shared layout fixtures for a placed Backpack panel (valid) and a setting on it (invalid) pass in both validators.
+
+**Not run:** the panel in game or a real browser (slot sizing at different panel sizes, tooltips), positional contents from the integrated server and from a backpack screen, and backpacks with upgrades that change their slot count.
+
+## Backpacks and Personal backpack panels (2026-10-22)
+
+The `backpack` panel is now **Personal backpack**; a new `backpacks` panel (**Backpacks**, 4 × 4, off by default, Minecraft 1.21.1 only) lists every backpack (singleplayer: the world's Sophisticated Backpacks storage plus its access log; servers: backpacks remembered from their screens), searches by name, player, item id and item name, selects one (`backpacks.selected`, a UUID or "last", validated in both validators) or the **Last opened**, and draws it slot by slot. Watched backpacks (carried, last opened, selected) refresh every 250 ms in singleplayer; the list every 5 s; open backpack screens are captured every 5 ticks. New snapshot field `backpacks` (`BackpacksSnapshot`), always sent, null without a supported mod.
+
+**Tested:** `./gradlew releaseBuild` for all three nodes; 124 dashboard tests (protocol validation of `backpacks`, the Backpacks panel's list, search, selection, Last opened, loading/unknown/server notes, grid updates across revisions, 26.1.2 gate, setting validation, renamed chip); Java: `BackpacksSnapshot` JSON and limits, `LayoutStore.backpackSelections` (profile settings and rule set actions, not "last", updated on save), rejected `selected` values, shared fixtures (a selected backpack valid; "LAST" and a short UUID invalid) in both validators.
+
+**Not run:** anything in game: the world index from `BackpackStorage`/`getAccessLogs()` (names, players, times, slot counts), how quickly a selection reaches the game after the layout saves, the 250 ms refresh cost with many backpacks, the panels' look in a real browser, and the server fallback.
+
+## Pinned windows that couldn't be closed (2026-10-22)
+
+Reported in game: a pinned item window from the saved layout couldn't be closed or unpinned. Cause: `syncPinnedWindows` replaced each pinned entry with a copy whenever the layout was applied, while the window's ×, 📌 and drag handlers kept the original entry, so closing removed nothing and the copy was saved again. It now updates the entry in place. **Tested:** reproduced in the dashboard harness first (× left the window and re-saved it), then a regression test (close one saved pinned window, unpin another, nothing stays pinned); 125 dashboard tests; `./gradlew releaseBuild`. **Not run:** in a real browser.

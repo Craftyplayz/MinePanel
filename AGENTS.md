@@ -2,7 +2,7 @@
 
 Instructions for AI agents (Claude Code, Codex and others) and human contributors.
 
-MinePanel is a client-only Fabric mod (Minecraft 26.1.2, Java 25) that serves a read-only, loopback-only browser dashboard. Java collects game state into immutable snapshots; the dashboard (`src/client/resources/web/`, plain JS, no build step) renders them, and evaluates layout rules in the browser.
+MinePanel is a client-only mod (Fabric 26.1.2 on Java 25, Fabric 1.21.1 and NeoForge 1.21.1 on Java 21, one JAR each, built with Stonecutter) that serves a read-only, loopback-only browser dashboard. Java collects game state into immutable snapshots; the dashboard (`src/client/resources/web/`, plain JS, no build step) renders them, and evaluates layout rules in the browser.
 
 ## Documentation map
 
@@ -13,6 +13,7 @@ MinePanel is a client-only Fabric mod (Minecraft 26.1.2, Java 25) that serves a 
 | `docs/ARCHITECTURE.md` | Developers | Protocol, threading, snapshot fields, integrations internals |
 | `docs/RULES_V2.md` | Developers | Rules design, implementation status, handoff |
 | `docs/IMPLEMENTATION_PLAN.md`, `docs/web-handover.md` | Developers | Plans, milestones, agreed decisions, session handover |
+| `docs/ROADMAP.md` | Developers | Planned panels and integrations, with what each mod sends to the client |
 | `docs/TESTING.md` | Developers | Test commands and records of what was and wasn't verified |
 | `docs/INSTALLATION.md`, `docs/TROUBLESHOOTING.md`, `README.md` | Developers / repo visitors | Install, build, release and developer-level troubleshooting |
 
@@ -73,4 +74,6 @@ Before finishing, grep the wiki for the old name, value or behaviour you changed
 - Follow the constraints in `docs/ARCHITECTURE.md` and `docs/web-handover.md`: read-only, loopback-only, no gameplay mutation, nothing slow on the client thread, Litematica imports only in `dev.craftyplayz.minepanel.litematica`.
 - Layout format changes go in **both** validators (`layout.js` `normalizeLayout` and `LayoutStore`/`LayoutRules` in Java) and in `src/test/fixtures/layouts-v2.json`.
 - Docs must separate tested from unverified behaviour. Never claim in-game checks that weren't performed; record results in `docs/TESTING.md`.
+- Minecraft-version- and loader-specific code goes in Stonecutter `//? if` blocks (`>=26.1`, `fabric`, `neoforge`) with the `26.1.2-fabric` side active in `src/` (see `docs/ARCHITECTURE.md` "Multiple Minecraft versions"). Any Java change must build on every node: `./gradlew releaseBuild` runs them all.
+- Optional mods are isolated like Litematica: only `dev.craftyplayz.minepanel.litematica` may import `fi.dy.masa.*`, only `dev.craftyplayz.minepanel.backpacks` may import `net.p3pp3rf1y.*` (`litematicaIsolation` enforces both).
 - Checks: `node --test src/test/js/dashboard.test.js` for the dashboard; `./gradlew check` or `./gradlew releaseBuild` for everything.

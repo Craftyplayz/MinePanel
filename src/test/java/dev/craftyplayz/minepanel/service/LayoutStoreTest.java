@@ -31,7 +31,36 @@ public final class LayoutStoreTest {
         testVersion1IsReadAndBackedUp();
         testInvalidStoredLayoutIsKept();
         testSensorNeeds();
+        testBackpackSelections();
         System.out.println("LayoutStoreTest passed");
+    }
+
+    /** The game reads in full the backpacks any profile's Backpacks panel or a rule's set action selects. */
+    private static void testBackpackSelections() throws Exception {
+        String chosen = "123e4567-e89b-12d3-a456-426614174000";
+        String byRule = "223e4567-e89b-12d3-a456-426614174000";
+        String layout = "{\"version\":2,\"tiles\":[],\"settings\":{\"backpacks\":{\"selected\":\"last\"}},"
+                + "\"profiles\":[{\"id\":\"bags\",\"name\":\"Bags\",\"tiles\":[],\"settings\":{\"backpacks\":"
+                + "{\"selected\":\"" + chosen + "\"}}}],\"rules\":[{\"id\":\"r\",\"name\":\"R\",\"enabled\":true,"
+                + "\"when\":[],\"then\":[{\"do\":\"notify\",\"text\":\"Hi\"},{\"do\":\"set\",\"panel\":\"backpacks\","
+                + "\"setting\":\"selected\",\"value\":\"" + byRule + "\"}]}]}";
+        var selections = LayoutStore.backpackSelections(JsonParser.parseString(LayoutStore.normalize(layout)).getAsJsonObject());
+        check(selections.equals(java.util.Set.of(chosen, byRule)), "profile settings and rule actions, not \"last\": " + selections);
+        Path file = Files.createTempDirectory("minepanel-layout-backpacks").resolve("layout.json");
+        LayoutStore store = new LayoutStore(file);
+        check(store.backpackSelections().isEmpty(), "nothing before a layout");
+        store.save(layout);
+        check(store.backpackSelections().equals(selections), "a save updates the watched backpacks");
+        for (String bad : new String[] {"LAST", "123e4567", "123E4567-E89B-12D3-A456-426614174000", ""}) {
+            boolean rejected;
+            try {
+                LayoutStore.normalize("{\"version\":2,\"tiles\":[],\"settings\":{\"backpacks\":{\"selected\":\"" + bad + "\"}}}");
+                rejected = false;
+            } catch (IllegalArgumentException expected) {
+                rejected = true;
+            }
+            check(rejected, "selected backpack " + bad + " is rejected");
+        }
     }
 
     /** The mod collects the costlier sensors only for enabled rules in enabled folders that read them. */

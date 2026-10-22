@@ -13,12 +13,13 @@ const LAYOUT_COLUMNS = 12;
 const LAYOUT_MAX_Y = 1000;
 const LAYOUT_MAX_H = 60;
 const TILE_IDS = ["player", "inventory", "statistics", "history", "map", "build",
-  "movement", "xp", "pickups", "advancements", "villagers", "performance", "afk", "model"];
+  "movement", "xp", "pickups", "advancements", "villagers", "performance", "afk", "model", "backpack", "backpacks"];
 const TILE_MINIMUMS = {
   player: { w: 2, h: 2 }, inventory: { w: 3, h: 2 }, statistics: { w: 2, h: 3 },
   history: { w: 3, h: 3 }, map: { w: 2, h: 2 }, build: { w: 2, h: 2 },
   movement: { w: 2, h: 2 }, xp: { w: 2, h: 2 }, pickups: { w: 2, h: 2 }, advancements: { w: 3, h: 3 },
-  villagers: { w: 3, h: 3 }, performance: { w: 2, h: 2 }, afk: { w: 3, h: 3 }, model: { w: 2, h: 3 }
+  villagers: { w: 3, h: 3 }, performance: { w: 2, h: 2 }, afk: { w: 3, h: 3 }, model: { w: 2, h: 3 },
+  backpack: { w: 3, h: 3 }, backpacks: { w: 4, h: 4 }
 };
 const MAX_STATISTIC_SETTINGS = 512;
 const DEFAULT_MAP_URL = "http://127.0.0.1:8080/";
@@ -36,7 +37,7 @@ const MAX_XP_GOALS = 8;
 const MAX_XP_GOAL_LEVEL = 10000;
 const MAX_PROFILES = 16;
 const MAX_PINNED = 16;
-const PIN_SOURCES = ["inventory", "enderchest", "enderchest-item"];
+const PIN_SOURCES = ["inventory", "enderchest", "enderchest-item", "accessory"];
 // How often the game samples the player, in ms; one client tick is 50 ms, so 50 is the fastest. Global, not per
 // profile: the game samples at one rate whichever profile is shown.
 const UPDATE_INTERVAL_CHOICES = [50, 100, 250, 500, 1000];
@@ -66,7 +67,9 @@ function defaultSettings() {
     advancements: { popupSeconds: 10, hiddenTabs: [], pinned: [] },
     model: { spin: true, axis: "y", speed: 30 },
     // hidden: statistics the AFK crawl never shows.
-    afk: { fontSize: 13, speed: 20, hidden: [] }
+    afk: { fontSize: 13, speed: 20, hidden: [] },
+    // "last" (the most recently opened backpack) or one backpack's UUID.
+    backpacks: { selected: "last" }
   };
 }
 
@@ -106,7 +109,9 @@ const SETTING_RULES = [
   ["model", "speed", value => MODEL_SPEED_CHOICES.includes(value)],
   ["afk", "fontSize", value => AFK_FONT_SIZE_CHOICES.includes(value)],
   ["afk", "speed", value => AFK_SPEED_CHOICES.includes(value)],
-  ["afk", "hidden", validStatisticIds]
+  ["afk", "hidden", validStatisticIds],
+  ["backpacks", "selected", value => value === "last" || typeof value === "string"
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value)]
 ];
 
 /** Copies only known, valid settings out of {@code value}; rejects present-but-malformed ones. */
@@ -151,7 +156,9 @@ function defaultLayout() {
     { id: "map", enabled: false, x: 0, y: 33, w: 6, h: 6 },
     { id: "build", enabled: false, x: 6, y: 33, w: 6, h: 4 },
     { id: "afk", enabled: false, x: 6, y: 37, w: 6, h: 6 },
-    { id: "model", enabled: true, x: 8, y: 25, w: 4, h: 8 }
+    { id: "model", enabled: true, x: 8, y: 25, w: 4, h: 8 },
+    { id: "backpack", enabled: false, x: 0, y: 43, w: 6, h: 6 },
+    { id: "backpacks", enabled: false, x: 6, y: 43, w: 6, h: 8 }
   ], profiles: [], pinned: [], updates: { intervalMillis: DEFAULT_UPDATE_INTERVAL },
   animation: { ...DEFAULT_ANIMATION }, folders: [], places: [], toggles: [], rules: [] };
 }

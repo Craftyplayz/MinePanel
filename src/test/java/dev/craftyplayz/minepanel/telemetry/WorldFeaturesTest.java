@@ -120,6 +120,42 @@ public final class WorldFeaturesTest {
         invalid(() -> new ItemSnapshot(false, "minecraft:bundle", "Bundle", 1, 1, null, null, List.of(), null, false,
                 List.of(), List.of(shulker)));
         invalid(() -> new ItemSnapshot(true, null, null, 0, 0, null, null, List.of(), null, false, List.of(), List.of()));
+        var unseen = new ItemSnapshot(false, "sophisticatedbackpacks:backpack", "Backpack", 1, 1, null, null, List.of(),
+                null, false, List.of(), List.of(), true);
+        check(unseen.toJson().endsWith("\"contentsUnknown\":true,\"contents\":[]}"), "unknown contents are marked");
+        invalid(() -> new ItemSnapshot(false, "sophisticatedbackpacks:backpack", "Backpack", 1, 1, null, null,
+                List.of(), null, false, List.of(), null, true));
+        invalid(() -> new ItemSnapshot(false, "sophisticatedbackpacks:backpack", "Backpack", 1, 1, null, null,
+                List.of(), null, false, List.of(), List.of(inner), true));
+        ItemExtractor.ItemView unseenView = new ItemExtractor.ItemView() {
+            public boolean isEmpty() { return false; }
+            public String itemId() { return "sophisticatedbackpacks:backpack"; }
+            public String name() { return "Backpack"; }
+            public int count() { return 1; }
+            public int maxCount() { return 1; }
+            public boolean isDamageable() { return false; }
+            public int damage() { return 0; }
+            public int maxDamage() { return 0; }
+            public Iterable<ItemExtractor.EnchantmentView> appliedEnchantments() { return List.of(); }
+            public Iterable<ItemExtractor.EnchantmentView> storedEnchantments() { return List.of(); }
+            public boolean contentsUnknown() { return true; }
+            public List<ItemExtractor.ItemView> contents() { throw new AssertionError("unknown contents are not read"); }
+        };
+        check(ItemExtractor.extract(unseenView).equals(unseen), "an unseen backpack extracts as unknown contents");
+        check(ItemExtractor.extract(new ItemExtractor.ItemView() {
+            public boolean isEmpty() { return false; }
+            public String itemId() { return "minecraft:bundle"; }
+            public String name() { return "Bundle"; }
+            public int count() { return 1; }
+            public int maxCount() { return 1; }
+            public boolean isDamageable() { return false; }
+            public int damage() { return 0; }
+            public int maxDamage() { return 0; }
+            public Iterable<ItemExtractor.EnchantmentView> appliedEnchantments() { return List.of(); }
+            public Iterable<ItemExtractor.EnchantmentView> storedEnchantments() { return List.of(); }
+            public List<ItemExtractor.ItemView> contents() { return List.of(unseenView); }
+        }).contents().getFirst().equals(new ItemSnapshot(false, "sophisticatedbackpacks:backpack", "Backpack", 1, 1,
+                null, null, List.of(), null, false, List.of())), "a nested backpack lists no contents of its own");
         var details = PlayerDetails.placeholder();
         var snapshot = new PlayerSnapshot(1, 1, true, 0L, "minecraft:overworld", 0.0, 0.0, 0.0, 20.0, 20.0, 0.0,
                 InventorySnapshot.empty(), null, GameplayHistory.empty(), 20, 5.0, List.of(), details);
@@ -282,8 +318,8 @@ public final class WorldFeaturesTest {
                 InventorySnapshot.empty(), null, GameplayHistory.empty(), 20, 5.0, List.of(), details);
         var after = new PlayerSnapshot(2, 2, true, 0L, "minecraft:overworld", 0.0, 0.0, 0.0, 20.0, 20.0, 0.0,
                 InventorySnapshot.empty(), null, GameplayHistory.empty(), 20, 5.0, List.of(), dressed);
-        check(before.toJson().contains(",\"appearance\":" + Appearance.EMPTY.toJson() + "}"),
-                "full snapshots end with the appearance");
+        check(before.toJson().contains(",\"appearance\":" + Appearance.EMPTY.toJson() + ",\"backpacks\":null}"),
+                "full snapshots end with the appearance, then backpacks (null without a backpack mod)");
         check(after.toDeltaJson(before).contains(",\"appearance\":" + appearance.toJson()), "a changed appearance is sent");
     }
 

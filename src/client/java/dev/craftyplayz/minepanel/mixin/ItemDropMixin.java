@@ -14,7 +14,11 @@ abstract class ItemDropMixin {
     private void minepanel$dropped(boolean all, CallbackInfoReturnable<Boolean> callback) {
         var activity = ClientActivity.get();
         if (activity == null) return;
+        //? if >=26.1 {
         var stack = ((LocalPlayer) (Object) this).getInventory().getSelectedItem();
+        //?} else {
+        /*var stack = ((LocalPlayer) (Object) this).getInventory().getSelected();
+        *///?}
         activity.itemDropped(stack, all ? stack.getCount() : Math.min(1, stack.getCount()));
     }
 }

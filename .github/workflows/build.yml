@@ -65,7 +65,10 @@ jobs:
         uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
         with:
           distribution: temurin
-          java-version: '25'
+          # 21 for Minecraft 1.21.1 (Fabric and NeoForge), 25 for 26.1 (the last one listed is the default).
+          java-version: |
+            21
+            25
 
       - name: Install Node for existing frontend tests
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -75,9 +78,12 @@ jobs:
       - name: Build, test, and package with the Gradle wrapper
         env:
           VERSION: ${{ steps.version.outputs.version }}
-        run: ./gradlew --no-daemon --stacktrace --console=plain "-Pmod_version=$VERSION" releaseBuild
+        # Builds one JAR per Minecraft version; Gradle picks each version's JDK from setup-java's installs.
+        run: >-
+          ./gradlew --no-daemon --stacktrace --console=plain "-Pmod_version=$VERSION"
+          -Porg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64,JAVA_HOME_25_X64 releaseBuild
 
-      - name: Validate and name the JAR
+      - name: Validate and name the JARs
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -86,35 +92,54 @@ jobs:
           import json
           import os
           import pathlib
+          import re
+          import tomllib
           import zipfile
 
           version = os.environ["VERSION"]
-          source = pathlib.Path("build/release") / f"minepanel-{version}.jar"
+          # One JAR per Stonecutter node in settings.gradle: version '<minecraft>-<loader>', '<minecraft>'.
+          settings = pathlib.Path("settings.gradle").read_text()
+          nodes = re.findall(r"^\s*version\(?\s*'([0-9][0-9.]*)-([a-z]+)'\s*,\s*'[0-9.]+'", settings, re.M)
+          sources = [pathlib.Path("build/release") / f"minepanel-{loader}-{version}+{game}.jar" for game, loader in nodes]
           candidates = sorted(pathlib.Path("build/release").glob("*.jar"))
-          if candidates != [source] or source.stat().st_size == 0:
-              raise SystemExit(f"Expected exactly one nonempty release JAR: {source}; found {candidates}")
-          with zipfile.ZipFile(source) as jar:
-              if jar.testzip() is not None:
-                  raise SystemExit("JAR integrity check failed")
-              metadata = json.loads(jar.read("fabric.mod.json"))
-          if metadata["id"] != "minepanel" or metadata["version"] != version:
-              raise SystemExit(f"Packaged mod identity/version {metadata['version']} does not match {version}")
-          compatibility = metadata["depends"]
+          if not nodes or candidates != sorted(sources) or any(source.stat().st_size == 0 for source in sources):
+              raise SystemExit(f"Expected one nonempty release JAR per Stonecutter node: {sources}; found {candidates}")
 
           output = pathlib.Path("build/ci-jar")
           output.mkdir(parents=True, exist_ok=True)
-          destination = output / f"MinePanel-v{version}.jar"
-          data = source.read_bytes()
-          destination.write_bytes(data)
+          downloads = []
+          for (game, loader), source in zip(nodes, sources):
+              with zipfile.ZipFile(source) as jar:
+                  if jar.testzip() is not None:
+                      raise SystemExit(f"JAR integrity check failed: {source}")
+                  if loader == "fabric":
+                      metadata = json.loads(jar.read("fabric.mod.json"))
+                      mod_id, mod_version = metadata["id"], metadata["version"]
+                      depends = metadata["depends"]
+                      requirements = [("Minecraft", depends["minecraft"]), ("Fabric Loader", depends["fabricloader"]),
+                                      ("Fabric API", depends["fabric-api"]), ("Java", depends["java"])]
+                  else:
+                      metadata = tomllib.loads(jar.read("META-INF/neoforge.mods.toml").decode())
+                      mod = metadata["mods"][0]
+                      mod_id, mod_version = mod["modId"], mod["version"]
+                      ranges = {dep["modId"]: dep["versionRange"] for dep in metadata["dependencies"]["minepanel"]}
+                      requirements = [("Minecraft", ranges["minecraft"]), ("NeoForge", ranges["neoforge"]),
+                                      ("Java", "21")]
+              if mod_id != "minepanel" or mod_version != f"{version}+{game}":
+                  raise SystemExit(f"Packaged mod identity/version {mod_version} does not match {version}+{game}")
+              destination = output / f"MinePanel-v{version}-{loader}-mc{game}.jar"
+              data = source.read_bytes()
+              destination.write_bytes(data)
+              downloads.append(
+                  f"### {'NeoForge' if loader == 'neoforge' else 'Fabric'} {game}: `{destination.name}`\n\n"
+                  + "".join(f"- {name}: `{value}`\n" for name, value in requirements)
+                  + f"- JAR SHA-256: `{hashlib.sha256(data).hexdigest()}`\n"
+              )
           notes = (
               f"MinePanel v{version}\n\n"
               f"Built from Git commit `{os.environ['GITHUB_SHA']}`.\n\n"
-              f"- Minecraft: `{compatibility['minecraft']}`\n"
-              f"- Fabric Loader: `{compatibility['fabricloader']}`\n"
-              f"- Fabric API: `{compatibility['fabric-api']}`\n"
-              f"- Java: `{compatibility['java']}`\n\n"
-              f"Download `{destination.name}` and place it in your Fabric client's `mods` directory.\n\n"
-              f"JAR SHA-256: `{hashlib.sha256(data).hexdigest()}`\n\n"
+              "Download the JAR for your loader and Minecraft version and place it in your client's `mods` directory.\n\n"
+              + "\n".join(downloads) + "\n"
               "Compilation, automated tests, and packaging passed. "
               "No in-game testing is performed; runtime compatibility is not certified.\n"
           )
@@ -157,7 +182,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
-      - name: Download the validated JAR
+      - name: Download the validated JARs
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: MinePanel-${{ github.sha }}
@@ -165,16 +190,17 @@ jobs:
 
       - name: Create the release
         run: |
-          jar=$(find release -name "MinePanel-$TAG.jar")
+          mapfile -t jars < <(find release -name "MinePanel-$TAG-*-mc*.jar" | sort)
           notes=$(find release -name release-notes.md)
-          test -s "$jar"
+          test "${#jars[@]}" -gt 0
+          for jar in "${jars[@]}"; do test -s "$jar"; done
           test -s "$notes"
           if gh release view "$TAG" > /dev/null 2>&1; then
             echo "::error::Release $TAG already exists; refusing to overwrite it."
             exit 1
           fi
           # Stay a draft until the JAR has uploaded, then publish.
-          gh release create "$TAG" "$jar" \
+          gh release create "$TAG" "${jars[@]}" \
             --target "$GITHUB_SHA" --draft --generate-notes \
             --title "MinePanel $TAG" --notes-file "$notes"
           gh release edit "$TAG" --draft=false --latest

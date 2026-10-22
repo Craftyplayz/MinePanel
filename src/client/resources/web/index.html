@@ -74,6 +74,7 @@
       <div class="tile-body inventory-body" id="inventory-body">
         <p class="held" id="held-value">Held item unavailable</p>
         <div class="inventory-grid" id="inventory-grid" aria-label="Inventory"></div>
+        <div class="inventory-accessories" id="inventory-accessories" aria-label="Accessories" hidden></div>
       </div>
     </article>
     <article class="tile" id="tile-statistics" data-tile="statistics" aria-labelledby="statistics-title">
@@ -212,6 +213,30 @@
         </form>
         <div class="afk-timer"><span class="afk-timer-label">AFK for</span><strong id="afk-timer">—</strong></div>
         <div class="afk-crawl" id="afk-crawl" aria-label="Random statistics"></div>
+      </div>
+    </article>
+    <article class="tile" id="tile-backpack" data-tile="backpack" aria-labelledby="backpack-title">
+      <header class="tile-head" id="head-backpack"><h2 id="backpack-title">Personal backpack</h2>
+        <span class="head-actions"><span class="badge muted" id="backpack-status">Unavailable</span></span></header>
+      <div class="tile-body column backpack-body" id="backpack-body">
+        <p class="hint" id="backpack-message">Join a world to see your backpack.</p>
+        <div class="backpack-grid" id="backpack-grid" aria-label="Backpack contents"></div>
+      </div>
+    </article>
+    <article class="tile" id="tile-backpacks" data-tile="backpacks" aria-labelledby="backpacks-title">
+      <header class="tile-head" id="head-backpacks"><h2 id="backpacks-title">Backpacks</h2>
+        <span class="head-actions"><span class="badge muted" id="backpacks-status">Unavailable</span></span></header>
+      <div class="tile-body column">
+        <div class="history-filters backpacks-tools">
+          <label>Search <input id="backpacks-search" type="search" placeholder="Search backpacks or items" maxlength="100"></label>
+          <button type="button" class="button quiet small" id="backpacks-last" aria-pressed="true">Last opened</button>
+        </div>
+        <p class="empty-note" id="backpacks-note" hidden>On a server, only backpacks you've opened are listed, as you last saw them.</p>
+        <div class="backpacks-list scroll" id="backpacks-list" aria-label="Backpacks"></div>
+        <div class="backpacks-view" id="backpacks-view">
+          <p class="hint" id="backpacks-message">Join a world to see your backpacks.</p>
+          <div class="backpack-grid" id="backpacks-grid" aria-label="Selected backpack contents"></div>
+        </div>
       </div>
     </article>
     <article class="tile" id="tile-pickups" data-tile="pickups" aria-labelledby="pickups-title">

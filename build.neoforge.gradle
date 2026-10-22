@@ -1,0 +1,138 @@
+// NeoForge: Stonecutter runs this script once per NeoForge node (versions/<minecraft>-neoforge/), against the shared
+// src/. ModDevGradle compiles against Mojang names, which NeoForge also uses at runtime, so nothing is remapped.
+plugins {
+    id 'net.neoforged.moddev' version '2.0.147'
+}
+
+def minecraftVersion = stonecutter.current.version
+def javaVersion = project.java_version as int
+
+version = "${project.mod_version}+${minecraftVersion}"
+group = project.maven_group
+
+base {
+    archivesName = 'minepanel-neoforge'
+}
+
+// Same layout as Fabric's split source sets: client code sees main, never the other way round.
+sourceSets {
+    client {
+        compileClasspath += main.output
+        runtimeClasspath += main.output
+    }
+    // The service tests serve the dashboard from web/, which is in the client resources.
+    test {
+        runtimeClasspath += client.output
+    }
+}
+
+configurations {
+    clientCompileOnly.extendsFrom compileOnly
+}
+
+neoForge {
+    version = project.neoforge_version
+    addModdingDependenciesTo sourceSets.client
+    // The service tests use Gson and other libraries that ship with the game.
+    addModdingDependenciesTo sourceSets.test
+
+    mods {
+        minepanel {
+            sourceSet sourceSets.main
+            sourceSet sourceSets.client
+        }
+    }
+
+    runs {
+        client {
+            client()
+            gameDirectory = rootProject.file('run/neoforge')
+        }
+    }
+}
+
+repositories {
+    exclusiveContent {
+        forRepository {
+            maven { url = 'https://maven.theillusivec4.top/' }
+        }
+        filter {
+            includeGroup 'top.theillusivec4.curios'
+        }
+    }
+    exclusiveContent {
+        forRepository {
+            maven { url = 'https://api.modrinth.com/maven' }
+        }
+        filter {
+            includeGroup 'maven.modrinth'
+        }
+    }
+}
+
+dependencies {
+    // Optional mods: compile-time only, never bundled; only their own packages in MinePanel may use them.
+    compileOnly("maven.modrinth:sophisticated-backpacks:${project.sophisticated_backpacks_version}") { transitive = false }
+    compileOnly("maven.modrinth:sophisticated-core:${project.sophisticated_core_version}") { transitive = false }
+    compileOnly("maven.modrinth:forgematica:${project.forgematica_version}") { transitive = false }
+    compileOnly("maven.modrinth:mafglib:${project.mafglib_version}") { transitive = false }
+    compileOnly("top.theillusivec4.curios:curios-neoforge:${project.curios_version}:api") { transitive = false }
+}
+
+processResources {
+    exclude 'fabric.mod.json'
+    def expansions = [version: project.version.toString(), minecraft: project.minecraft_range,
+                      neoforge: project.neoforge_version, litematica_minimum: project.forgematica_version,
+                      sophisticatedbackpacks_minimum: project.sophisticatedbackpacks_minimum]
+    inputs.properties expansions
+    filesMatching('META-INF/neoforge.mods.toml') {
+        expand expansions
+    }
+}
+
+processClientResources {
+    // Mixins whose target classes don't exist on this Minecraft version (their sources are //? if'd out too).
+    def excludedMixins = project.findProperty('excluded_mixins')?.toString()?.tokenize(',') ?: []
+    inputs.property 'java', javaVersion
+    inputs.property 'excludedMixins', excludedMixins
+    filesMatching('minepanel.client.mixins.json') {
+        expand java: javaVersion
+        // Each mixin is on its own line, and none of these is the last entry, so the JSON stays valid.
+        filter { line -> excludedMixins.any { line.trim() == '"' + it + '",' } ? null : line }
+    }
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(javaVersion)
+    sourceCompatibility = JavaVersion.toVersion(javaVersion)
+    targetCompatibility = JavaVersion.toVersion(javaVersion)
+    withSourcesJar()
+}
+
+tasks.jar {
+    from sourceSets.client.output
+    manifest {
+        attributes('Implementation-Version': project.version)
+    }
+}
+
+tasks.named('sourcesJar') {
+    from sourceSets.client.allSource
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = javaVersion
+}
+
+ext.modJar = tasks.named('jar')
+ext.loaderMetadata = 'META-INF/neoforge.mods.toml'
+ext.checkMetadata = { java.util.jar.JarFile jar ->
+    if (jar.getEntry('fabric.mod.json') != null) {
+        throw new GradleException('NeoForge JAR must not contain fabric.mod.json')
+    }
+    def toml = jar.getInputStream(jar.getEntry('META-INF/neoforge.mods.toml')).text
+    if (!toml.contains('modId="minepanel"') || !toml.contains('config="minepanel.client.mixins.json"')) {
+        throw new GradleException('neoforge.mods.toml must declare minepanel and its mixin config')
+    }
+}
+apply from: rootProject.file('gradle/shared.gradle')

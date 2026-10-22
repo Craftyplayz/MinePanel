@@ -60,7 +60,11 @@ public final class AdvancementsCollector {
                 }
                 remaining.sort(Comparator.naturalOrder());
             }
+            //? if >=26.1 {
             ItemStack icon = display.getIcon().create();
+            //?} else {
+            /*ItemStack icon = display.getIcon();
+            *///?}
             entries.add(new AdvancementsSnapshot.Entry(node.holder().id().toString(), tab,
                     bounded(display.getTitle().getString()), description(display.getDescription().getString()),
                     display.getType().getSerializedName(), iconKey(icon, icons), icon.hasFoil(), display.isHidden(),

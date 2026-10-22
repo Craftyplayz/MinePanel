@@ -61,6 +61,11 @@ final class RegistriesCollector {
         for (var type : BuiltInRegistries.ENTITY_TYPE) {
             Identifier id = BuiltInRegistries.ENTITY_TYPE.getKey(type);
             Item egg = BuiltInRegistries.ITEM.getOptional(id.withSuffix("_spawn_egg")).orElse(Items.AIR);
+            //? if <26.1 {
+            /*// Mods name their eggs freely; the game's lookup also finds NeoForge's DeferredSpawnEggItem.
+            Item registered = net.minecraft.world.item.SpawnEggItem.byId(type);
+            if (registered != null) egg = registered;
+            *///?}
             add(entities, id, type.getDescription(), egg == Items.AIR ? null : icons.deferredKey(new ItemStack(egg)));
         }
         List<Entry> effects = new ArrayList<>();
@@ -68,7 +73,11 @@ final class RegistriesCollector {
             add(effects, BuiltInRegistries.MOB_EFFECT.getKey(effect), effect.getDisplayName(), null);
         }
         List<Entry> biomes = new ArrayList<>();
+        //? if >=26.1 {
         for (Identifier id : level.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.BIOME).keySet()) {
+        //?} else {
+        /*for (Identifier id : level.registryAccess().registryOrThrow(net.minecraft.core.registries.Registries.BIOME).keySet()) {
+        *///?}
             add(biomes, id, Component.literal(WorldCollector.biomeName(id)), null);
         }
         List<Entry> stats = new ArrayList<>();

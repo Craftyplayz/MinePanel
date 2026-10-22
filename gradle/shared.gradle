@@ -1,0 +1,130 @@
+// Tests, checks, release validation and installMod, shared by every Minecraft version and loader. The loader's build
+// script sets these before applying this file:
+//   modJar          the task producing the installable JAR (remapJar/jar on Fabric, jar on NeoForge)
+//   loaderMetadata  the loader's metadata file inside the JAR
+//   checkMetadata   closure(JarFile) that throws a GradleException when that metadata is wrong
+
+def serviceTest = tasks.register('serviceTest', JavaExec) {
+    dependsOn tasks.testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.craftyplayz.minepanel.service.LocalDashboardServerTest'
+    workingDir = rootProject.projectDir
+}
+
+def frontendSyntax = tasks.register('frontendSyntax', Exec) {
+    workingDir = rootProject.projectDir
+    // node --check accepts one file, so check each dashboard script in turn.
+    commandLine 'node', '-e', "for (const file of ['protocol.js', 'layout.js', 'rules.js', 'app.js', 'player-links.js', 'features.js', 'model.js']) " +
+            "require('child_process').execFileSync(process.execPath, ['--check', 'src/client/resources/web/' + file], { stdio: 'inherit' })"
+}
+
+def frontendTest = tasks.register('frontendTest', Exec) {
+    workingDir = rootProject.projectDir
+    commandLine 'node', '--test', 'src/test/js/dashboard.test.js'
+}
+
+// Java tests are main()-based and run through serviceTest, so the JUnit task finds none.
+tasks.named('test') {
+    failOnNoDiscoveredTests = false
+}
+
+// Optional mods: only their adapter package may import them, so their absence can never break class loading elsewhere.
+// Package → import prefix (Litematica/Forgematica, Sophisticated Backpacks/Core, Curios).
+def isolatedMods = ['litematica': 'fi.dy.masa.', 'backpacks': 'net.p3pp3rf1y.', 'curios': 'top.theillusivec4.']
+def litematicaIsolation = tasks.register('litematicaIsolation') {
+    def sources = rootProject.fileTree('src') { include '**/*.java' }
+    inputs.files(sources)
+    doLast {
+        isolatedMods.each { pkg, prefix ->
+            def pattern = ~("(?m)^import\\s+(static\\s+)?" + java.util.regex.Pattern.quote(prefix))
+            def offenders = sources.files.findAll { file ->
+                !file.path.replace(File.separator, '/').contains("/dev/craftyplayz/minepanel/${pkg}/")
+                        && file.text =~ pattern
+            }
+            if (!offenders.isEmpty()) {
+                throw new GradleException("Only dev.craftyplayz.minepanel.${pkg} may import ${prefix}*: ${offenders*.name}")
+            }
+        }
+    }
+}
+
+tasks.named('check') {
+    dependsOn serviceTest, frontendSyntax, frontendTest, litematicaIsolation
+}
+
+def jarFile = modJar.flatMap { it.archiveFile }
+def metadataEntry = loaderMetadata
+def metadataCheck = checkMetadata
+
+tasks.register('releaseBuild') {
+    group = 'build'
+    description = 'Builds, tests, and validates the installable MinePanel release JAR.'
+    dependsOn tasks.build
+    def releaseDir = rootProject.layout.buildDirectory.dir('release')
+    doLast {
+        def artifact = jarFile.get().asFile
+        if (!artifact.isFile()) {
+            throw new GradleException("Release JAR was not created: ${artifact}")
+        }
+        def jar = new java.util.jar.JarFile(artifact)
+        try {
+            [metadataEntry, 'minepanel.client.mixins.json', 'web/index.html', 'web/app.js', 'web/styles.css',
+             'web/protocol.js', 'web/layout.js', 'web/model.js',
+             'dev/craftyplayz/minepanel/MinePanelClient.class',
+             'dev/craftyplayz/minepanel/mixin/StatisticsSyncMixin.class',
+             'dev/craftyplayz/minepanel/mixin/BlockChangeMixin.class',
+             'dev/craftyplayz/minepanel/build/BuildTracker.class'].each { entry ->
+                if (jar.getEntry(entry) == null) {
+                    throw new GradleException("Release JAR is missing ${entry}")
+                }
+            }
+            // Optional integrations (Litematica and MaLiLib are LGPL-3.0) are compiled against, never shipped.
+            def bundled = jar.entries().toList().findAll { it.name.startsWith('fi/dy/masa/') || it.name.contains('litematica-fabric') || it.name.contains('malilib-fabric') }
+            if (!bundled.isEmpty()) {
+                throw new GradleException("Release JAR bundles Litematica/MaLiLib: ${bundled*.name.take(5)}")
+            }
+            metadataCheck(jar)
+        } finally {
+            jar.close()
+        }
+        def destination = releaseDir.get().file(artifact.name).asFile
+        destination.parentFile.mkdirs()
+        java.nio.file.Files.copy(artifact.toPath(), destination.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        logger.lifecycle("Validated release artifact: ${destination}")
+    }
+}
+
+// Local testing: builds the JAR (no tests) and swaps it into a Minecraft instance's mods folder. Set the folder once in
+// ~/.gradle/gradle.properties as minepanelModsDir=..., pass -PminepanelModsDir=..., or set MINEPANEL_MODS_DIR.
+// Only one build installs (each would delete the other's JAR): minepanelTarget=<minecraft>-<loader> (for example
+// 1.21.1-neoforge), else the Stonecutter active one.
+def target = stonecutter.current.project
+def installHere = providers.gradleProperty('minepanelTarget').map { it == target }
+        .orElse(stonecutter.current.isActive)
+tasks.register('installMod') {
+    group = 'build'
+    description = 'Builds the mod JAR and copies it into the mods folder named by minepanelModsDir.'
+    onlyIf { installHere.get() }
+    dependsOn modJar
+    def modsDir = providers.gradleProperty('minepanelModsDir').orElse(providers.environmentVariable('MINEPANEL_MODS_DIR'))
+    outputs.upToDateWhen { false }
+    doLast {
+        if (!modsDir.isPresent()) {
+            throw new GradleException('Set minepanelModsDir in ~/.gradle/gradle.properties (or pass -PminepanelModsDir=<mods folder>)')
+        }
+        def dir = new File(modsDir.get())
+        if (!dir.isDirectory()) {
+            throw new GradleException("Mods folder does not exist: ${dir}")
+        }
+        // Remove earlier MinePanel builds and releases so the loader doesn't load two copies.
+        dir.listFiles().findAll { it.isFile() && it.name ==~ /(?i)minepanel-.*\.jar/ }.each { old ->
+            if (!old.delete()) {
+                throw new GradleException("Could not remove ${old} (is Minecraft still running?)")
+            }
+        }
+        def artifact = jarFile.get().asFile
+        def destination = new File(dir, artifact.name)
+        java.nio.file.Files.copy(artifact.toPath(), destination.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        logger.lifecycle("Installed ${destination}")
+    }
+}

@@ -12,6 +12,7 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.contents.TranslatableContents;
+//? if >=26.1
 import net.minecraft.world.attribute.EnvironmentAttributes;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
@@ -78,12 +79,21 @@ final class SensorsCollector {
     }
 
     private Sensors read(Minecraft minecraft, ClientLevel level, Player player, SensorNeeds needs, long now) {
+        //? if >=26.1 {
         int moonPhase = level.environmentAttributes().getDimensionValue(EnvironmentAttributes.MOON_PHASE).index();
         var spawn = level.getRespawnData();
         Integer spawnDistance = spawn.dimension().equals(level.dimension())
                 ? (int) Math.round(Math.hypot(player.getX() - (spawn.pos().getX() + 0.5),
                         player.getZ() - (spawn.pos().getZ() + 0.5)))
                 : null;
+        //?} else {
+        /*int moonPhase = level.getMoonPhase();
+        // The client only knows the world spawn, which is in the Overworld.
+        BlockPos spawn = level.getSharedSpawnPos();
+        Integer spawnDistance = level.dimension() == net.minecraft.world.level.Level.OVERWORLD
+                ? (int) Math.round(Math.hypot(player.getX() - (spawn.getX() + 0.5), player.getZ() - (spawn.getZ() + 0.5)))
+                : null;
+        *///?}
         BlockPos feet = player.blockPosition();
         // As Entity.isInRain (not public): rain reaches the feet or the top of the player.
         boolean inRain = level.isRainingAt(feet)
@@ -129,12 +139,16 @@ final class SensorsCollector {
             case BLOCK -> "blocking";
             case BOW -> "bow";
             case CROSSBOW -> "crossbow";
+            //? if >=26.1 {
             case TRIDENT -> "trident";
             case SPEAR -> "spear";
+            case BUNDLE -> "bundle";
+            //?} else {
+            /*case SPEAR -> "trident"; // tridents used the spear animation before spears existed
+            *///?}
             case SPYGLASS -> "spyglass";
             case TOOT_HORN -> "horn";
             case BRUSH -> "brush";
-            case BUNDLE -> "bundle";
             default -> null;
         };
     }

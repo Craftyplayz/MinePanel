@@ -956,6 +956,119 @@ function renderMaterials(rows) {
   }
 }
 
+// --------------------------------------------------------------------------------------------------- Backpacks
+
+/** A grid that draws a backpack slot by slot; the Personal backpack and Backpacks panels each have one. */
+function backpackGrid(body, grid) {
+  const view = { body, grid, slots: [], count: 0, key: undefined };
+  if (typeof ResizeObserver === "function") new ResizeObserver(() => layoutBackpack(view)).observe(body);
+  return view;
+}
+
+/** Every slot of {@code contents} in order, empty ones in place. */
+function drawBackpack(view, contents) {
+  while (view.slots.length < contents.length) view.slots.push(createSlot(view.grid));
+  view.slots.forEach((slot, index) => {
+    setHidden(slot.element, index >= contents.length);
+    renderSlot(slot, contents[index] ?? null, false);
+  });
+  view.count = contents.length;
+  layoutBackpack(view);
+}
+
+/** Big backpacks are 12 slots wide in game, smaller ones 9; slots shrink until every row fits the panel. */
+function layoutBackpack(view) {
+  const columns = view.count > 81 ? 12 : 9;
+  const rows = Math.max(1, Math.ceil(view.count / columns));
+  const width = view.body.clientWidth - 24;
+  const height = view.body.clientHeight - 20;
+  const slot = Math.max(12, Math.min(48, Math.floor(Math.min((width - 2 * (columns - 1)) / columns,
+    (height - 2 * (rows - 1)) / rows))));
+  const key = `${columns}x${slot}`;
+  if (key === view.key) return;
+  view.key = key;
+  view.grid.style.setProperty("--columns", String(columns));
+  view.grid.style.setProperty("--slot", `${slot}px`);
+}
+
+const backpackParts = { status: $("#backpack-status"), message: $("#backpack-message"),
+  grid: backpackGrid($("#backpack-body"), $("#backpack-grid")) };
+
+/** The worn backpack: the first container in an accessory slot (Curios), else a container worn in the chest slot. */
+function wornBackpack(inventory) {
+  const container = item => item && !item.empty && Array.isArray(item.contents);
+  return inventory?.accessories?.find(container) ?? (container(inventory?.equipment.chest) ? inventory.equipment.chest : null);
+}
+
+function renderBackpack(player) {
+  const backpack = wornBackpack(player?.available ? player.inventory : null);
+  writeText(backpackParts.status, !player?.available ? "Unavailable" : backpack ? backpack.name : "None worn");
+  writeText(backpackParts.message, !player?.available ? "Join a world to see your backpack."
+    : !backpack ? "Wear a backpack (in a Curios slot or the chest slot) to see it here."
+      : backpack.contentsUnknown ? "Contents not known yet. Open the backpack once in game." : "");
+  setHidden(backpackParts.message, Boolean(backpack) && !backpack.contentsUnknown);
+  drawBackpack(backpackParts.grid, backpack && !backpack.contentsUnknown ? backpack.contents : []);
+}
+
+// The Backpacks panel: every backpack the mod knows of, searchable, and the selected one (by default the one opened
+// last) drawn slot by slot. The selection is the panel's "selected" setting, so it is saved per profile.
+const backpacksParts = { status: $("#backpacks-status"), search: $("#backpacks-search"), last: $("#backpacks-last"),
+  note: $("#backpacks-note"), list: $("#backpacks-list"), message: $("#backpacks-message"),
+  grid: backpackGrid($("#backpacks-view"), $("#backpacks-grid")) };
+let backpacksListKey;
+
+backpacksParts.search.addEventListener("input", () => renderBackpacks(currentPlayerState));
+backpacksParts.last.addEventListener("click", () => changeSettings("backpacks", { selected: "last" }));
+
+const backpackLabel = name => name || "Backpack";
+/** What a search matches: the backpack's name, who opened it, and the ids and names of the items inside. */
+const backpackText = entry => [backpackLabel(entry.name), entry.player ?? "", ...entry.items,
+  ...entry.items.map(id => knownId("item", id)?.name ?? "")].join(" ").toLowerCase();
+
+function renderBackpacks(player) {
+  const backpacks = player?.available ? player.backpacks : null;
+  const selected = displaySettings().backpacks.selected;
+  const uuid = selected === "last" ? backpacks?.last ?? null : selected;
+  const shown = backpacks?.shown.find(entry => entry.uuid === uuid) ?? null;
+  const listed = backpacks?.list.find(entry => entry.uuid === uuid) ?? null;
+  writeText(backpacksParts.status, !backpacks ? "Unavailable" : uuid === null ? "None"
+    : backpackLabel(shown?.name || listed?.name));
+  backpacksParts.last.setAttribute("aria-pressed", String(selected === "last"));
+  setHidden(backpacksParts.note, backpacks?.source !== "remembered");
+
+  const query = backpacksParts.search.value.trim().toLowerCase();
+  const now = Date.now();
+  const rows = (backpacks?.list ?? []).filter(entry => !query || backpackText(entry).includes(query)).map(entry => ({
+    uuid: entry.uuid, name: backpackLabel(entry.name),
+    meta: [entry.player, entry.openedAt === null ? null : `opened ${formatAgo(now - entry.openedAt)}`]
+      .filter(Boolean).join(" · "),
+    fill: entry.slots ? `${entry.filled}/${entry.slots}` : "", selected: entry.uuid === uuid }));
+  const key = JSON.stringify(rows);
+  if (key !== backpacksListKey) {
+    backpacksListKey = key;
+    backpacksParts.list.replaceChildren(...rows.map(row => {
+      const element = create("button", "backpacks-row");
+      element.type = "button";
+      element.setAttribute("aria-pressed", String(row.selected));
+      element.appendChild(create("span", "label", row.name));
+      element.appendChild(create("span", "fill", row.fill));
+      element.appendChild(create("span", "meta", row.meta));
+      element.addEventListener("click", () => changeSettings("backpacks", { selected: row.uuid }));
+      return element;
+    }));
+  }
+
+  const message = !player?.available ? "Join a world to see your backpacks."
+    : !backpacks ? "Needs Sophisticated Backpacks."
+      : backpacks.list.length === 0 && !shown ? "No backpacks found yet."
+        : uuid === null ? "Pick a backpack from the list."
+          : !shown ? "Loading…"
+            : shown.contentsUnknown ? "Contents not known yet. Open the backpack once in game." : "";
+  writeText(backpacksParts.message, message);
+  setHidden(backpacksParts.message, message === "");
+  drawBackpack(backpacksParts.grid, shown && !shown.contentsUnknown ? shown.contents : []);
+}
+
 function renderBuild(player) {
   const build = player?.available ? player.build : null;
   const placement = build?.placement ?? null;
@@ -1316,6 +1429,7 @@ function windowItem(player, source, slot) {
     return player.enderChest ? { name: "Ender Chest", contents: player.enderChest.slots, enderChest: true } : null;
   }
   if (source === "enderchest-item") return player.enderChest?.slots[slot] ?? null;
+  if (source === "accessory") return player.inventory.accessories?.[slot] ?? null;
   return slot < 36 ? player.inventory.slots[slot] : player.inventory.equipment[EQUIPMENT_INDEX[slot]] ?? null;
 }
 
@@ -1348,7 +1462,11 @@ function syncPinnedWindows() {
     ...openWindows.filter(entry => !entry.pinned && !saved.some(pin => same(pin, entry))),
     ...saved.map(pin => {
       const open = openWindows.find(entry => entry.pinned && same(entry, pin));
-      return open ? { ...open, x: pin.x, y: pin.y } : { ...pin, pinned: true };
+      if (!open) return { ...pin, pinned: true };
+      // The same entry, not a copy: its window's close, pin and drag handlers hold this object.
+      open.x = pin.x;
+      open.y = pin.y;
+      return open;
     })
   ];
   renderWindows(currentPlayerState);
@@ -1412,7 +1530,8 @@ function renderWindows(player) {
     pin.setAttribute("aria-pressed", String(entry.pinned));
     pin.title = entry.pinned ? "Unpin" : "Pin: keep this window open";
     entry.element.className = `float-window${entry.pinned ? " pinned" : ""}${current ? "" : " stale"}`;
-    writeText(note, current ? (entry.source === "enderchest" ? `As of ${formatAgo(Date.now() - player.enderChest.seenAt)}` : "")
+    writeText(note, current ? (entry.source === "enderchest" ? `As of ${formatAgo(Date.now() - player.enderChest.seenAt)}`
+      : current.contentsUnknown ? "Contents not known yet. Open the backpack once in game." : "")
       : entry.source === "enderchest" ? "Open your ender chest in game to see its contents."
         : "Not in your inventory any more; showing what it last held.");
     const contents = shown?.contents ?? [];
@@ -3571,6 +3690,8 @@ featureHooks.render.push(player => {
   renderAfk(player);
   renderPickups(player);
   renderBuild(player);
+  renderBackpack(player);
+  renderBackpacks(player);
   renderAdvancements(player);
   checkAdvancementPopup(player);
   renderVillagers(player);
@@ -3588,6 +3709,7 @@ featureHooks.layout.push(() => {
   renderPickups(currentPlayerState);
   renderPickupSettings();
   renderBuild(currentPlayerState);
+  renderBackpacks(currentPlayerState);
   renderAdvancements(currentPlayerState);
   renderAdvancementSettings();
   syncPinnedWindows();

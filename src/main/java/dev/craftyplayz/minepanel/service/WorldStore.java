@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import dev.craftyplayz.minepanel.telemetry.ItemSnapshot;
 import dev.craftyplayz.minepanel.telemetry.VillagerSnapshot;
 
 import java.io.IOException;
@@ -25,7 +26,7 @@ import java.util.regex.Pattern;
 
 /**
  * Remembers per-world data that outlives a session: villagers the player has traded with and the contents of their
- * ender chest. Each world (server address or singleplayer world name) has its own file under
+ * ender chest and of backpacks they opened. Each world (server address or singleplayer world name) has its own file under
  * {@code config/minepanel/worlds/}. Items are stored as the JSON the game's own item codec produces, so they come
  * back exactly (enchanted books keep their enchantments); this class treats them as opaque values.
  *
@@ -73,11 +74,29 @@ public final class WorldStore {
         }
     }
 
+    /**
+     * The non-empty stacks of a backpack (Sophisticated Backpacks) as last seen in its own screen, keyed by the
+     * backpack's storage UUID. Item values are opaque JSON objects, at most {@link ItemSnapshot#MAX_CONTENTS}.
+     */
+    public record Backpack(String uuid, long seenAt, List<JsonElement> items) {
+        public Backpack {
+            items = List.copyOf(items);
+            if (uuid == null || !VillagerSnapshot.UUID.matcher(uuid).matches()
+                    || items.size() > ItemSnapshot.MAX_CONTENTS) {
+                throw new IllegalArgumentException("Invalid stored backpack");
+            }
+            items.forEach(WorldStore::item);
+        }
+    }
+
+    public static final int MAX_BACKPACKS = 64;
+
     private final Path directory;
     private String worldKey;
     private Path file;
     private final Map<String, Villager> villagers = new LinkedHashMap<>();
     private EnderChest enderChest;
+    private final Map<String, Backpack> backpacks = new LinkedHashMap<>();
     private long revision;
     private boolean dirty;
 
@@ -94,6 +113,7 @@ public final class WorldStore {
             file = key == null ? null : directory.resolve(fileName(key));
             villagers.clear();
             enderChest = null;
+            backpacks.clear();
             dirty = false;
             revision++;
             target = file;
@@ -156,6 +176,25 @@ public final class WorldStore {
     public synchronized void enderChest(EnderChest contents) {
         if (worldKey == null || contents.slots().equals(enderChest == null ? null : enderChest.slots())) return;
         enderChest = contents;
+        changed();
+    }
+
+    public synchronized Backpack backpack(String uuid) {
+        return backpacks.get(uuid);
+    }
+
+    /** Every remembered backpack in this world, the one seen longest ago first. */
+    public synchronized List<Backpack> backpacks() {
+        return List.copyOf(backpacks.values());
+    }
+
+    /** Remembers a backpack's contents; the one seen longest ago is forgotten beyond {@link #MAX_BACKPACKS}. */
+    public synchronized void putBackpack(Backpack backpack) {
+        Backpack known = backpacks.get(backpack.uuid());
+        if (worldKey == null || known != null && known.items().equals(backpack.items())) return;
+        backpacks.remove(backpack.uuid());
+        if (backpacks.size() >= MAX_BACKPACKS) backpacks.remove(backpacks.keySet().iterator().next());
+        backpacks.put(backpack.uuid(), backpack);
         changed();
     }
 
@@ -237,6 +276,17 @@ public final class WorldStore {
             chest.add("slots", slots);
             root.add("enderChest", chest);
         }
+        JsonArray packs = new JsonArray();
+        for (Backpack backpack : backpacks.values()) {
+            JsonObject entry = new JsonObject();
+            entry.addProperty("uuid", backpack.uuid());
+            entry.addProperty("seenAt", backpack.seenAt());
+            JsonArray items = new JsonArray();
+            backpack.items().forEach(items::add);
+            entry.add("items", items);
+            packs.add(entry);
+        }
+        root.add("backpacks", packs);
         return root;
     }
 
@@ -276,6 +326,20 @@ public final class WorldStore {
                 enderChest = new EnderChest(chest.get("seenAt").getAsLong(), slots);
             } catch (RuntimeException malformed) {
                 LOGGER.fine("Skipped a malformed saved ender chest.");
+            }
+        }
+        if (root.has("backpacks") && root.get("backpacks").isJsonArray()) {
+            for (JsonElement element : root.getAsJsonArray("backpacks")) {
+                try {
+                    JsonObject entry = element.getAsJsonObject();
+                    List<JsonElement> items = new ArrayList<>();
+                    entry.getAsJsonArray("items").forEach(items::add);
+                    Backpack backpack = new Backpack(entry.get("uuid").getAsString(), entry.get("seenAt").getAsLong(),
+                            items);
+                    if (backpacks.size() < MAX_BACKPACKS) backpacks.put(backpack.uuid(), backpack);
+                } catch (RuntimeException malformed) {
+                    LOGGER.fine("Skipped a malformed saved backpack.");
+                }
             }
         }
     }

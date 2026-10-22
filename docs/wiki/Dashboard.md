@@ -40,13 +40,14 @@ Hover over any item (inventory, pickups, materials, villager trades) to see its 
 
 ## Item windows
 
-Click a **shulker box** or **bundle** in the Inventory panel to open a window showing what's inside. The **ender chest** slot in the Inventory panel opens your ender chest's contents.
+Click a **shulker box**, **bundle** or [backpack](Integrations.md#sophisticated-backpacks) in the Inventory panel to open a window showing what's inside. The **ender chest** slot in the Inventory panel opens your ender chest's contents.
 
 - A window follows the item: if you move the shulker box to another slot it still shows the same box, and it says so if the item is gone.
 - Shulker boxes inside the ender chest open their own windows.
 - **📌 Pin** keeps a window open. You can have several pinned windows; only one unpinned window is open at a time. Pinned windows are remembered with your layout.
 - **×** closes a window.
 - The ender chest shows what it held **the last time you opened it in game**, with how long ago that was. Until you open it once in a world, it asks you to.
+- On a server, a backpack shows what it held the last time you opened it. Until then its window says *Contents not known yet*.
 
 ## Player menu
 

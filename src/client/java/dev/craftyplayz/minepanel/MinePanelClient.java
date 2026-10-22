@@ -11,6 +11,7 @@ import dev.craftyplayz.minepanel.telemetry.TelemetryStore;
 import dev.craftyplayz.minepanel.telemetry.StatisticsTracker;
 import dev.craftyplayz.minepanel.telemetry.GameplayTracker;
 import dev.craftyplayz.minepanel.telemetry.GameplayHistory;
+//? if fabric {
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
@@ -20,51 +21,87 @@ import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.fabric.api.event.client.player.ClientPlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
-import net.fabricmc.fabric.api.resource.v1.ResourceLoader;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.resources.Identifier;
+import net.minecraft.server.packs.PackType;
+import net.minecraft.world.InteractionResult;
+//?}
+//? if fabric && >=26.1 {
+import net.fabricmc.fabric.api.resource.v1.ResourceLoader;
+//?}
+//? if fabric && <26.1 {
+/*import net.fabricmc.fabric.api.resource.ResourceManagerHelper;
+import net.fabricmc.fabric.api.resource.SimpleSynchronousResourceReloadListener;
+import net.minecraft.server.packs.resources.ResourceManager;
+*///?}
+//? if neoforge {
+/*import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.state.BlockState;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.bus.api.IEventBus;
+import net.neoforged.fml.common.Mod;
+import net.neoforged.fml.loading.FMLPaths;
+import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
+import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.neoforge.client.event.RegisterClientReloadListenersEvent;
+import net.neoforged.neoforge.client.event.ScreenEvent;
+import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.GameShuttingDownEvent;
+import net.neoforged.neoforge.event.entity.player.AttackEntityEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
+import net.neoforged.neoforge.event.level.ChunkEvent;
+*///?}
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
-import net.minecraft.resources.Identifier;
-import net.minecraft.server.packs.PackType;
 import net.minecraft.server.packs.resources.ResourceManagerReloadListener;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.world.InteractionResult;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 
 import java.io.IOException;
 import java.net.BindException;
 import java.net.URI;
+import java.nio.file.Path;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+//? if fabric {
 public final class MinePanelClient implements ClientModInitializer {
+//?} else {
+/*@Mod(value = "minepanel", dist = Dist.CLIENT)
+public final class MinePanelClient {
+*///?}
     private static final Logger LOGGER = Logger.getLogger("MinePanel");
+    //? if fabric {
+    private static final Path GAME_DIR = FabricLoader.getInstance().getGameDir();
+    private static final Path CONFIG_DIR = FabricLoader.getInstance().getConfigDir();
+    //?} else {
+    /*private static final Path GAME_DIR = FMLPaths.GAMEDIR.get();
+    private static final Path CONFIG_DIR = FMLPaths.CONFIGDIR.get();
+    *///?}
     private static final int MILLIS_PER_TICK = 50;
     private static final long STATS_INTERVAL_NANOS = 3_000_000_000L;
     private final TelemetryStore telemetry = new TelemetryStore();
     private final StatisticsTracker statistics = new StatisticsTracker();
     private final IconRenderer icons = new IconRenderer();
     private final EffectsCollector effects = new EffectsCollector();
-    private final HistoryArchive archive = new HistoryArchive(
-            FabricLoader.getInstance().getGameDir().resolve("minepanel").resolve("history"));
+    private final HistoryArchive archive = new HistoryArchive(GAME_DIR.resolve("minepanel").resolve("history"));
     private final GameplayTracker history = new GameplayTracker(archive::append);
     private final PortalTracker portals = new PortalTracker();
     private final XpTracker experience = new XpTracker();
     private final PickupTracker pickups = new PickupTracker();
     private final MotionCollector motion = new MotionCollector();
     private final AdvancementsCollector advancements = new AdvancementsCollector();
-    private final WorldStore worldStore = new WorldStore(
-            FabricLoader.getInstance().getConfigDir().resolve("minepanel").resolve("worlds"));
+    private final WorldStore worldStore = new WorldStore(CONFIG_DIR.resolve("minepanel").resolve("worlds"));
     private final WorldDataCollector worldData = new WorldDataCollector(worldStore);
-    private final LayoutStore layouts = new LayoutStore(
-            FabricLoader.getInstance().getConfigDir().resolve("minepanel").resolve("layout.json"));
+    private final LayoutStore layouts = new LayoutStore(CONFIG_DIR.resolve("minepanel").resolve("layout.json"));
     private final ClientActivity activity = new ClientActivity(history, portals, this::pickedUp);
     private final BuildProgressCollector build = new BuildProgressCollector();
     private final SensorsCollector sensors = new SensorsCollector();
@@ -88,58 +125,16 @@ public final class MinePanelClient implements ClientModInitializer {
         return thread;
     });
 
+    //? if fabric {
     @Override
     public void onInitializeClient() {
         lifecycleExecutor.execute(this::startDashboard);
-        ResourceLoader.get(PackType.CLIENT_RESOURCES).registerReloadListener(
-                Identifier.fromNamespaceAndPath("minepanel", "item_icons"),
-                (ResourceManagerReloadListener) manager -> {
-                    icons.reset();
-                    MinecraftStatisticsCollector.clearNames();
-                });
+        registerReloadListener();
         MinecraftStatisticsCollector.onKills(activity::killStatistics);
-        ClientPlayConnectionEvents.INIT.register((listener, client) -> {
-            initializedConnection = listener;
-            MinecraftStatisticsCollector.reset(listener);
-            statistics.reset();
-            activity.reset();
-            effects.reset();
-            resetSession();
-            sessionStartedNanos = 0;
-            samplingFailureReported = false;
-        });
-        ClientPlayConnectionEvents.JOIN.register((listener, sender, client) -> {
-            playConnection = listener;
-            sessionStartedNanos = System.nanoTime();
-            lastStatsRequestNanos = sessionStartedNanos;
-            long now = System.currentTimeMillis();
-            history.start(now);
-            archive.newSession(now);
-            MinecraftStatisticsCollector.request(listener);
-            String worldKey = WorldCollector.worldKey(client);
-            lifecycleExecutor.execute(() -> {
-                worldStore.save();
-                worldStore.open(worldKey);
-            });
-            client.execute(() -> announceDashboard(client));
-        });
-        ClientPlayConnectionEvents.DISCONNECT.register((listener, client) -> {
-            client.execute(() -> {
-                if (initializedConnection != listener) return;
-                initializedConnection = null;
-                playConnection = null;
-                MinecraftStatisticsCollector.reset(null);
-                statistics.reset();
-                activity.reset();
-                effects.reset();
-                resetSession();
-                lifecycleExecutor.execute(worldStore::save);
-                sessionStartedNanos = 0;
-                history.disconnect(System.currentTimeMillis());
-                telemetry.markUnavailable(System.currentTimeMillis(), history.snapshot());
-            });
-        });
-        ClientChunkEvents.CHUNK_LOAD.register((level, chunk) -> build.chunkLoaded(chunk.getPos().x(), chunk.getPos().z()));
+        ClientPlayConnectionEvents.INIT.register((listener, client) -> connectionCreated(listener));
+        ClientPlayConnectionEvents.JOIN.register((listener, sender, client) -> joined(listener, client));
+        ClientPlayConnectionEvents.DISCONNECT.register(this::disconnected);
+        ClientChunkEvents.CHUNK_LOAD.register((level, chunk) -> chunkLoaded(chunk.getPos()));
         ClientPlayerBlockBreakEvents.AFTER.register((level, player, pos, state) -> activity.blockMined(pos, state));
         AttackEntityCallback.EVENT.register((player, level, hand, entity, hit) -> {
             if (level.isClientSide() && player == Minecraft.getInstance().player) activity.attackedEntity(entity);
@@ -155,14 +150,172 @@ public final class MinePanelClient implements ClientModInitializer {
         });
         ClientTickEvents.END_CLIENT_TICK.register(this::tick);
 
-        ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
+        ClientLifecycleEvents.CLIENT_STOPPING.register(client -> stopping());
+    }
+    //?}
+
+    //? if fabric && >=26.1 {
+    private void registerReloadListener() {
+        ResourceLoader.get(PackType.CLIENT_RESOURCES).registerReloadListener(
+                Identifier.fromNamespaceAndPath("minepanel", "item_icons"),
+                (ResourceManagerReloadListener) manager -> resourcesReloaded());
+    }
+    //?}
+    //? if fabric && <26.1 {
+    /*private void registerReloadListener() {
+        ResourceManagerHelper.get(PackType.CLIENT_RESOURCES).registerReloadListener(
+                new SimpleSynchronousResourceReloadListener() {
+                    @Override
+                    public Identifier getFabricId() {
+                        return Identifier.fromNamespaceAndPath("minepanel", "item_icons");
+                    }
+
+                    @Override
+                    public void onResourceManagerReload(ResourceManager manager) {
+                        resourcesReloaded();
+                    }
+                });
+    }
+    *///?}
+
+    //? if neoforge {
+    /*// Set when the game starts shutting down. NeoForge fires that before the last tick, Fabric after the game loop.
+    private boolean shuttingDown;
+    // The block the local player hit this tick and its state at that moment; checked at the end of the tick.
+    private BlockPos hitBlock;
+    private BlockState hitBlockState;
+
+    // NeoForge entrypoint. Every listener only observes: none cancels or changes its event.
+    public MinePanelClient(IEventBus modBus) {
+        lifecycleExecutor.execute(this::startDashboard);
+        modBus.addListener(RegisterClientReloadListenersEvent.class, event -> event.registerReloadListener(
+                (ResourceManagerReloadListener) manager -> resourcesReloaded()));
+        MinecraftStatisticsCollector.onKills(activity::killStatistics);
+        var bus = NeoForge.EVENT_BUS;
+        // Fabric's INIT (listener created) and JOIN (login packet handled) both map to LoggingIn, which is fired
+        // while the login packet is handled; nothing MinePanel tracks reaches the listener before that packet.
+        bus.addListener(ClientPlayerNetworkEvent.LoggingIn.class, event -> {
+            connectionCreated(event.getPlayer().connection);
+            joined(event.getPlayer().connection, Minecraft.getInstance());
+        });
+        bus.addListener(ClientPlayerNetworkEvent.LoggingOut.class, event -> {
+            // Every Minecraft.disconnect() fires this, also without a world (null player); Fabric reports neither.
+            if (event.getPlayer() != null && !shuttingDown) {
+                disconnected(event.getPlayer().connection, Minecraft.getInstance());
+            }
+        });
+        bus.addListener(ChunkEvent.Load.class, event -> {
+            if (event.getLevel().isClientSide()) chunkLoaded(event.getChunk().getPos());
+        });
+        // NeoForge has no event after a client-predicted break. Every MultiPlayerGameMode.destroyBlock call follows
+        // a LeftClickBlock event in the same tick, so remember the hit block and compare it at the end of the tick.
+        bus.addListener(PlayerInteractEvent.LeftClickBlock.class, event -> {
+            if (event.getLevel().isClientSide() && event.getEntity() == Minecraft.getInstance().player) {
+                hitBlock = event.getPos().immutable();
+                hitBlockState = event.getLevel().getBlockState(hitBlock);
+            }
+        });
+        bus.addListener(AttackEntityEvent.class, event -> {
+            if (event.getEntity().level().isClientSide() && event.getEntity() == Minecraft.getInstance().player) {
+                activity.attackedEntity(event.getTarget());
+            }
+        });
+        // Fabric's UseEntityCallback fires for both interactAt and interact, as these two events do.
+        bus.addListener(PlayerInteractEvent.EntityInteractSpecific.class, event -> {
+            if (event.getLevel().isClientSide() && event.getEntity() == Minecraft.getInstance().player) {
+                worldData.interacted(event.getTarget());
+            }
+        });
+        bus.addListener(PlayerInteractEvent.EntityInteract.class, event -> {
+            if (event.getLevel().isClientSide() && event.getEntity() == Minecraft.getInstance().player) {
+                worldData.interacted(event.getTarget());
+            }
+        });
+        bus.addListener(ScreenEvent.Init.Post.class,
+                event -> activity.screenOpened(Minecraft.getInstance(), event.getScreen()));
+        bus.addListener(ScreenEvent.Closing.class, event -> activity.screenClosed(event.getScreen()));
+        bus.addListener(ClientTickEvent.Post.class, event -> {
+            Minecraft client = Minecraft.getInstance();
+            if (hitBlock != null) {
+                if (client.level != null && client.level.getBlockState(hitBlock) != hitBlockState) {
+                    activity.blockMined(hitBlock, hitBlockState);
+                }
+                hitBlock = null;
+                hitBlockState = null;
+            }
+            if (!shuttingDown) tick(client);
+        });
+        bus.addListener(GameShuttingDownEvent.class, event -> {
+            shuttingDown = true;
+            stopping();
+        });
+    }
+    *///?}
+
+    private void resourcesReloaded() {
+        icons.reset();
+        MinecraftStatisticsCollector.clearNames();
+    }
+
+    private void connectionCreated(ClientPacketListener listener) {
+        initializedConnection = listener;
+        MinecraftStatisticsCollector.reset(listener);
+        statistics.reset();
+        activity.reset();
+        effects.reset();
+        resetSession();
+        sessionStartedNanos = 0;
+        samplingFailureReported = false;
+    }
+
+    private void joined(ClientPacketListener listener, Minecraft client) {
+        playConnection = listener;
+        sessionStartedNanos = System.nanoTime();
+        lastStatsRequestNanos = sessionStartedNanos;
+        long now = System.currentTimeMillis();
+        history.start(now);
+        archive.newSession(now);
+        MinecraftStatisticsCollector.request(listener);
+        String worldKey = WorldCollector.worldKey(client);
+        lifecycleExecutor.execute(() -> {
+            worldStore.save();
+            worldStore.open(worldKey);
+        });
+        client.execute(() -> announceDashboard(client));
+    }
+
+    private void disconnected(ClientPacketListener listener, Minecraft client) {
+        client.execute(() -> {
+            if (initializedConnection != listener) return;
+            initializedConnection = null;
+            playConnection = null;
+            MinecraftStatisticsCollector.reset(null);
+            statistics.reset();
+            activity.reset();
+            effects.reset();
+            resetSession();
+            lifecycleExecutor.execute(worldStore::save);
+            sessionStartedNanos = 0;
             history.disconnect(System.currentTimeMillis());
-            archive.close();
-            lifecycleExecutor.execute(() -> {
-                worldStore.save();
-                stopDashboard();
-                lifecycleExecutor.shutdown();
-            });
+            telemetry.markUnavailable(System.currentTimeMillis(), history.snapshot());
+        });
+    }
+
+    private void chunkLoaded(ChunkPos pos) {
+        //? if >=26.1 {
+        build.chunkLoaded(pos.x(), pos.z());
+        //?} else {
+        /*build.chunkLoaded(pos.x, pos.z);
+        *///?}
+    }
+
+    private void stopping() {
+        history.disconnect(System.currentTimeMillis());
+        archive.close();
+        lifecycleExecutor.execute(() -> {
+            worldStore.save();
+            stopDashboard();
+            lifecycleExecutor.shutdown();
         });
     }
 
@@ -258,7 +411,8 @@ public final class MinePanelClient implements ClientModInitializer {
                     FrameCollector.snapshot(), build.snapshot(client, snapshot, icons),
                     MinecraftInventoryCollector.icons(client, player, icons),
                     sensors.collect(client, level, player, layouts.sensorNeeds(), millis), registries.collect(level, icons),
-                    appearance.collect(client, player, icons));
+                    appearance.collect(client, player, icons),
+                    Backpacks.collect(client, icons, layouts.backpackSelections()));
             telemetry.updatePlayer(
                     millis,
                     (now - sessionStartedNanos) / 1_000_000_000L,
@@ -292,14 +446,24 @@ public final class MinePanelClient implements ClientModInitializer {
                     .append(Component.literal(url).withStyle(style -> style
                             .withColor(ChatFormatting.AQUA)
                             .withUnderlined(true)
+                            //? if >=26.1 {
                             .withClickEvent(new ClickEvent.OpenUrl(URI.create(url)))
                             .withHoverEvent(new HoverEvent.ShowText(Component.literal("Open MinePanel in your browser")))));
+                            //?} else {
+                            /*.withClickEvent(new ClickEvent(ClickEvent.Action.OPEN_URL, url))
+                            .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                                    Component.literal("Open MinePanel in your browser")))));
+                            *///?}
             if (fixedPortUnavailable) {
                 message = message.copy().append(Component.literal(" (port " + LocalDashboardServer.DEFAULT_PORT
                         + " was busy)").withStyle(ChatFormatting.YELLOW));
             }
         }
+        //? if >=26.1 {
         client.gui.getChat().addClientSystemMessage(message);
+        //?} else {
+        /*client.gui.getChat().addMessage(message);
+        *///?}
     }
 
     private void startDashboard() {

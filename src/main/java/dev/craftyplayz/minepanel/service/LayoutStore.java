@@ -53,7 +53,7 @@ public final class LayoutStore {
     private static final Pattern ID = Pattern.compile("[a-z0-9-]{1,32}");
     private static final Pattern ITEM_ID = Pattern.compile("[a-z0-9_.-]+:[a-z0-9/._-]+");
     public static final List<String> TILE_IDS = List.of("player", "inventory", "statistics", "history", "map", "build",
-            "movement", "xp", "pickups", "advancements", "villagers", "performance", "afk", "model");
+            "movement", "xp", "pickups", "advancements", "villagers", "performance", "afk", "model", "backpack", "backpacks");
     /** The 3D render panel's spin axes (vertical, head over heels, cartwheel) and speeds in degrees per second. */
     public static final List<String> MODEL_AXES = List.of("y", "x", "z");
     public static final List<Integer> MODEL_SPEEDS = List.of(15, 30, 60, 120);
@@ -66,13 +66,18 @@ public final class LayoutStore {
     public static final List<Integer> XP_WINDOWS = List.of(10, 30, 60, 300, 600, 3600);
     public static final int MAX_XP_GOALS = 8;
     public static final int MAX_XP_GOAL_LEVEL = 10000;
-    public static final List<String> PIN_SOURCES = List.of("inventory", "enderchest", "enderchest-item");
+    public static final List<String> PIN_SOURCES = List.of("inventory", "enderchest", "enderchest-item", "accessory");
     /** How often the game samples the player for the dashboard; one client tick is 50 ms, so 50 is the fastest. */
     public static final List<Integer> UPDATE_INTERVALS = List.of(50, 100, 250, 500, 1000);
     public static final int DEFAULT_UPDATE_INTERVAL = 250;
     private final Path file;
     private volatile int updateIntervalMillis = DEFAULT_UPDATE_INTERVAL;
     private volatile SensorNeeds sensorNeeds = SensorNeeds.NONE;
+    private volatile Set<String> backpackSelections = Set.of();
+    /** How many selected backpacks the game reads in full for the Backpacks panels. */
+    static final int MAX_WATCHED_BACKPACKS = 7;
+    private static final Pattern BACKPACK_UUID =
+            Pattern.compile("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
 
     public LayoutStore(Path file) {
         this.file = file;
@@ -84,6 +89,11 @@ public final class LayoutStore {
     }
 
     /** The costlier rule sensors that enabled rules of the last layout loaded or saved read; read every sample. */
+    /** Backpacks the saved layout's Backpacks panels select, which the game reads in full (any thread). */
+    public Set<String> backpackSelections() {
+        return backpackSelections;
+    }
+
     public SensorNeeds sensorNeeds() {
         return sensorNeeds;
     }
@@ -99,6 +109,7 @@ public final class LayoutStore {
             String normalized = normalize(Files.readString(file, StandardCharsets.UTF_8));
             updateIntervalMillis = updateInterval(normalized);
             sensorNeeds = LayoutRules.needs(JsonParser.parseString(normalized).getAsJsonObject());
+            backpackSelections = backpackSelections(JsonParser.parseString(normalized).getAsJsonObject());
             return normalized;
         } catch (IOException | RuntimeException invalid) {
             keepRejected(invalid);
@@ -121,6 +132,7 @@ public final class LayoutStore {
         }
         updateIntervalMillis = updateInterval(normalized);
         sensorNeeds = LayoutRules.needs(JsonParser.parseString(normalized).getAsJsonObject());
+        backpackSelections = backpackSelections(JsonParser.parseString(normalized).getAsJsonObject());
     }
 
     /** The file beside the layout named {@code layout.<suffix>.json}. */
@@ -383,7 +395,56 @@ public final class LayoutStore {
             if (afk.has("hidden")) normalized.add("hidden", statisticIds(afk.getAsJsonArray("hidden")));
             result.add("afk", normalized);
         }
+        if (source.has("backpacks")) {
+            JsonObject backpacks = source.getAsJsonObject("backpacks");
+            JsonObject normalized = new JsonObject();
+            if (backpacks.has("selected")) {
+                String selected = text(backpacks.get("selected"), 36);
+                if (!selected.equals("last") && !BACKPACK_UUID.matcher(selected).matches()) {
+                    throw new IllegalArgumentException("selected backpack must be \"last\" or a UUID");
+                }
+                normalized.addProperty("selected", selected);
+            }
+            result.add("backpacks", normalized);
+        }
         return result;
+    }
+
+    /**
+     * The backpacks a normalized layout's Backpacks panels may show: every UUID a profile's {@code backpacks.selected}
+     * setting or a rule's set action names (not "last"), at most {@value #MAX_WATCHED_BACKPACKS}.
+     */
+    static Set<String> backpackSelections(JsonObject layout) {
+        Set<String> selected = new java.util.LinkedHashSet<>();
+        java.util.function.Consumer<JsonObject> fromSettings = settings -> {
+            if (settings != null && settings.has("backpacks") && settings.getAsJsonObject("backpacks").has("selected")) {
+                selected.add(settings.getAsJsonObject("backpacks").get("selected").getAsString());
+            }
+        };
+        if (layout.has("settings")) fromSettings.accept(layout.getAsJsonObject("settings"));
+        if (layout.has("profiles")) {
+            for (JsonElement profile : layout.getAsJsonArray("profiles")) {
+                fromSettings.accept(profile.getAsJsonObject().has("settings")
+                        ? profile.getAsJsonObject().getAsJsonObject("settings") : null);
+            }
+        }
+        if (layout.has("rules")) {
+            for (JsonElement rule : layout.getAsJsonArray("rules")) {
+                for (String branch : List.of("then", "else")) {
+                    if (!rule.getAsJsonObject().has(branch)) continue;
+                    for (JsonElement action : rule.getAsJsonObject().getAsJsonArray(branch)) {
+                        JsonObject value = action.getAsJsonObject();
+                        // Only set actions carry a panel and setting; profile and notify actions have neither.
+                        if ("set".equals(value.get("do").getAsString()) && "backpacks".equals(value.get("panel").getAsString())
+                                && "selected".equals(value.get("setting").getAsString())) {
+                            selected.add(value.get("value").getAsString());
+                        }
+                    }
+                }
+            }
+        }
+        selected.remove("last");
+        return selected.stream().limit(MAX_WATCHED_BACKPACKS).collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 
     /** Version 1 rules: every group needs one matching condition. Read only, to be converted by the browser. */

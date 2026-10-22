@@ -34,13 +34,18 @@ function validateTooltip(tooltip) {
   });
 }
 
-/** Shulker boxes and bundles list what they hold (one level deep); other items have null contents. */
+/**
+ * Shulker boxes, bundles and backpacks list what they hold (one level deep); other items have null contents. A
+ * backpack whose contents have not been seen yet has contentsUnknown set and an empty list.
+ */
 function validateItem(item, nested = false) {
   requireValid(object(item) && (item.contents === null
-    || !nested && Array.isArray(item.contents) && item.contents.length <= 64));
+    || !nested && Array.isArray(item.contents) && item.contents.length <= 128)
+    && typeof item.contentsUnknown === "boolean"
+    && (!item.contentsUnknown || Array.isArray(item.contents) && item.contents.length === 0));
   const contents = Array.isArray(item.contents) ? item.contents.map(inner => validateItem(inner, true)) : null;
   requireValid(!item.empty || contents === null);
-  return { ...validateItemFields(item), contents };
+  return { ...validateItemFields(item), contentsUnknown: item.contentsUnknown, contents };
 }
 
 function validateItemFields(item) {
@@ -89,7 +94,18 @@ function validateInventory(inventory) {
   const equipment = Object.fromEntries(equipmentKeys.map(key =>
     [key, validateItem(inventory.equipment[key])]));
   requireValid(JSON.stringify(equipment.mainhand) === JSON.stringify(slots[inventory.selectedHotbarSlot]));
-  return { slots, selectedHotbarSlot: inventory.selectedHotbarSlot, equipment };
+  return { slots, selectedHotbarSlot: inventory.selectedHotbarSlot, equipment,
+    accessories: validateAccessories(inventory.accessories ?? []) };
+}
+
+const MAX_ACCESSORIES = 32;
+
+/** Items worn in a mod's extra slots (Curios): non-empty, at most 32; older servers send none. */
+function validateAccessories(accessories) {
+  requireValid(Array.isArray(accessories) && accessories.length <= MAX_ACCESSORIES);
+  const items = accessories.map(item => validateItem(item));
+  requireValid(items.every(item => !item.empty));
+  return items;
 }
 
 function patchInventory(previous, patch) {
@@ -110,6 +126,7 @@ function patchInventory(previous, patch) {
   }
   return validateInventory({
     slots, equipment,
+    accessories: has(patch, "accessories") ? patch.accessories : previous.accessories,
     selectedHotbarSlot: has(patch, "selectedHotbarSlot")
       ? patch.selectedHotbarSlot : previous.selectedHotbarSlot
   });
@@ -212,7 +229,7 @@ function applyHistory(previous, patch) {
 // ------------------------------------------------------------------------------- World, motion and other details
 
 const DETAIL_FIELDS = ["world", "motion", "xp", "portal", "pickups", "advancements", "villagers", "enderChest",
-  "performance", "build", "icons", "sensors", "registries", "appearance"];
+  "performance", "build", "icons", "sensors", "registries", "appearance", "backpacks"];
 const WEATHER = ["clear", "rain", "thunder"];
 const GAME_MODES = ["survival", "creative", "adventure", "spectator"];
 const MOTION_MODES = ["ground", "elytra", "swimming", "riding", "flying", "falling"];
@@ -481,6 +498,39 @@ function validateAppearance(appearance) {
     leftHand: validateHeld(appearance.leftHand) };
 }
 
+const BACKPACK_SOURCES = ["world", "remembered"];
+const MAX_BACKPACKS = 256;
+const MAX_SHOWN_BACKPACKS = 8;
+const validUuid = value => typeof value === "string"
+  && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
+const backpackName = value => typeof value === "string" && value.length <= 256 && validUnicode(value);
+const slotCount = value => integer(value) && value <= 128;
+
+/** Sophisticated Backpacks' backpacks (null without the mod); mirrors Backpacks on the Java side. */
+function validateBackpacks(backpacks) {
+  if (backpacks === null) return null;
+  requireValid(object(backpacks) && BACKPACK_SOURCES.includes(backpacks.source)
+    && (backpacks.last === null || validUuid(backpacks.last))
+    && Array.isArray(backpacks.list) && backpacks.list.length <= MAX_BACKPACKS
+    && Array.isArray(backpacks.shown) && backpacks.shown.length <= MAX_SHOWN_BACKPACKS);
+  const list = backpacks.list.map(entry => {
+    requireValid(object(entry) && validUuid(entry.uuid) && backpackName(entry.name)
+      && (entry.player === null || validText(entry.player, 64)) && (entry.openedAt === null || integer(entry.openedAt))
+      && validIcon(entry.icon) && Array.isArray(entry.items) && entry.items.length <= 64
+      && entry.items.every(validIdentifier) && slotCount(entry.filled) && slotCount(entry.slots));
+    return { uuid: entry.uuid, name: entry.name, player: entry.player, openedAt: entry.openedAt, icon: entry.icon,
+      items: [...entry.items], filled: entry.filled, slots: entry.slots };
+  });
+  const shown = backpacks.shown.map(entry => {
+    requireValid(object(entry) && validUuid(entry.uuid) && backpackName(entry.name)
+      && typeof entry.contentsUnknown === "boolean" && Array.isArray(entry.contents) && entry.contents.length <= 128
+      && (!entry.contentsUnknown || entry.contents.length === 0));
+    return { uuid: entry.uuid, name: entry.name, contentsUnknown: entry.contentsUnknown,
+      contents: entry.contents.map(item => validateItem(item, true)) };
+  });
+  return { source: backpacks.source, last: backpacks.last, list, shown };
+}
+
 /** Validates the detail fields: required while in a world (advancements and ender chest may be null), else null. */
 function validateDetails(state) {
   requireValid(DETAIL_FIELDS.every(key => has(state, key)));
@@ -491,7 +541,8 @@ function validateDetails(state) {
   const validators = { world: validateWorld, motion: validateMotion, xp: validateXp, portal: validatePortal,
     pickups: validatePickups, advancements: validateAdvancements, villagers: validateVillagers,
     enderChest: validateEnderChest, performance: validatePerformance, build: validateBuild, icons: validateIcons,
-    sensors: validateSensors, registries: validateRegistries, appearance: validateAppearance };
+    sensors: validateSensors, registries: validateRegistries, appearance: validateAppearance,
+    backpacks: validateBackpacks };
   return Object.fromEntries(DETAIL_FIELDS.map(key => {
     const value = state[key];
     // Deltas carry over unchanged fields from the previous state, which were validated when they arrived.

@@ -41,6 +41,11 @@ public final class ItemExtractor {
         default List<? extends ItemView> contents() {
             return null;
         }
+
+        /** A container (a backpack) whose contents have not been seen yet; {@link #contents()} is then ignored. */
+        default boolean contentsUnknown() {
+            return false;
+        }
     }
 
     public record TooltipSegmentView(String text, Integer rgb, String format) {
@@ -71,8 +76,11 @@ public final class ItemExtractor {
         collectEnchantments(item.storedEnchantments(), enchantments);
         boolean damageable = item.isDamageable();
         List<ItemSnapshot> contents = null;
-        List<? extends ItemView> held = withContents ? item.contents() : null;
-        if (held != null) {
+        boolean unknown = withContents && item.contentsUnknown();
+        List<? extends ItemView> held = withContents && !unknown ? item.contents() : null;
+        if (unknown) {
+            contents = List.of();
+        } else if (held != null) {
             // Only one level deep: a shulker box inside a bundle shows as an item, not its own grid.
             contents = new ArrayList<>(Math.min(held.size(), ItemSnapshot.MAX_CONTENTS));
             for (ItemView inner : held) {
@@ -83,7 +91,7 @@ public final class ItemExtractor {
         return new ItemSnapshot(false, item.itemId(), readableText(item.name()), item.count(), item.maxCount(),
                 damageable ? item.damage() : null, damageable ? item.maxDamage() : null,
                 new ArrayList<>(enchantments.values()), item.iconKey(), item.foil(), tooltip(item.tooltip()),
-                contents);
+                contents, unknown);
     }
 
     /** Truncates oversized tooltips and drops empty runs instead of rejecting a whole inventory sample. */

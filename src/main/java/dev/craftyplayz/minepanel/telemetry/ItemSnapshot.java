@@ -8,10 +8,10 @@ import java.util.regex.Pattern;
 public record ItemSnapshot(boolean empty, String itemId, String name, int count, int maxCount,
                            Integer damage, Integer maxDamage, List<Enchantment> enchantments,
                            String icon, boolean foil, List<List<TooltipSegment>> tooltip,
-                           List<ItemSnapshot> contents) {
+                           List<ItemSnapshot> contents, boolean contentsUnknown) {
     public static final int MAX_TEXT_LENGTH = 256;
     /** Shulker boxes hold 27 slots; bundles hold at most 64 separate stacks. */
-    public static final int MAX_CONTENTS = 64;
+    public static final int MAX_CONTENTS = 128;
     public static final int MAX_COUNT = 1_000_000;
     public static final int MAX_ENCHANTMENTS = 64;
     public static final int MAX_ENCHANTMENT_LEVEL = 255;
@@ -34,9 +34,17 @@ public record ItemSnapshot(boolean empty, String itemId, String name, int count,
         this(empty, itemId, name, count, maxCount, damage, maxDamage, enchantments, icon, foil, tooltip, null);
     }
 
+    public ItemSnapshot(boolean empty, String itemId, String name, int count, int maxCount,
+                        Integer damage, Integer maxDamage, List<Enchantment> enchantments,
+                        String icon, boolean foil, List<List<TooltipSegment>> tooltip, List<ItemSnapshot> contents) {
+        this(empty, itemId, name, count, maxCount, damage, maxDamage, enchantments, icon, foil, tooltip, contents,
+                false);
+    }
+
     /**
-     * {@code contents} is null for items that hold nothing; for shulker boxes and bundles it lists the held items
-     * (shulker slots in order, including empty ones). Nested containers are listed without their own contents.
+     * {@code contents} is null for items that hold nothing; for shulker boxes, bundles and backpacks it lists the held
+     * items (shulker slots in order, including empty ones). Nested containers are listed without their own contents.
+     * {@code contentsUnknown} marks a backpack whose contents MinePanel has not seen yet; its contents list is empty.
      */
     public ItemSnapshot {
         Objects.requireNonNull(enchantments, "enchantments");
@@ -64,6 +72,9 @@ public record ItemSnapshot(boolean empty, String itemId, String name, int count,
                 }
             }
             contents = List.copyOf(contents);
+        }
+        if (contentsUnknown && (contents == null || !contents.isEmpty())) {
+            throw new IllegalArgumentException("unknown contents must be an empty list");
         }
         if (empty) {
             if (itemId != null || name != null || count != 0 || maxCount != 0
@@ -119,7 +130,7 @@ public record ItemSnapshot(boolean empty, String itemId, String name, int count,
             }
             json.append(']');
         }
-        json.append("],\"contents\":");
+        json.append("],\"contentsUnknown\":").append(contentsUnknown).append(",\"contents\":");
         if (contents == null) return json.append("null}").toString();
         json.append('[');
         for (int index = 0; index < contents.size(); index++) {

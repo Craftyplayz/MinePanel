@@ -39,9 +39,16 @@ final class MinecraftInventoryCollector {
 
     static InventorySnapshot collect(Minecraft minecraft, Player player, IconRenderer icons) {
         var inventory = player.getInventory();
+        // Through item(), so a backpack worn in an accessory slot gets its contents like one in the inventory.
+        List<ItemSnapshot> accessories = Accessories.worn(player).stream().map(stack -> item(minecraft, stack, icons))
+                .toList();
         return InventorySnapshot.collect(
                 index -> item(minecraft, inventory.getItem(index), icons),
+                //? if >=26.1 {
                 inventory.getSelectedSlot(),
+                //?} else {
+                /*inventory.selected,
+                *///?}
                 key -> item(minecraft, player.getItemBySlot(switch (key) {
                     case "head" -> EquipmentSlot.HEAD;
                     case "chest" -> EquipmentSlot.CHEST;
@@ -49,17 +56,24 @@ final class MinecraftInventoryCollector {
                     case "feet" -> EquipmentSlot.FEET;
                     case "offhand" -> EquipmentSlot.OFFHAND;
                     default -> throw new IllegalArgumentException("Unsupported equipment slot");
-                }), icons));
+                }), icons)).withAccessories(accessories);
     }
 
     /** The player's own head and an ender chest, drawn beside the inventory on the dashboard. */
     static PlayerDetails.Icons icons(Minecraft minecraft, Player player, IconRenderer icons) {
         // The tab-list profile carries the skin textures; the local player's own profile may not.
         var info = minecraft.getConnection() == null ? null : minecraft.getConnection().getPlayerInfo(player.getUUID());
+        //? if >=26.1 {
         var profile = ResolvableProfile.createResolved(info == null ? player.getGameProfile() : info.getProfile());
+        boolean skinLoaded = minecraft.playerSkinRenderCache().lookup(profile).isDone();
+        //?} else {
+        /*var gameProfile = info == null ? player.getGameProfile() : info.getProfile();
+        var profile = new ResolvableProfile(gameProfile);
+        boolean skinLoaded = minecraft.getSkinManager().getOrLoad(gameProfile).isDone();
+        *///?}
         ItemSnapshot head = null;
         // Until the skin has loaded the head renders with the default skin, and its icon would be cached that way.
-        if (minecraft.playerSkinRenderCache().lookup(profile).isDone()) {
+        if (skinLoaded) {
             var stack = new ItemStack(Items.PLAYER_HEAD);
             stack.set(DataComponents.PROFILE, profile);
             head = item(minecraft, stack, icons);
@@ -70,35 +84,46 @@ final class MinecraftInventoryCollector {
                 item(minecraft, ENDER_CHEST, icons));
     }
 
-    /** Client thread: the dashboard value of one stack, including the contents of shulker boxes and bundles. */
+    /** Client thread: the dashboard value of one stack, including the contents of shulker boxes, bundles, backpacks. */
     static ItemSnapshot item(Minecraft minecraft, ItemStack stack, IconRenderer icons) {
         if (stack.isEmpty()) return ItemSnapshot.emptyItem();
         if (cacheEpoch != icons.epoch() || CACHE.size() >= MAX_CACHED) {
             CACHE.clear();
             cacheEpoch = icons.epoch();
         }
-        CachedStack key = new CachedStack(stack);
+        // Backpack contents live outside the stack, so they are part of the key (by identity).
+        Backpacks.Contents backpack = Backpacks.contents(stack);
+        CachedStack key = new CachedStack(stack, backpack);
         ItemSnapshot cached = CACHE.get(key);
         if (cached != null) return cached;
-        ItemSnapshot extracted = ItemExtractor.extract(new MinecraftItemView(minecraft, stack, icons));
+        ItemSnapshot extracted = ItemExtractor.extract(new MinecraftItemView(minecraft, stack, icons, backpack));
         // Rendering an icon may reset the icon cache, which changes every key; do not keep a value with stale keys.
-        if (cacheEpoch == icons.epoch()) CACHE.put(new CachedStack(stack.copy()), extracted);
+        if (cacheEpoch == icons.epoch()) CACHE.put(new CachedStack(stack.copy(), backpack), extracted);
         return extracted;
+    }
+
+    private static final ItemStack HOLDER = new ItemStack(Items.CHEST);
+
+    /** The dashboard items of a container the player doesn't carry (a backpack elsewhere), one level deep. */
+    static List<ItemSnapshot> contents(Minecraft minecraft, Backpacks.Contents contents, IconRenderer icons) {
+        return ItemExtractor.extract(new MinecraftItemView(minecraft, HOLDER, icons, contents)).contents();
     }
 
     private static final class CachedStack {
         private final ItemStack stack;
+        private final Backpacks.Contents backpack;
         private final int hash;
 
-        CachedStack(ItemStack stack) {
+        CachedStack(ItemStack stack, Backpacks.Contents backpack) {
             this.stack = stack;
+            this.backpack = backpack;
             hash = ItemStack.hashItemAndComponents(stack) * 31 + stack.getCount();
         }
 
         @Override
         public boolean equals(Object other) {
             return other instanceof CachedStack that && hash == that.hash && stack.getCount() == that.stack.getCount()
-                    && ItemStack.isSameItemSameComponents(stack, that.stack);
+                    && backpack == that.backpack && ItemStack.isSameItemSameComponents(stack, that.stack);
         }
 
         @Override
@@ -107,22 +132,36 @@ final class MinecraftInventoryCollector {
         }
     }
 
-    private record MinecraftItemView(Minecraft minecraft, ItemStack stack, IconRenderer icons)
+    /** {@code backpack} is null unless the stack is a backpack whose contents should be listed. */
+    private record MinecraftItemView(Minecraft minecraft, ItemStack stack, IconRenderer icons,
+                                     Backpacks.Contents backpack)
             implements ItemExtractor.ItemView {
+        public boolean contentsUnknown() {
+            return backpack != null && backpack.items() == null;
+        }
+
         public List<MinecraftItemView> contents() {
+            if (backpack != null && backpack.items() != null) {
+                return backpack.items().stream().limit(ItemSnapshot.MAX_CONTENTS)
+                        .map(inner -> new MinecraftItemView(minecraft, inner, icons, null)).toList();
+            }
             ItemContainerContents container = stack.get(DataComponents.CONTAINER);
             if (container != null) {
                 List<MinecraftItemView> slots = new ArrayList<>(SHULKER_SLOTS);
+                //? if >=26.1 {
                 container.allItemsCopyStream().limit(ItemSnapshot.MAX_CONTENTS)
-                        .forEach(inner -> slots.add(new MinecraftItemView(minecraft, inner, icons)));
+                //?} else {
+                /*container.stream().limit(ItemSnapshot.MAX_CONTENTS)
+                *///?}
+                        .forEach(inner -> slots.add(new MinecraftItemView(minecraft, inner, icons, null)));
                 // Shulker boxes keep slot positions; trailing empty slots are not stored, so pad the grid.
-                while (slots.size() < SHULKER_SLOTS) slots.add(new MinecraftItemView(minecraft, ItemStack.EMPTY, icons));
+                while (slots.size() < SHULKER_SLOTS) slots.add(new MinecraftItemView(minecraft, ItemStack.EMPTY, icons, null));
                 return slots;
             }
             BundleContents bundle = stack.get(DataComponents.BUNDLE_CONTENTS);
             if (bundle != null) {
                 return bundle.itemCopyStream().limit(ItemSnapshot.MAX_CONTENTS)
-                        .map(inner -> new MinecraftItemView(minecraft, inner, icons)).toList();
+                        .map(inner -> new MinecraftItemView(minecraft, inner, icons, null)).toList();
             }
             return null;
         }

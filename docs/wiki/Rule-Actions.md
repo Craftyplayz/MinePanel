@@ -72,6 +72,7 @@ Changes one panel setting while the rule applies, using the panel's own controls
 | Advancements | Pop-up seconds, Hidden tabs, Pinned | 0–300; lists |
 | 3D render | Spin, Axis, Speed | on/off; turntable / head over heels / cartwheel; 15–120 °/s |
 | AFK | Text size, Speed, Hidden | 11–32 px; slow / normal / fast / very fast; statistic list |
+| Backpacks | Selected (`selected`) | `last` (the backpack opened most recently) or one backpack's UUID, in lowercase |
 
 See [Panels](Panels.md) for what each setting does and its default.
 

@@ -12,21 +12,42 @@ public final class InventorySnapshotTest {
         testItems();
         testCollectionAndValidation();
         testChangesAndBaselines();
+        testBackpacks();
         System.out.println("MinePanel immutable inventory telemetry tests passed.");
+    }
+
+    private static void testBackpacks() {
+        String uuid = "123e4567-e89b-12d3-a456-426614174000";
+        var entry = new BackpacksSnapshot.Entry(uuid, "Mining \"bag\"", "Steve", 1000L, null, List.of("minecraft:stone"), 1, 27);
+        var shown = new BackpacksSnapshot.Shown(uuid, "Mining", false, List.of(item(3), ItemSnapshot.emptyItem()));
+        var snapshot = new BackpacksSnapshot("world", uuid, List.of(entry), List.of(shown));
+        check(snapshot.toJson().equals("{\"source\":\"world\",\"last\":\"" + uuid + "\",\"list\":[{\"uuid\":\"" + uuid
+                + "\",\"name\":\"Mining \\\"bag\\\"\",\"player\":\"Steve\",\"openedAt\":1000,\"icon\":null,"
+                + "\"items\":[\"minecraft:stone\"],\"filled\":1,\"slots\":27}],\"shown\":[{\"uuid\":\"" + uuid
+                + "\",\"name\":\"Mining\",\"contentsUnknown\":false,\"contents\":[" + item(3).toJson() + ","
+                + ItemSnapshot.emptyItem().toJson() + "]}]}"), "backpacks JSON: " + snapshot.toJson());
+        invalid(() -> new BackpacksSnapshot("server", null, List.of(), List.of()));
+        invalid(() -> new BackpacksSnapshot("world", "nope", List.of(), List.of()));
+        invalid(() -> new BackpacksSnapshot("world", null, List.of(), java.util.Collections.nCopies(9, shown)));
+        invalid(() -> new BackpacksSnapshot.Entry("bad", "", null, null, null, List.of(), 0, 0));
+        invalid(() -> new BackpacksSnapshot.Entry(uuid, "", null, null, null, List.of("Bad Id"), 0, 0));
+        invalid(() -> new BackpacksSnapshot.Entry(uuid, "", null, null, null, List.of(), 0, 129));
+        invalid(() -> new BackpacksSnapshot.Shown(uuid, "", true, List.of(item(1))));
+        invalid(() -> new BackpacksSnapshot.Shown(uuid, "", false, java.util.Collections.nCopies(129, item(1))));
     }
 
     private static void testItems() {
         ItemSnapshot empty = ItemSnapshot.emptyItem();
         check(empty.toJson().equals("{\"empty\":true,\"itemId\":null,\"name\":null,\"count\":0,\"maxCount\":0,"
                 + "\"damage\":null,\"maxDamage\":null,\"remainingDurability\":null,\"enchantments\":[],"
-                + "\"icon\":null,\"foil\":false,\"tooltip\":[],\"contents\":null}"),
+                + "\"icon\":null,\"foil\":false,\"tooltip\":[],\"contentsUnknown\":false,\"contents\":null}"),
                 "empty items have explicit null/zero metadata");
         var name = new ItemSnapshot.TooltipSegment("Sharp \"Sword\"", "#55ffff", "bi");
         var lore = new ItemSnapshot.TooltipSegment("Lore", null, "");
         ItemSnapshot styled = new ItemSnapshot(false, "minecraft:diamond_sword", "Sword", 1, 1, null, null,
                 List.of(), "e0-1a2b", true, List.of(List.of(name), List.of(), List.of(lore)));
         check(styled.toJson().endsWith("\"icon\":\"e0-1a2b\",\"foil\":true,\"tooltip\":[[{\"text\":\"Sharp \\\"Sword\\\"\","
-                        + "\"color\":\"#55ffff\",\"format\":\"bi\"}],[],[{\"text\":\"Lore\",\"color\":null,\"format\":\"\"}]],\"contents\":null}"),
+                        + "\"color\":\"#55ffff\",\"format\":\"bi\"}],[],[{\"text\":\"Lore\",\"color\":null,\"format\":\"\"}]],\"contentsUnknown\":false,\"contents\":null}"),
                 "icon key, glint and styled tooltip lines serialized");
         invalid(() -> new ItemSnapshot(true, null, null, 0, 0, null, null, List.of(), "e0-1", false, List.of()));
         invalid(() -> new ItemSnapshot(false, "minecraft:stone", "Stone", 1, 64, null, null, List.of(),
@@ -99,6 +120,14 @@ public final class InventorySnapshotTest {
         });
         check(snapshot.equals(collected) && reads.get() == 36 && equipmentReads.get() == 5,
                 "pure collection adapter captures an immutable value snapshot");
+        check(snapshot.accessories().isEmpty() && snapshot.toJson().endsWith(",\"accessories\":[]}"),
+                "an inventory without accessory slots sends an empty accessories list");
+        InventorySnapshot wearing = snapshot.withAccessories(List.of(item(1)));
+        check(wearing.toDeltaJson(snapshot).equals("{\"accessories\":[" + item(1).toJson() + "]}")
+                        && wearing.toDeltaJson(wearing).equals("{}"),
+                "accessories are sent whole when they change, and not at all otherwise");
+        invalid(() -> snapshot.withAccessories(List.of(ItemSnapshot.emptyItem())));
+        invalid(() -> snapshot.withAccessories(java.util.Collections.nCopies(InventorySnapshot.MAX_ACCESSORIES + 1, item(1))));
         invalid(() -> new InventorySnapshot(List.of(), 0, emptyEquipment()));
         invalid(() -> new InventorySnapshot(emptySlots(), -1, emptyEquipment()));
         invalid(() -> new InventorySnapshot(emptySlots(), 9, emptyEquipment()));

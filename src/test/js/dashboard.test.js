@@ -11,7 +11,7 @@ const sources = ["protocol.js", "layout.js", "rules.js", "app.js", "player-links
 function empty() {
   return { empty: true, itemId: null, name: null, count: 0, maxCount: 0,
     damage: null, maxDamage: null, remainingDurability: null, enchantments: [],
-    icon: null, foil: false, tooltip: [], contents: null };
+    icon: null, foil: false, tooltip: [], contentsUnknown: false, contents: null };
 }
 
 function item(overrides = {}) {
@@ -24,7 +24,7 @@ function inventory() {
   slots[0] = item();
   return { slots, selectedHotbarSlot: 0,
     equipment: { head: empty(), chest: empty(), legs: empty(), feet: empty(),
-      offhand: empty(), mainhand: item() } };
+      offhand: empty(), mainhand: item() }, accessories: [] };
 }
 
 function statistics(entries = [counter()]) {
@@ -57,7 +57,7 @@ function details() {
     icons: { name: "Steve", uuid: "8667ba71-b85a-4004-af54-457a9734eed7",
       head: item({ itemId: "minecraft:player_head", name: "Steve's Head", count: 1, icon: "e0-head" }),
       enderChest: item({ itemId: "minecraft:ender_chest", name: "Ender Chest", count: 1, icon: "e0-ender" }) },
-    sensors: sensors(), registries: registries(), appearance: appearance()
+    sensors: sensors(), registries: registries(), appearance: appearance(), backpacks: null
   };
 }
 
@@ -109,7 +109,7 @@ function unavailable(overrides = {}) {
     absorption: null, inventory: null, statistics: null, history: history({ active: false }),
     food: null, saturation: null, effects: null, world: null, motion: null, xp: null, portal: null, pickups: null,
     advancements: null, villagers: null, enderChest: null, performance: null, build: null, icons: null, sensors: null,
-    registries: null, appearance: null, ...overrides });
+    registries: null, appearance: null, backpacks: null, ...overrides });
 }
 
 function defaultFetch(storedLayout = null, requests = []) {
@@ -1210,7 +1210,7 @@ test("imported or stored layouts are validated and completed", () => {
   const normalize = value => h.run(`normalizeLayout(${JSON.stringify(value)})`);
   const partial = normalize({ version: 1, tiles: [{ id: "history", enabled: true, x: 0, y: 5, w: 12, h: 2 }] });
   assert.deepEqual(plain(partial.tiles[0]), { id: "history", enabled: true, x: 0, y: 0, w: 12, h: 3 });
-  assert.equal(partial.tiles.length, 14);
+  assert.equal(partial.tiles.length, 16);
   assert.equal(partial.tiles.filter(tile => tile.enabled).length, 1, "missing tiles are added disabled");
   for (const bad of [null, [], { version: 3, tiles: [] }, { version: 1 }, { version: 2 },
     { version: 1, tiles: [{ id: "chat", enabled: true, x: 0, y: 0, w: 1, h: 1 }] },
@@ -1240,7 +1240,7 @@ test("the saved layout is loaded after the session and applied to tile grid plac
     [["Player", "false"], ["Inventory", "true"], ["Statistics", "false"], ["Activity log", "false"],
       ["JourneyMap", "false"], ["Build progress", "false"], ["Movement", "false"], ["Experience", "false"],
       ["Recent pickups", "false"], ["Advancements", "false"], ["Villager trades", "false"], ["Performance", "false"],
-      ["AFK", "false"], ["3D render", "false"]]);
+      ["AFK", "false"], ["3D render", "false"], ["Personal backpack", "false"], ["Backpacks", "false"]]);
   await h.runTimers(400);
   const saves = requests.filter(request => request.url === "/api/layout" && request.method === "PUT");
   assert.equal(saves.length, 1, "a version 1 layout is saved back converted");
@@ -1705,7 +1705,7 @@ test("navigation, portal and experience maths match the game", () => {
 
 /** The example layout from docs/RULES_V2.md. */
 const docLayout = () => ({ version: 2, tiles: [], profiles: [{ id: "nether", name: "Nether", tiles: [] }],
-  pinned: [{ source: "inventory", slot: 9, x: 10, y: 20 }],
+  pinned: [{ source: "inventory", slot: 9, x: 10, y: 20 }, { source: "accessory", slot: 0, x: 30, y: 20 }],
   animation: { durationMs: 300, easing: "ease-out" },
   folders: [{ id: "combat", name: "Combat", enabled: true, collapsed: false }],
   places: [{ id: "home", name: "Home", world: "Test World", dimension: "minecraft:overworld", x: 120, y: 64, z: -340 }],
@@ -1736,7 +1736,7 @@ test("rules v2: the documented layout round-trips and missing parts get defaults
   for (const key of ["rules", "folders", "places", "toggles", "animation", "pinned"]) {
     assert.deepEqual(layout[key], docLayout()[key], key);
   }
-  assert.equal(layout.profiles[0].tiles.length, 14);
+  assert.equal(layout.profiles[0].tiles.length, 16);
   assert.equal(layout.profiles[0].settings.xp.window, 60, "profile settings are completed with defaults");
   assert.deepEqual(plain(R.normalizeLayout(layout)), layout, "normalizing is idempotent");
   assert.deepEqual(plain(R.normalizeLayout(plain(R.defaultLayout()))), plain(R.defaultLayout()));
@@ -2500,7 +2500,7 @@ test("rules v2: rule sets arrange profiles: Default, existing ones by name and n
   const mining = next.profiles.find(profile => profile.id === "mine");
   assert.equal(mining.settings.pickups.maxRows, 12);
   assert.equal(mining.settings.xp.window, 3600);
-  assert.equal(mining.tiles.length, 14, "Mining keeps its panels");
+  assert.equal(mining.tiles.length, 16, "Mining keeps its panels");
   const flying = next.profiles.find(profile => profile.name === "Flying");
   assert.equal(flying.id, "fly");
   assert.deepEqual(plain(next.profiles.map(profile => profile.id)), ["keep", "mine", "fly"], "others stay unless replacing");
@@ -2581,7 +2581,12 @@ test("detail fields and item contents are validated", () => {
     { performance: performance([-1]) }, { performance: performance(Array(601).fill(60)) },
     { performance: { ...performance(), windows: { ...performance().windows, 10: { seconds: 10, average: 50, low: 51 } } } },
     { performance: { ...performance(), windows: { 10: null, 30: null, 60: null } } },
-    { inventory: { ...inventory(), slots: [shulker({ contents: [shulker()] }), ...inventory().slots.slice(1)] } }]) {
+    { inventory: { ...inventory(), slots: [shulker({ contents: [shulker()] }), ...inventory().slots.slice(1)] } },
+    { inventory: { ...inventory(), slots: [shulker({ contentsUnknown: true }), ...inventory().slots.slice(1)] } },
+    { inventory: { ...inventory(), slots: [item({ contentsUnknown: true }), ...inventory().slots.slice(1)] } },
+    { inventory: { ...inventory(), slots: [item({ contentsUnknown: undefined }), ...inventory().slots.slice(1)] } },
+    { inventory: { ...inventory(), slots: [shulker({ contents: [item({ contentsUnknown: 1 })] }),
+      ...inventory().slots.slice(1)] } }]) {
     assert.throws(() => h.apply(undefined, initial(snapshot(bad))), JSON.stringify(bad).slice(0, 100));
   }
   assert.throws(() => h.apply(undefined, initial(unavailable({ world: details().world }))));
@@ -2843,6 +2848,233 @@ test("shulker boxes open a window over the dashboard that can be pinned and save
   h.sockets[0].message(update({ inventory: { slots: [{ index: 0, item: empty() }], equipment: { mainhand: empty() } } }));
   assert.match(windows()[0].children[1].textContent, /Not in your inventory/);
   assert.equal(windows()[0].children[2].children.length, 27, "the last contents stay visible");
+});
+
+test("a window pinned in the saved layout can be closed and unpinned", async () => {
+  const requests = [];
+  const stored = { version: 2, tiles: [{ id: "inventory", enabled: true, x: 0, y: 0, w: 12, h: 6 }],
+    pinned: [{ source: "accessory", slot: 0, x: 240, y: 100 }, { source: "accessory", slot: 1, x: 260, y: 120 }] };
+  const h = harness(defaultFetch(stored, requests));
+  await h.flush();
+  const backpack = item({ itemId: "sophisticatedbackpacks:backpack", name: "Backpack", count: 1, maxCount: 1,
+    contents: [item({ name: "Blaze Rod" })] });
+  h.sockets[0].message(initial(snapshot({ inventory: { ...inventory(), accessories: [backpack, backpack] } })));
+  const windows = () => h.get("#windows").children;
+  assert.equal(windows().length, 2);
+  windows()[0].children[0].children[2].emit("click");
+  assert.equal(windows().length, 1, "× closes a window that came from the saved layout");
+  windows()[0].children[0].children[1].emit("click");
+  await h.runTimers(400);
+  assert.deepEqual(JSON.parse(requests.filter(request => request.method === "PUT").at(-1).body).pinned, [],
+    "closing one and unpinning the other leaves nothing pinned");
+  h.events.pointerdown({ target: {} });
+  assert.equal(windows().length, 0, "the unpinned window closes like any other");
+});
+
+test("a backpack whose contents are not known yet opens a window that says so", async () => {
+  const h = harness();
+  await h.flush();
+  const backpack = item({ itemId: "sophisticatedbackpacks:backpack", name: "Backpack", count: 1, maxCount: 1,
+    contentsUnknown: true, contents: [] });
+  const slots = [backpack, ...inventory().slots.slice(1)];
+  h.sockets[0].message(initial(snapshot({ inventory: { ...inventory(), slots,
+    equipment: { ...inventory().equipment, mainhand: backpack } } })));
+  hotbar(h)[0].emit("click", { clientX: 50, clientY: 60 });
+  const windows = () => h.get("#windows").children;
+  assert.equal(windows().length, 1);
+  assert.equal(windows()[0].children[0].children[0].textContent, "Backpack");
+  assert.match(windows()[0].children[1].textContent, /not known yet/);
+  assert.equal(windows()[0].children[2].children.filter(slot => !slot.hidden).length, 0, "no empty grid is shown");
+  const seen = { ...backpack, contentsUnknown: false, contents: [item({ name: "Diamond", itemId: "minecraft:diamond" })] };
+  h.sockets[0].message(update({ inventory: { slots: [{ index: 0, item: seen }], equipment: { mainhand: seen } } }));
+  assert.equal(windows()[0].children[1].textContent, "");
+  assert.equal(slotParts(windows()[0].children[2].children[0]).fallback.textContent, "DI");
+});
+
+test("accessory slots show under the inventory and a worn backpack opens a live window", async () => {
+  const h = harness();
+  await h.flush();
+  const row = h.get("#inventory-accessories");
+  h.sockets[0].message(initial(snapshot()));
+  assert.equal(row.hidden, true, "no row while nothing is worn");
+  const ring = item({ itemId: "artifacts:gold_ring", name: "Gold Ring", count: 1, maxCount: 1 });
+  const backpack = (contents) => item({ itemId: "sophisticatedbackpacks:backpack", name: "Backpack", count: 1,
+    maxCount: 1, contents });
+  h.sockets[0].message(update({ inventory: { accessories: [ring, backpack([item({ name: "Diamond" })])] } }));
+  assert.equal(row.hidden, false);
+  const shown = row.children.filter(slot => !slot.hidden);
+  assert.equal(shown.length, 2);
+  shown[0].emit("click", { clientX: 50, clientY: 60 });
+  const windows = () => h.get("#windows").children;
+  assert.equal(windows().length, 0, "a ring has no window");
+  shown[1].emit("click", { clientX: 50, clientY: 60 });
+  assert.equal(windows().length, 1);
+  assert.equal(slotParts(windows()[0].children[2].children[0]).fallback.textContent, "DI");
+  h.sockets[0].message(update({ baseRevision: 7, revision: 8, capturedAt: 102,
+    inventory: { accessories: [ring, backpack([item({ name: "Emerald" })])] } }));
+  assert.equal(slotParts(windows()[0].children[2].children[0]).fallback.textContent, "EM", "the window follows changes");
+  for (const bad of [[empty()], Array.from({ length: 33 }, () => ring), "ring"]) {
+    assert.throws(() => h.apply(snapshot(), update({ inventory: { accessories: bad } })), "accessories are validated");
+  }
+});
+
+test("the Personal backpack panel shows the worn backpack's slots, only on Minecraft 1.21.1", async () => {
+  const chip = h => h.get("#tile-toggles").children.find(element => element.textContent === "Personal backpack");
+  const modern = harness();
+  await modern.flush();
+  modern.sockets[0].message({ ...initial(snapshot()), modVersion: "0.12+26.1.2" });
+  assert.equal(chip(modern).hidden, true, "no Personal backpack panel on 26.1.2");
+  assert.equal(modern.get("#tile-backpack").hidden, true);
+
+  const h = harness();
+  await h.flush();
+  const backpack = item({ itemId: "sophisticatedbackpacks:backpack", name: "Iron Backpack", count: 1, maxCount: 1,
+    contents: [item({ name: "Diamond" }), empty(), item({ name: "Emerald" }), ...Array.from({ length: 51 }, empty)] });
+  h.sockets[0].message({ ...initial(snapshot({ inventory: { ...inventory(), accessories: [backpack] } })),
+    modVersion: "0.12+1.21.1" });
+  assert.equal(chip(h).hidden, false, "available on 1.21.1");
+  assert.equal(h.get("#backpack-status").textContent, "Iron Backpack");
+  assert.equal(h.get("#backpack-message").hidden, true);
+  const slots = h.get("#backpack-grid").children.filter(slot => !slot.hidden);
+  assert.equal(slots.length, 54, "every slot of the backpack, empty ones in place");
+  assert.equal(slotParts(slots[0]).fallback.textContent, "DI");
+  assert.equal(slotParts(slots[2]).fallback.textContent, "EM");
+  h.sockets[0].message(update({ inventory: { accessories: [] } }));
+  assert.equal(h.get("#backpack-status").textContent, "None worn");
+  assert.match(h.get("#backpack-message").textContent, /Wear a backpack/);
+  assert.equal(h.get("#backpack-grid").children.filter(slot => !slot.hidden).length, 0);
+});
+
+const IRON_PACK = "123e4567-e89b-12d3-a456-426614174000";
+const GOLD_PACK = "123e4567-e89b-12d3-a456-426614174001";
+
+function backpacks(overrides = {}) {
+  const now = Date.now();
+  return { source: "world", last: IRON_PACK, list: [
+    { uuid: IRON_PACK, name: "Iron Backpack", player: "Steve", openedAt: now - 120_000, icon: "e0-iron",
+      items: ["minecraft:diamond"], filled: 1, slots: 27 },
+    { uuid: GOLD_PACK, name: "", player: null, openedAt: null, icon: null,
+      items: ["minecraft:ender_pearl", "minecraft:emerald"], filled: 2, slots: 54 }
+  ], shown: [{ uuid: IRON_PACK, name: "Iron Backpack", contentsUnknown: false,
+    contents: [item({ itemId: "minecraft:diamond", name: "Diamond" }), ...Array.from({ length: 26 }, empty)] }],
+  ...overrides };
+}
+
+test("backpacks are validated like the Java model", () => {
+  const h = harness();
+  const valid = backpacks();
+  assert.deepEqual(plain(h.apply(undefined, initial(snapshot({ backpacks: valid }))).backpacks), valid);
+  assert.equal(h.apply(undefined, initial()).backpacks, null, "null without the backpack mod");
+  const entry = valid.list[0];
+  const shown = valid.shown[0];
+  for (const bad of [{ ...valid, source: "server" }, { ...valid, last: "LAST" },
+    { ...valid, list: [{ ...entry, uuid: "123E4567-E89B-12D3-A456-426614174000" }] },
+    { ...valid, list: Array.from({ length: 257 }, () => entry) },
+    { ...valid, shown: Array.from({ length: 9 }, () => shown) },
+    { ...valid, list: [{ ...entry, name: "x".repeat(257) }] },
+    { ...valid, list: [{ ...entry, player: "" }] }, { ...valid, list: [{ ...entry, filled: 129 }] },
+    { ...valid, list: [{ ...entry, items: ["Diamond"] }] },
+    { ...valid, list: [{ ...entry, items: Array.from({ length: 65 }, () => "minecraft:stone") }] },
+    { ...valid, shown: [{ ...shown, contents: Array.from({ length: 129 }, empty) }] },
+    { ...valid, shown: [{ ...shown, contentsUnknown: true }] },
+    { ...valid, shown: [{ ...shown, contents: [item({ contents: [] })] }] }, "none", undefined]) {
+    assert.throws(() => h.apply(undefined, initial(snapshot({ backpacks: bad }))), JSON.stringify(bad)?.slice(0, 200));
+  }
+});
+
+test("the Backpacks panel lists, searches and shows the selected backpack, only on Minecraft 1.21.1", async () => {
+  const chip = h => h.get("#tile-toggles").children.find(element => element.textContent === "Backpacks");
+  const modern = harness();
+  await modern.flush();
+  modern.sockets[0].message({ ...initial(snapshot()), modVersion: "0.12+26.1.2" });
+  assert.equal(chip(modern).hidden, true, "no Backpacks panel on 26.1.2");
+  assert.equal(modern.get("#tile-backpacks").hidden, true);
+
+  const requests = [];
+  const h = harness(defaultFetch(null, requests));
+  await h.flush();
+  const pearl = { id: "minecraft:ender_pearl", name: "Ender Pearl", icon: null };
+  h.sockets[0].message({ ...initial(snapshot({ registries: registries({ items: [pearl] }) })),
+    modVersion: "0.12+1.21.1" });
+  assert.equal(chip(h).hidden, false, "available on 1.21.1");
+  assert.equal(h.get("#backpacks-message").textContent, "Needs Sophisticated Backpacks.");
+  assert.equal(h.get("#backpacks-status").textContent, "Unavailable");
+
+  h.sockets[0].message(update({ backpacks: backpacks() }));
+  const rows = () => h.get("#backpacks-list").children;
+  const names = () => rows().map(row => row.children[0].textContent);
+  const visible = () => h.get("#backpacks-grid").children.filter(slot => !slot.hidden);
+  assert.deepEqual(rows().map(row => row.children.map(part => part.textContent)),
+    [["Iron Backpack", "1/27", "Steve · opened 2m ago"], ["Backpack", "2/54", ""]]);
+  assert.deepEqual(rows().map(row => row.attributes["aria-pressed"]), ["true", "false"], "the last opened is selected");
+  assert.equal(h.get("#backpacks-last").attributes["aria-pressed"], "true");
+  assert.equal(h.get("#backpacks-status").textContent, "Iron Backpack");
+  assert.equal(h.get("#backpacks-message").hidden, true);
+  assert.equal(visible().length, 27);
+  assert.equal(slotParts(visible()[0]).fallback.textContent, "DI");
+  assert.equal(h.get("#backpacks-note").hidden, true, "singleplayer lists every backpack");
+
+  const search = text => {
+    h.get("#backpacks-search").value = text;
+    h.get("#backpacks-search").emit("input");
+  };
+  search("steve");
+  assert.deepEqual(names(), ["Iron Backpack"], "by player");
+  search("Iron");
+  assert.deepEqual(names(), ["Iron Backpack"], "by name");
+  search("ender pearl");
+  assert.deepEqual(names(), ["Backpack"], "by item name from the registries");
+  search("minecraft:emerald");
+  assert.deepEqual(names(), ["Backpack"], "by item id");
+  search("");
+  assert.equal(rows().length, 2);
+
+  rows()[1].emit("click");
+  assert.equal(h.run("displaySettings().backpacks.selected"), GOLD_PACK);
+  assert.equal(h.get("#backpacks-last").attributes["aria-pressed"], "false");
+  assert.deepEqual(rows().map(row => row.attributes["aria-pressed"]), ["false", "true"]);
+  assert.equal(h.get("#backpacks-status").textContent, "Backpack");
+  assert.equal(h.get("#backpacks-message").textContent, "Loading…", "until the game sends its contents");
+  assert.equal(visible().length, 0);
+
+  const gold = contents => ({ uuid: GOLD_PACK, name: "", contentsUnknown: false,
+    contents: [...contents, ...Array.from({ length: 54 - contents.length }, empty)] });
+  h.sockets[0].message(update({ baseRevision: 7, revision: 8, capturedAt: 102,
+    backpacks: backpacks({ shown: [...backpacks().shown, gold([item({ itemId: "minecraft:emerald", name: "Emerald" })])] }) }));
+  assert.equal(h.get("#backpacks-message").hidden, true);
+  assert.equal(visible().length, 54);
+  assert.equal(slotParts(visible()[0]).fallback.textContent, "EM");
+  h.sockets[0].message(update({ baseRevision: 8, revision: 9, capturedAt: 103,
+    backpacks: backpacks({ shown: [gold([empty(), item({ itemId: "minecraft:ender_pearl", name: "Ender Pearl" })])] }) }));
+  assert.equal(slotParts(visible()[1]).fallback.textContent, "EP", "follows every snapshot");
+  h.sockets[0].message(update({ baseRevision: 9, revision: 10, capturedAt: 104,
+    backpacks: backpacks({ source: "remembered", shown: [{ ...gold([]), contents: [], contentsUnknown: true }] }) }));
+  assert.equal(h.get("#backpacks-message").textContent, "Contents not known yet. Open the backpack once in game.");
+  assert.equal(h.get("#backpacks-note").hidden, false, "servers list only opened backpacks");
+  assert.equal(visible().length, 0);
+
+  h.get("#backpacks-last").emit("click");
+  assert.equal(h.run("displaySettings().backpacks.selected"), "last");
+  assert.equal(h.get("#backpacks-status").textContent, "Iron Backpack");
+  assert.equal(h.get("#backpacks-message").textContent, "Loading…", "the last opened isn't in this sample");
+  await h.runTimers(400);
+  assert.equal(savedLayout(requests).settings.backpacks.selected, "last");
+
+  h.sockets[0].message(update({ baseRevision: 10, revision: 11, capturedAt: 105,
+    backpacks: { source: "world", last: null, list: [], shown: [] } }));
+  assert.equal(h.get("#backpacks-message").textContent, "No backpacks found yet.");
+  assert.equal(h.get("#backpacks-status").textContent, "None");
+  assert.equal(rows().length, 0);
+});
+
+test("the Backpacks panel's selection is a validated setting", () => {
+  const h = harness();
+  const normalize = value => h.run(`normalizeSettings(${JSON.stringify(value)})`);
+  assert.equal(normalize({}).backpacks.selected, "last");
+  assert.equal(normalize({ backpacks: { selected: GOLD_PACK } }).backpacks.selected, GOLD_PACK);
+  for (const bad of ["LAST", "123e4567", GOLD_PACK.toUpperCase(), 7, null]) {
+    assert.throws(() => normalize({ backpacks: { selected: bad } }), String(bad));
+  }
 });
 
 test("villager trades are searchable, navigable with height arrows and can be forgotten", async () => {

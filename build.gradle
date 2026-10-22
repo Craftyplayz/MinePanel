@@ -1,12 +1,16 @@
+// Fabric: Stonecutter runs this script once per Fabric node (versions/<minecraft>-fabric/), against the shared src/.
 plugins {
-    id 'net.fabricmc.fabric-loom' version "${loom_version}"
+    id 'dev.kikugie.loom-back-compat'
 }
 
-version = project.mod_version
+def minecraftVersion = stonecutter.current.version
+def javaVersion = project.java_version as int
+
+version = "${project.mod_version}+${minecraftVersion}"
 group = project.maven_group
 
 base {
-    archivesName = 'minepanel'
+    archivesName = 'minepanel-fabric'
 }
 
 loom {
@@ -31,32 +35,57 @@ repositories {
             includeGroup 'fi.dy.masa.malilib'
         }
     }
+    exclusiveContent {
+        forRepository {
+            maven { url = 'https://api.modrinth.com/maven' }
+        }
+        filter {
+            includeGroup 'maven.modrinth'
+        }
+    }
 }
 
 dependencies {
-    minecraft "com.mojang:minecraft:${project.minecraft_version}"
-    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
-    implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
-    compileOnly("fi.dy.masa.litematica:litematica-fabric-${project.minecraft_version}:${project.litematica_version}") {
+    minecraft "com.mojang:minecraft:${minecraftVersion}"
+    // Mojang names on obfuscated versions; a no-op on 26.1+. mod* configurations remap there and are plain aliases on 26.1+.
+    loomx.applyMojangMappings()
+    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+    modCompileOnly("${project.litematica_dependency}:${project.litematica_version}") {
         transitive = false
     }
-    compileOnly("fi.dy.masa.malilib:malilib-fabric-${project.minecraft_version}:${project.malilib_version}") {
+    modCompileOnly("${project.malilib_dependency}:${project.malilib_version}") {
         transitive = false
     }
 }
 
 processResources {
-    def expansions = [version: project.version.toString(), litematica_version: project.litematica_version]
+    exclude 'META-INF/neoforge.mods.toml'
+    def expansions = [version: project.version.toString(), litematica_version: project.litematica_version,
+                      minecraft: project.minecraft_range, java: javaVersion,
+                      fabric_api: project.fabric_api_version.tokenize('+')[0]]
     inputs.properties expansions
     filesMatching('fabric.mod.json') {
         expand expansions
     }
 }
 
+processClientResources {
+    // Mixins whose target classes don't exist on this Minecraft version (their sources are //? if'd out too).
+    def excludedMixins = project.findProperty('excluded_mixins')?.toString()?.tokenize(',') ?: []
+    inputs.property 'java', javaVersion
+    inputs.property 'excludedMixins', excludedMixins
+    filesMatching('minepanel.client.mixins.json') {
+        expand java: javaVersion
+        // Each mixin is on its own line, and none of these is the last entry, so the JSON stays valid.
+        filter { line -> excludedMixins.any { line.trim() == '"' + it + '",' } ? null : line }
+    }
+}
+
 java {
-    toolchain.languageVersion = JavaLanguageVersion.of(25)
-    sourceCompatibility = JavaVersion.VERSION_25
-    targetCompatibility = JavaVersion.VERSION_25
+    toolchain.languageVersion = JavaLanguageVersion.of(javaVersion)
+    sourceCompatibility = JavaVersion.toVersion(javaVersion)
+    targetCompatibility = JavaVersion.toVersion(javaVersion)
     withSourcesJar()
 }
 
@@ -67,119 +96,19 @@ tasks.jar {
 }
 
 tasks.withType(JavaCompile).configureEach {
-    options.release = 25
+    options.release = javaVersion
 }
 
-def serviceTest = tasks.register('serviceTest', JavaExec) {
-    dependsOn tasks.testClasses
-    classpath = sourceSets.test.runtimeClasspath
-    mainClass = 'dev.craftyplayz.minepanel.service.LocalDashboardServerTest'
-}
-
-def frontendSyntax = tasks.register('frontendSyntax', Exec) {
-    // node --check accepts one file, so check each dashboard script in turn.
-    commandLine 'node', '-e', "for (const file of ['protocol.js', 'layout.js', 'rules.js', 'app.js', 'player-links.js', 'features.js', 'model.js']) " +
-            "require('child_process').execFileSync(process.execPath, ['--check', 'src/client/resources/web/' + file], { stdio: 'inherit' })"
-}
-
-def frontendTest = tasks.register('frontendTest', Exec) {
-    commandLine 'node', '--test', 'src/test/js/dashboard.test.js'
-}
-
-// Java tests are main()-based and run through serviceTest, so the JUnit task finds none.
-tasks.named('test') {
-    failOnNoDiscoveredTests = false
-}
-
-// Litematica is optional: only its adapter package may import it, so absence can never break class loading elsewhere.
-def litematicaIsolation = tasks.register('litematicaIsolation') {
-    def sources = fileTree('src') { include '**/*.java' }
-    inputs.files(sources)
-    doLast {
-        def offenders = sources.files.findAll { file ->
-            !file.path.replace(File.separator, '/').contains('/dev/craftyplayz/minepanel/litematica/')
-                    && file.text =~ /(?m)^import\s+(static\s+)?fi\.dy\.masa\./
-        }
-        if (!offenders.isEmpty()) {
-            throw new GradleException("Only dev.craftyplayz.minepanel.litematica may import Litematica: ${offenders*.name}")
-        }
+ext.modJar = loomx.modJar
+ext.loaderMetadata = 'fabric.mod.json'
+def litematicaRange = ">=${project.litematica_version}"
+ext.checkMetadata = { java.util.jar.JarFile jar ->
+    if (jar.getEntry('dev/craftyplayz/minepanel/litematica/LitematicaBuildSource.class') == null) {
+        throw new GradleException('Release JAR is missing the Litematica adapter')
+    }
+    def metadata = new groovy.json.JsonSlurper().parse(jar.getInputStream(jar.getEntry('fabric.mod.json')))
+    if (metadata.suggests?.litematica != litematicaRange) {
+        throw new GradleException("fabric.mod.json must suggest litematica ${litematicaRange}")
     }
 }
-
-tasks.named('check') {
-    dependsOn serviceTest, frontendSyntax, frontendTest, litematicaIsolation
-}
-
-tasks.register('releaseBuild') {
-    group = 'build'
-    description = 'Builds, tests, and validates the installable MinePanel release JAR.'
-    dependsOn tasks.build
-    def jarFile = tasks.named('jar').flatMap { it.archiveFile }
-    def releaseDir = layout.buildDirectory.dir('release')
-    def litematicaRange = ">=${project.litematica_version}"
-    doLast {
-        def artifact = jarFile.get().asFile
-        if (!artifact.isFile()) {
-            throw new GradleException("Release JAR was not created: ${artifact}")
-        }
-        def jar = new java.util.jar.JarFile(artifact)
-        try {
-            ['fabric.mod.json', 'minepanel.client.mixins.json', 'web/index.html', 'web/app.js', 'web/styles.css',
-             'web/protocol.js', 'web/layout.js', 'web/model.js',
-             'dev/craftyplayz/minepanel/MinePanelClient.class',
-             'dev/craftyplayz/minepanel/mixin/StatisticsSyncMixin.class',
-             'dev/craftyplayz/minepanel/mixin/BlockChangeMixin.class',
-             'dev/craftyplayz/minepanel/build/BuildTracker.class',
-             'dev/craftyplayz/minepanel/litematica/LitematicaBuildSource.class'].each { entry ->
-                if (jar.getEntry(entry) == null) {
-                    throw new GradleException("Release JAR is missing ${entry}")
-                }
-            }
-            // Litematica and MaLiLib are LGPL-3.0 optional dependencies: compiled against, never shipped.
-            def bundled = jar.entries().toList().findAll { it.name.startsWith('fi/dy/masa/') || it.name.contains('litematica-fabric') || it.name.contains('malilib-fabric') }
-            if (!bundled.isEmpty()) {
-                throw new GradleException("Release JAR bundles Litematica/MaLiLib: ${bundled*.name.take(5)}")
-            }
-            def metadata = new groovy.json.JsonSlurper().parse(jar.getInputStream(jar.getEntry('fabric.mod.json')))
-            if (metadata.suggests?.litematica != litematicaRange) {
-                throw new GradleException("fabric.mod.json must suggest litematica ${litematicaRange}")
-            }
-        } finally {
-            jar.close()
-        }
-        def destination = releaseDir.get().file(artifact.name).asFile
-        destination.parentFile.mkdirs()
-        java.nio.file.Files.copy(artifact.toPath(), destination.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-        logger.lifecycle("Validated release artifact: ${destination}")
-    }
-}
-
-// Local testing: builds the JAR (no tests) and swaps it into a Minecraft instance's mods folder. Set the folder once in
-// ~/.gradle/gradle.properties as minepanelModsDir=..., pass -PminepanelModsDir=..., or set MINEPANEL_MODS_DIR.
-tasks.register('installMod') {
-    group = 'build'
-    description = 'Builds the mod JAR and copies it into the mods folder named by minepanelModsDir.'
-    dependsOn tasks.named('jar')
-    def jarFile = tasks.named('jar').flatMap { it.archiveFile }
-    def modsDir = providers.gradleProperty('minepanelModsDir').orElse(providers.environmentVariable('MINEPANEL_MODS_DIR'))
-    outputs.upToDateWhen { false }
-    doLast {
-        if (!modsDir.isPresent()) {
-            throw new GradleException('Set minepanelModsDir in ~/.gradle/gradle.properties (or pass -PminepanelModsDir=<mods folder>)')
-        }
-        def dir = new File(modsDir.get())
-        if (!dir.isDirectory()) {
-            throw new GradleException("Mods folder does not exist: ${dir}")
-        }
-        // Remove earlier MinePanel builds and releases so Fabric doesn't load two copies.
-        dir.listFiles().findAll { it.isFile() && it.name ==~ /(?i)minepanel-.*\.jar/ }.each { old ->
-            if (!old.delete()) {
-                throw new GradleException("Could not remove ${old} (is Minecraft still running?)")
-            }
-        }
-        def artifact = jarFile.get().asFile
-        def destination = new File(dir, artifact.name)
-        java.nio.file.Files.copy(artifact.toPath(), destination.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-        logger.lifecycle("Installed ${destination}")
-    }
-}
+apply from: rootProject.file('gradle/shared.gradle')

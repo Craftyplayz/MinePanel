@@ -13,15 +13,26 @@ import java.util.UUID;
  * registries (for the rule editor's pickers), and what the 3D render panel draws. Each part is sent as a top-level
  * snapshot field and replaced whole when it changes.
  * {@code advancements} is null until the server has sent them; {@code enderChest} is null until the player opens
- * their ender chest in this world.
+ * their ender chest in this world. {@code backpacks} is null without a supported backpack mod.
  */
 public record PlayerDetails(WorldInfo world, Motion motion, XpTracker.Experience xp, PortalTracker.State portal,
                             List<PickupTracker.Pickup> pickups, AdvancementsSnapshot advancements,
                             List<VillagerSnapshot> villagers, EnderChest enderChest,
                             FrameStats.Performance performance, BuildProgress build, Icons icons,
-                            Sensors sensors, Registries registries, Appearance appearance) {
+                            Sensors sensors, Registries registries, Appearance appearance,
+                            BackpacksSnapshot backpacks) {
     public static final List<String> FIELDS = List.of("world", "motion", "xp", "portal", "pickups", "advancements",
-            "villagers", "enderChest", "performance", "build", "icons", "sensors", "registries", "appearance");
+            "villagers", "enderChest", "performance", "build", "icons", "sensors", "registries", "appearance",
+            "backpacks");
+
+    /** Details without backpacks (no supported backpack mod). */
+    public PlayerDetails(WorldInfo world, Motion motion, XpTracker.Experience xp, PortalTracker.State portal,
+                         List<PickupTracker.Pickup> pickups, AdvancementsSnapshot advancements,
+                         List<VillagerSnapshot> villagers, EnderChest enderChest, FrameStats.Performance performance,
+                         BuildProgress build, Icons icons, Sensors sensors, Registries registries, Appearance appearance) {
+        this(world, motion, xp, portal, pickups, advancements, villagers, enderChest, performance, build, icons,
+                sensors, registries, appearance, null);
+    }
 
     /** The 27 slots of the player's ender chest, as of {@code seenAt}. */
     public record EnderChest(long seenAt, List<ItemSnapshot> slots) {
@@ -141,6 +152,7 @@ public record PlayerDetails(WorldInfo world, Motion motion, XpTracker.Experience
             case "sensors" -> details.sensors.toJson();
             case "registries" -> details.registries.toJson();
             case "appearance" -> details.appearance.toJson();
+            case "backpacks" -> details.backpacks == null ? "null" : details.backpacks.toJson();
             default -> throw new IllegalArgumentException(field);
         };
     }
@@ -162,6 +174,7 @@ public record PlayerDetails(WorldInfo world, Motion motion, XpTracker.Experience
             case "sensors" -> details.sensors;
             case "registries" -> details.registries;
             case "appearance" -> details.appearance;
+            case "backpacks" -> details.backpacks;
             default -> throw new IllegalArgumentException(field);
         };
     }

@@ -106,7 +106,12 @@ final class MotionCollector {
     private static ItemStack glider(Player player) {
         for (EquipmentSlot slot : EquipmentSlot.values()) {
             ItemStack stack = player.getItemBySlot(slot);
+            //? if >=26.1 {
             if (LivingEntity.canGlideUsing(stack, slot)) return stack;
+            //?} else {
+            /*if (slot == EquipmentSlot.CHEST && stack.getItem() instanceof net.minecraft.world.item.ElytraItem
+                    && net.minecraft.world.item.ElytraItem.isFlyEnabled(stack)) return stack;
+            *///?}
         }
         return ItemStack.EMPTY;
     }

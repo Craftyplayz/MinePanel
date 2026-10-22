@@ -51,7 +51,7 @@ Contents: [World](#world) · [Position](#position) · [Player](#player) · [Inve
 | AFK for | `afk` | compare (minutes) | Minutes since you last moved more than ¼ block, turned, or moved the mouse cursor in game. Same timer as the [AFK panel](Panels.md#afk) |
 | On fire / In water / In lava / In rain / Sneaking / Sprinting / Sleeping | `onFire`, `inWater`, `inLava`, `inRain`, `sneaking`, `sprinting`, `sleeping` | — | That's happening right now. *In rain* means rain is actually falling on you |
 | Riding | `riding` | optional entity | You're riding anything, or that kind of entity (horse, boat, minecart, …) |
-| Using an item | `usingItem` | eating, drinking, blocking, drawing a bow, loading a crossbow, throwing a trident, using a spear, spyglass, goat horn, brushing, bundle, fishing | You're doing that right now. *Fishing* means your hook is out |
+| Using an item | `usingItem` | eating, drinking, blocking, drawing a bow, loading a crossbow, throwing a trident, using a spear, spyglass, goat horn, brushing, bundle, fishing | You're doing that right now. *Fishing* means your hook is out. On Minecraft 1.21.1, *using a spear* and *bundle* never match ([why](Home.md#minecraft-versions)) |
 
 ## Inventory
 

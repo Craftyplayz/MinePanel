@@ -22,6 +22,8 @@ Every panel, what it shows and how to configure it. Settings marked **⚙** are 
 | [AFK](#afk) | `afk` | no | 3 × 3 | ⚙ |
 | [JourneyMap](#journeymap) | `map` | no | 2 × 2 | ⚙ |
 | [Build progress](#build-progress) | `build` | no | 2 × 2 | — |
+| [Personal backpack](#personal-backpack) | `backpack` | no | 3 × 3 | — |
+| [Backpacks](#backpacks) | `backpacks` | no | 4 × 4 | selected backpack |
 
 Sizes are in grid cells: the grid is 12 columns wide and each row is 40 px. The **id** is what rules and rule set files use.
 
@@ -45,8 +47,9 @@ Click your **player head** for the [player menu](Dashboard.md#player-menu).
 A read-only copy of your inventory: the hotbar (selected slot highlighted), the 27 main slots, armour, offhand and an ender chest slot. The line at the top names the item you're holding.
 
 - **Armor** (chip in the title bar) shows or hides the armour and offhand slots. Setting: `showArmor` (default on).
-- **Hover** an item for its tooltip; **click** a shulker box, bundle or the ender chest to open an [item window](Dashboard.md#item-windows).
+- **Hover** an item for its tooltip; **click** a shulker box, bundle, [backpack](Integrations.md#sophisticated-backpacks) or the ender chest to open an [item window](Dashboard.md#item-windows).
 - When the panel is small it shows only the whole rows that fit, hotbar first, instead of scrolling or cutting rows in half.
+- With [Curios](Integrations.md#curios) (NeoForge), items in your extra slots (back, rings, belt and so on) show in a row under the inventory, only while you wear something there. Click a backpack there to open it.
 
 ## Statistics
 
@@ -196,6 +199,37 @@ Your player in 3D, using your own skin, wearing your armour (without the enchant
 | `speed` | Speed | 15, 30, 60 or 120 degrees per second | 30 |
 
 After you drag it while spinning is on, it waits a moment, then eases back upright and starts spinning again. If your system asks for reduced motion, it doesn't spin or bob.
+
+## Personal backpack
+
+The backpack you're wearing, laid out slot by slot like its screen in game. Only on **Minecraft 1.21.1**: on other versions it isn't in the **Tiles** list.
+
+- It shows the first backpack in your [Curios](Integrations.md#curios) slots, or else a backpack worn in your chest slot. The title bar names it, or says **None worn**.
+- Every slot is drawn, empty ones included, 9 to a row (12 for backpacks bigger than 81 slots, as in game). Slots shrink so the whole backpack fits the panel.
+- Hover an item for its tooltip.
+- Contents come from [Sophisticated Backpacks](Integrations.md#sophisticated-backpacks): about four times a second in singleplayer, and from the last time you opened the backpack on a server. Until then the panel says *Contents not known yet. Open the backpack once in game.*
+
+> New and not tested in game yet.
+
+## Backpacks
+
+Every backpack MinePanel knows of, and the contents of the one you pick. Only on **Minecraft 1.21.1** with [Sophisticated Backpacks](Integrations.md#sophisticated-backpacks): on other versions it isn't in the **Tiles** list, and without the mod it says *Needs Sophisticated Backpacks.*
+
+- **Which backpacks are listed:** in singleplayer, every backpack in your world, whoever opened it. On a server, only the backpacks you've opened yourself, as you last saw them; the panel says so under the search box.
+- **The list** shows each backpack's name (**Backpack** if it has none), who opened it last and how long ago, and how many of its slots hold something (for example **12/54**). The most recently opened is at the top.
+- **Search backpacks or items** narrows the list by backpack name, by who opened it, or by an item inside (its name or id, such as `diamond` or `minecraft:diamond`).
+- **Click a backpack** in the list to show it below. **Last opened** goes back to showing whichever backpack was opened most recently, and stays pressed while it's chosen. The title bar names the backpack shown, or says **None**.
+- The chosen backpack is drawn slot by slot like the [Personal backpack](#personal-backpack) panel, and follows changes about four times a second in singleplayer. Hover an item for its tooltip.
+- Just after you pick a backpack, the panel says *Loading…* until the game sends its contents. *Contents not known yet. Open the backpack once in game.* means MinePanel hasn't seen inside it yet. *No backpacks found yet.* means it knows of none.
+- Nothing here changes a backpack: you can only look.
+
+| Setting | Id | What it does | Default |
+|---|---|---|---|
+| Selected backpack | `selected` | `last` shows the backpack opened most recently; a backpack's UUID (lowercase) always shows that backpack | `last` |
+
+The choice is saved per [profile](Customizing.md#profiles), so a rule can switch to a profile, or use [Set panel setting](Rule-Actions.md#set-panel-setting), to show a particular backpack.
+
+> New and not tested in game yet.
 
 ## AFK
 

@@ -1,0 +1,20 @@
+plugins {
+    id 'dev.kikugie.stonecutter'
+}
+
+stonecutter.active '26.1.2-fabric'
+
+stonecutter.parameters {
+    // //? if fabric { … } and //? if neoforge { … } pick loader-specific code.
+    def loader = current.project.tokenize('-').last()
+    constants['fabric'] = loader == 'fabric'
+    constants['neoforge'] = loader == 'neoforge'
+
+    replacements {
+        // 1.21.11 renamed ResourceLocation to Identifier (and ResourceKey.location() to identifier()).
+        string(current.parsed >= '1.21.11') {
+            replace 'ResourceLocation', 'Identifier'
+            replace '.location()', '.identifier()'
+        }
+    }
+}

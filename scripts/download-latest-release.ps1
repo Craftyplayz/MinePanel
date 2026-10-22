@@ -1,11 +1,16 @@
 # Downloads the newest MinePanel release JAR from GitHub into a Minecraft instance's mods folder,
 # replacing any earlier MinePanel JAR there.
 #
-#   powershell -ExecutionPolicy Bypass -File scripts\download-latest-release.ps1 -ModsDir "D:\Minecraft\Instances\26.1.2\minecraft\mods"
+#   powershell -ExecutionPolicy Bypass -File scripts\download-latest-release.ps1 -ModsDir "D:\Minecraft\Instances\ATM10\minecraft\mods" -Loader neoforge -Minecraft 1.21.1
 #
-# -ModsDir defaults to the MINEPANEL_MODS_DIR environment variable.
+# -ModsDir defaults to the MINEPANEL_MODS_DIR environment variable. Each release has one JAR per loader and Minecraft
+# version (MinePanel-v<version>-<loader>-mc<minecraft>.jar); -Loader (fabric or neoforge, default fabric) and
+# -Minecraft (default 26.1.2) pick one.
 param(
     [string]$ModsDir = $env:MINEPANEL_MODS_DIR,
+    [ValidateSet('fabric', 'neoforge')]
+    [string]$Loader = 'fabric',
+    [string]$Minecraft = '26.1.2',
     [string]$Repo = 'Craftyplayz/MinePanel'
 )
 
@@ -20,9 +25,9 @@ if (-not (Test-Path -LiteralPath $ModsDir -PathType Container)) {
 }
 
 $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest" -Headers @{ 'User-Agent' = 'MinePanel-downloader' }
-$asset = $release.assets | Where-Object { $_.name -like 'MinePanel-v*.jar' } | Select-Object -First 1
+$asset = $release.assets | Where-Object { $_.name -like "MinePanel-v*-$Loader-mc$Minecraft.jar" } | Select-Object -First 1
 if (-not $asset) {
-    throw "Release $($release.tag_name) has no MinePanel JAR attached."
+    throw "Release $($release.tag_name) has no MinePanel JAR for $Loader $Minecraft attached."
 }
 
 $destination = Join-Path $ModsDir $asset.name

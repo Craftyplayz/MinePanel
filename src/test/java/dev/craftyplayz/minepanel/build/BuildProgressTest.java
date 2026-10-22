@@ -193,6 +193,10 @@ public final class BuildProgressTest {
                         && progress.materials().get(progress.materials().size() - 1).itemId().equals("minecraft:stone"),
                 "sorted by still needed, then left, covered rows last: " + progress.materials());
         check(BuildTracker.carried(null).isEmpty(), "no inventory, nothing carried");
+        var backpack = item("sophisticatedbackpacks:backpack", "Backpack", 1,
+                List.of(item("minecraft:stone_slab", "Stone Slab", 7, null)));
+        check(BuildTracker.carried(inventory.withAccessories(List.of(backpack))).get("minecraft:stone_slab") == 10,
+                "a backpack worn in an accessory slot counts its contents as carried");
 
         var many = new FakeSource();
         var big = many.add("big");

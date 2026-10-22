@@ -90,6 +90,7 @@ public final class LitematicaBuildSource implements BuildSource {
                 SubRegionPlacement.RequiredEnabled.PLACEMENT_ENABLED;
         private final SchematicPlacement placement;
         // Litematica's comparison options, read once per tick.
+        //? if >=26.1
         private final boolean ignoreCropAge = Configs.Visuals.IGNORE_CROP_AGE.getBooleanValue();
         private final boolean ignoreFluids = Configs.Visuals.IGNORE_EXISTING_FLUIDS.getBooleanValue();
         private IgnoreBlockRegistry ignoreBlocks;
@@ -125,10 +126,17 @@ public final class LitematicaBuildSource implements BuildSource {
 
         @Override
         public long[] chunks() {
+            //? if >=26.1 {
             Set<ChunkPos> touched = placement.getTouchedChunks(ENABLED);
             long[] keys = new long[touched.size()];
             int index = 0;
             for (ChunkPos chunk : touched) keys[index++] = BuildTracker.chunkKey(chunk.x(), chunk.z());
+            //?} else {
+            /*Set<ChunkPos> touched = placement.getTouchedChunks();
+            long[] keys = new long[touched.size()];
+            int index = 0;
+            for (ChunkPos chunk : touched) keys[index++] = BuildTracker.chunkKey(chunk.x, chunk.z);
+            *///?}
             return keys;
         }
 
@@ -195,10 +203,20 @@ public final class LitematicaBuildSource implements BuildSource {
             Set<Pair<BlockState, BlockState>> ignored =
                     placement.hasVerifier() ? placement.getSchematicVerifier().getIgnoredMismatches() : Set.of();
             BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+            //? if >=26.1 {
             for (var box : placement.getBoxesWithinChunk(chunkX, chunkZ, ENABLED).values()) {
+            //?} else {
+            /*for (var box : placement.getBoxesWithinChunk(chunkX, chunkZ).values()) {
+            *///?}
+                //? if >=26.1 {
                 for (int y = box.minY(); y <= box.maxY(); y++) {
                     for (int z = box.minZ(); z <= box.maxZ(); z++) {
                         for (int x = box.minX(); x <= box.maxX(); x++) {
+                //?} else {
+                /*for (int y = box.minY; y <= box.maxY; y++) {
+                    for (int z = box.minZ; z <= box.maxZ; z++) {
+                        for (int x = box.minX; x <= box.maxX; x++) {
+                *///?}
                             pos.set(x, y, z);
                             BlockState expected = expectedChunk.getBlockState(pos);
                             BlockState actual = actualChunk.getBlockState(pos);
@@ -213,7 +231,11 @@ public final class LitematicaBuildSource implements BuildSource {
                                            Set<Pair<BlockState, BlockState>> ignored) {
             if (expected == actual) return expected.isAir() ? BuildRules.Result.NONE : BuildRules.Result.PLACED;
             return BuildRules.classify(expected.isAir(), actual.isAir(), false,
+                    //? if >=26.1 {
                     () -> ignoreCropAge && BlockUtils.areStatesEqualIgnoringAge(expected, actual),
+                    //?} else {
+                    /*() -> false, // Litematica 0.19 has no "ignore crop age" option
+                    *///?}
                     () -> !ignored.isEmpty() && ignored.contains(Pair.of(expected, actual)),
                     () -> ignoreFluids && actual.liquid() || ignoreBlocks().hasBlock(actual.getBlock()));
         }

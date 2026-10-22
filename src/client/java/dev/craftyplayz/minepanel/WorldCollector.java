@@ -7,9 +7,14 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
+//? if >=26.1 {
 import net.minecraft.util.Util;
+//?} else {
+/*import net.minecraft.Util;
+*///?}
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.Blocks;
+//? if >=26.1
 import net.minecraft.world.timeline.Timelines;
 
 import java.util.Locale;
@@ -47,10 +52,15 @@ final class WorldCollector {
         BlockPos feet = player.blockPosition();
         Identifier biome = level.getBiome(feet).unwrapKey().map(key -> key.identifier())
                 .orElse(Identifier.withDefaultNamespace("unknown"));
+        //? if >=26.1 {
         var clocks = level.clockManager();
         var timeline = level.registryAccess().get(Timelines.OVERWORLD_DAY);
         long day = timeline.map(holder -> (long) holder.value().getPeriodCount(clocks)).orElse(0L);
         long ticks = timeline.map(holder -> holder.value().getCurrentTicks(clocks)).orElse(level.getOverworldClockTime());
+        //?} else {
+        /*long ticks = level.getDayTime();
+        long day = ticks / 24_000L;
+        *///?}
         String weather = level.isThundering() ? "thunder" : level.isRaining() ? "rain" : "clear";
         String gameMode = minecraft.gameMode == null ? "survival" : minecraft.gameMode.getPlayerMode().getName();
         return new WorldInfo(kind, bounded(name), biome.toString(), biomeName(biome), weather, Math.max(0, day),
@@ -88,8 +98,13 @@ final class WorldCollector {
     /** A lit Nether portal block within {@link #PORTAL_SEARCH_RADIUS} of the target column, or null. */
     static PortalTracker.Point findPortal(ClientLevel level, Player player, PortalTracker.Point target) {
         int centerY = (int) Math.floor(player.getY());
+        //? if >=26.1 {
         int bottom = Math.max(level.getMinY(), centerY - PORTAL_SEARCH_HEIGHT);
         int top = Math.min(level.getMaxY(), centerY + PORTAL_SEARCH_HEIGHT);
+        //?} else {
+        /*int bottom = Math.max(level.getMinBuildHeight(), centerY - PORTAL_SEARCH_HEIGHT);
+        int top = Math.min(level.getMaxBuildHeight() - 1, centerY + PORTAL_SEARCH_HEIGHT);
+        *///?}
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         for (int dx = -PORTAL_SEARCH_RADIUS; dx <= PORTAL_SEARCH_RADIUS; dx++) {
             for (int dz = -PORTAL_SEARCH_RADIUS; dz <= PORTAL_SEARCH_RADIUS; dz++) {

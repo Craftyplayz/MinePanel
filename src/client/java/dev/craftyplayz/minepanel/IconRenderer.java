@@ -1,21 +1,31 @@
 package dev.craftyplayz.minepanel;
 
+//? if >=26.1 {
 import com.mojang.blaze3d.ProjectionType;
 import com.mojang.blaze3d.buffers.GpuBuffer;
-import com.mojang.blaze3d.platform.Lighting;
 import com.mojang.blaze3d.systems.CommandEncoder;
 import com.mojang.blaze3d.systems.GpuDevice;
-import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.blaze3d.textures.TextureFormat;
+import net.minecraft.client.renderer.Projection;
+import net.minecraft.client.renderer.ProjectionMatrixBuffer;
+import net.minecraft.client.renderer.item.TrackingItemStackRenderState;
+//?} else {
+/*import com.mojang.blaze3d.pipeline.TextureTarget;
+import com.mojang.blaze3d.platform.GlStateManager;
+import com.mojang.blaze3d.platform.NativeImage;
+import com.mojang.blaze3d.vertex.VertexSorting;
+import org.joml.Matrix4f;
+import org.lwjgl.opengl.GL11;
+import org.lwjgl.opengl.GL30;
+*///?}
+import com.mojang.blaze3d.platform.Lighting;
+import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
 import dev.craftyplayz.minepanel.service.IconSource;
 import dev.craftyplayz.minepanel.service.PngEncoder;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.Projection;
-import net.minecraft.client.renderer.ProjectionMatrixBuffer;
-import net.minecraft.client.renderer.item.TrackingItemStackRenderState;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.resources.Identifier;
@@ -61,13 +71,17 @@ final class IconRenderer implements IconSource {
     // Skin and armor textures by key: PNG bytes, or a resource-pack texture read when the dashboard first asks.
     private final Map<String, Object> textures = new ConcurrentHashMap<>();
     private final PoseStack poseStack = new PoseStack();
-    private final Projection projection = new Projection();
     private volatile int epoch;
+    //? if >=26.1 {
+    private final Projection projection = new Projection();
     private GpuTexture colorTexture;
     private GpuTextureView colorView;
     private GpuTexture depthTexture;
     private GpuTextureView depthView;
     private ProjectionMatrixBuffer projectionBuffer;
+    //?} else {
+    /*private TextureTarget target;
+    *///?}
 
     private record Pending(String key, ItemStack stack, CompletableFuture<byte[]> result) {
     }
@@ -211,6 +225,7 @@ final class IconRenderer implements IconSource {
             pending.addLast(new Pending(key, copy, future));
         }
         if (pending.isEmpty()) return;
+        //? if >=26.1 {
         ensureTargets();
         GpuDevice device = RenderSystem.getDevice();
         CommandEncoder encoder = device.createCommandEncoder();
@@ -252,30 +267,92 @@ final class IconRenderer implements IconSource {
         } finally {
             RenderSystem.restoreProjectionMatrix();
         }
+        //?} else {
+        /*// As GuiGraphics.renderItem, into an off-screen target instead of the screen.
+        if (target == null) {
+            target = new TextureTarget(SIZE, SIZE, true, Minecraft.ON_OSX);
+            target.setClearColor(0, 0, 0, 0);
+        }
+        var bufferSource = minecraft.renderBuffers().bufferSource();
+        var modelView = RenderSystem.getModelViewStack();
+        // At tick time the last frame's blit left the screen bound, its viewport set and the depth test off; GUI item
+        // rendering (and custom item renderers that draw directly, e.g. NeoForge BEWLRs) runs with the depth test on.
+        int framebuffer = GlStateManager.getBoundFramebuffer();
+        int[] viewport = {GlStateManager.Viewport.x(), GlStateManager.Viewport.y(), GlStateManager.Viewport.width(),
+                GlStateManager.Viewport.height()};
+        boolean depthTest = GL11.glIsEnabled(GL11.GL_DEPTH_TEST);
+        RenderSystem.enableDepthTest();
+        RenderSystem.backupProjectionMatrix();
+        modelView.pushMatrix();
+        modelView.identity();
+        RenderSystem.applyModelViewMatrix();
+        RenderSystem.setProjectionMatrix(new Matrix4f().setOrtho(0, SIZE, SIZE, 0, -1000, 1000),
+                VertexSorting.ORTHOGRAPHIC_Z);
+        try {
+            for (int index = 0; index < RENDERS_PER_TICK && !pending.isEmpty(); index++) {
+                Pending item = pending.removeFirst();
+                if (icons.get(item.key) != item.result) continue;
+                poseStack.pushPose();
+                try {
+                    var model = minecraft.getItemRenderer().getModel(item.stack, minecraft.level, minecraft.player, 0);
+                    target.clear(Minecraft.ON_OSX);
+                    target.bindWrite(true);
+                    poseStack.translate(SIZE / 2.0F, SIZE / 2.0F, 0.0F);
+                    poseStack.scale(SIZE, -SIZE, SIZE);
+                    if (model.usesBlockLight()) Lighting.setupFor3DItems();
+                    else Lighting.setupForFlatItems();
+                    minecraft.getItemRenderer().render(item.stack, ItemDisplayContext.GUI, false, poseStack, bufferSource,
+                            15728880, OverlayTexture.NO_OVERLAY, model);
+                    bufferSource.endBatch();
+                    item.result.complete(png(readTarget()));
+                } catch (RuntimeException failure) {
+                    item.result.complete(null);
+                    LOGGER.log(Level.FINE, "MinePanel could not render an item icon.", failure);
+                } finally {
+                    poseStack.popPose();
+                }
+            }
+        } finally {
+            modelView.popMatrix();
+            RenderSystem.applyModelViewMatrix();
+            RenderSystem.restoreProjectionMatrix();
+            Lighting.setupFor3DItems();
+            if (!depthTest) RenderSystem.disableDepthTest();
+            GlStateManager._glBindFramebuffer(GL30.GL_FRAMEBUFFER, framebuffer);
+            RenderSystem.viewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+        }
+        *///?}
     }
 
+    /** RGBA pixels as the GPU returns them (rows bottom-up, colour premultiplied by alpha) as a PNG. */
+    private static byte[] png(byte[] gpu) {
+        byte[] rgba = new byte[SIZE * SIZE * 4];
+        for (int y = 0; y < SIZE; y++) {
+            // GPU rows are bottom-up; PNG rows are top-down.
+            int source = (SIZE - 1 - y) * SIZE * 4;
+            for (int x = 0; x < SIZE * 4; x += 4) {
+                int target = y * SIZE * 4 + x;
+                int alpha = gpu[source + x + 3] & 0xff;
+                for (int channel = 0; channel < 3; channel++) {
+                    int value = gpu[source + x + channel] & 0xff;
+                    // Translucent blending onto a transparent clear premultiplies colour by alpha.
+                    rgba[target + channel] = (byte) (alpha == 0 ? 0 : Math.min(255, value * 255 / alpha));
+                }
+                rgba[target + 3] = (byte) alpha;
+            }
+        }
+        return PngEncoder.encode(SIZE, SIZE, rgba);
+    }
+
+    //? if >=26.1 {
     private void readBack(GpuDevice device, CommandEncoder encoder, CompletableFuture<byte[]> result) {
         GpuBuffer buffer = device.createBuffer(() -> "MinePanel icon readback",
                 GpuBuffer.USAGE_MAP_READ | GpuBuffer.USAGE_COPY_DST, (long) SIZE * SIZE * 4);
         encoder.copyTextureToBuffer(colorTexture, buffer, 0L, () -> {
             try (GpuBuffer.MappedView view = encoder.mapBuffer(buffer, true, false)) {
-                byte[] rgba = new byte[SIZE * SIZE * 4];
-                var data = view.data();
-                for (int y = 0; y < SIZE; y++) {
-                    // GPU rows are bottom-up; PNG rows are top-down.
-                    int source = (SIZE - 1 - y) * SIZE * 4;
-                    for (int x = 0; x < SIZE * 4; x += 4) {
-                        int target = y * SIZE * 4 + x;
-                        int alpha = data.get(source + x + 3) & 0xff;
-                        for (int channel = 0; channel < 3; channel++) {
-                            int value = data.get(source + x + channel) & 0xff;
-                            // Translucent blending onto a transparent clear premultiplies colour by alpha.
-                            rgba[target + channel] = (byte) (alpha == 0 ? 0 : Math.min(255, value * 255 / alpha));
-                        }
-                        rgba[target + 3] = (byte) alpha;
-                    }
-                }
-                result.complete(PngEncoder.encode(SIZE, SIZE, rgba));
+                byte[] gpu = new byte[SIZE * SIZE * 4];
+                view.data().get(0, gpu);
+                result.complete(png(gpu));
             } catch (RuntimeException failure) {
                 result.complete(null);
             } finally {
@@ -295,4 +372,25 @@ final class IconRenderer implements IconSource {
         depthView = device.createTextureView(depthTexture);
         projectionBuffer = new ProjectionMatrixBuffer("MinePanel icons");
     }
+    //?} else {
+    /*// Synchronous glGetTexImage: at most RENDERS_PER_TICK small reads per tick, only while icons are missing.
+    private byte[] readTarget() {
+        byte[] gpu = new byte[SIZE * SIZE * 4];
+        RenderSystem.bindTexture(target.getColorTextureId());
+        try (NativeImage image = new NativeImage(SIZE, SIZE, false)) {
+            image.downloadTexture(0, false);
+            for (int y = 0; y < SIZE; y++) {
+                for (int x = 0; x < SIZE; x++) {
+                    int abgr = image.getPixelRGBA(x, y);
+                    int index = (y * SIZE + x) * 4;
+                    gpu[index] = (byte) abgr;
+                    gpu[index + 1] = (byte) (abgr >> 8);
+                    gpu[index + 2] = (byte) (abgr >> 16);
+                    gpu[index + 3] = (byte) (abgr >>> 24);
+                }
+            }
+        }
+        return gpu;
+    }
+    *///?}
 }

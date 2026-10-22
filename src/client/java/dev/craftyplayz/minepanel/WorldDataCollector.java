@@ -11,12 +11,18 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.ContainerScreen;
 import net.minecraft.client.gui.screens.inventory.MerchantScreen;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.entity.Entity;
+//? if >=26.1 {
 import net.minecraft.world.entity.npc.villager.Villager;
+//?} else {
+/*import net.minecraft.world.entity.npc.Villager;
+*///?}
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.trading.MerchantOffer;
 
@@ -25,7 +31,8 @@ import java.util.List;
 
 /**
  * Feeds the per-world {@link WorldStore}: the trades of villagers the player opens, where those villagers are while
- * they are nearby, and the contents of the player's ender chest whenever it is open. Also turns the stored data
+ * they are nearby, the contents of the player's ender chest whenever it is open, and (through {@link Backpacks}) of
+ * backpacks. Also turns the stored data
  * back into dashboard values, rebuilt only when the store or the icon keys change. Client thread only.
  */
 final class WorldDataCollector {
@@ -54,6 +61,7 @@ final class WorldDataCollector {
         interacted = null;
         tradingScreen = null;
         lastTrades = null;
+        Backpacks.reset();
     }
 
     /** Fabric's entity-use callback: remember the villager in case its trading screen opens next. */
@@ -86,6 +94,7 @@ final class WorldDataCollector {
                 store.enderChest(new WorldStore.EnderChest(now, slots));
             }
         }
+        Backpacks.tick(minecraft, store);
         if (++ticks % POSITION_INTERVAL_TICKS == 0) trackNearby(level, now);
     }
 
@@ -112,11 +121,17 @@ final class WorldDataCollector {
         lastTrades = trades;
         Villager villager = interacted;
         var data = villager.getVillagerData();
+        //? if >=26.1 {
         String profession = data.profession().unwrapKey().map(key -> key.identifier().toString())
                 .orElse("minecraft:none");
+        int villagerLevel = data.level();
+        //?} else {
+        /*String profession = BuiltInRegistries.VILLAGER_PROFESSION.getKey(data.getProfession()).toString();
+        int villagerLevel = data.getLevel();
+        *///?}
         String name = villager.hasCustomName() ? bounded(villager.getCustomName().getString()) : null;
         store.putVillager(new WorldStore.Villager(villager.getStringUUID(), profession,
-                Math.max(1, Math.min(5, data.level())), name, level.dimension().identifier().toString(),
+                Math.max(1, Math.min(5, villagerLevel)), name, level.dimension().identifier().toString(),
                 villager.getX(), villager.getY(), villager.getZ(), now, tradingSince, trades));
     }
 
@@ -128,9 +143,14 @@ final class WorldDataCollector {
             WorldStore.Villager known = store.villager(villager.getStringUUID());
             if (known == null) continue;
             var data = villager.getVillagerData();
+            //? if >=26.1 {
             String profession = data.profession().unwrapKey().map(key -> key.identifier().toString())
                     .orElse(known.profession());
             int villagerLevel = Math.max(1, Math.min(5, data.level()));
+            //?} else {
+            /*String profession = BuiltInRegistries.VILLAGER_PROFESSION.getKey(data.getProfession()).toString();
+            int villagerLevel = Math.max(1, Math.min(5, data.getLevel()));
+            *///?}
             double dx = known.x() - villager.getX();
             double dy = known.y() - villager.getY();
             double dz = known.z() - villager.getZ();
@@ -171,9 +191,15 @@ final class WorldDataCollector {
                         trade.uses(), trade.maxUses()));
             }
             Identifier id = Identifier.tryParse(villager.profession());
+            //? if >=26.1 {
             String professionName = id == null ? villager.profession()
                     : professions.get(ResourceKey.create(Registries.VILLAGER_PROFESSION, id))
                     .map(holder -> holder.value().name().getString()).orElse(id.getPath());
+            //?} else {
+            /*// Professions had no display name yet; the villager's title is translated by profession path.
+            String professionName = id == null ? villager.profession()
+                    : Component.translatable("entity.minecraft.villager." + id.getPath()).getString();
+            *///?}
             built.add(new VillagerSnapshot(villager.uuid(), villager.profession(), bounded(professionName),
                     villager.level(), villager.name(), villager.dimension(), villager.x(), villager.y(), villager.z(),
                     villager.seenAt(), villager.tradedAt(), trades));

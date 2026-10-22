@@ -21,6 +21,10 @@ const inventoryBody = $("#inventory-body");
 const inventoryGrid = $("#inventory-grid");
 const armorToggle = $("#armor-toggle");
 const heldValue = $("#held-value");
+const accessoriesRow = $("#inventory-accessories");
+const ACCESSORY_ROW_MARGIN = 6;
+/** Slots for the items in a mod's extra slots (Curios); clicking a container among them opens its item window. */
+const accessorySlots = [];
 const statisticsStatus = $("#statistics-status");
 const statisticsColumns = $("#statistics-columns");
 const statisticsEntries = $("#statistics-entries");
@@ -55,7 +59,12 @@ const layoutFile = $("#layout-file");
 const TILE_LABELS = { player: "Player", inventory: "Inventory", statistics: "Statistics",
   history: "Activity log", map: "JourneyMap", build: "Build progress", movement: "Movement", xp: "Experience",
   pickups: "Recent pickups", advancements: "Advancements", villagers: "Villager trades", performance: "Performance",
-  afk: "AFK", model: "3D render" };
+  afk: "AFK", model: "3D render", backpack: "Personal backpack", backpacks: "Backpacks" };
+/** Panels that exist only on some Minecraft versions (the backpack panels need the 1.21.1 backpack and Curios mods). */
+const TILE_VERSIONS = { backpack: ["1.21.1"], backpacks: ["1.21.1"] };
+/** The game's Minecraft version, from the mod version ("0.12+1.21.1") the dashboard gets on connect; null if unknown. */
+let gameVersion = null;
+const tileAvailable = id => !TILE_VERSIONS[id] || gameVersion === null || TILE_VERSIONS[id].includes(gameVersion);
 const CATEGORY_LABELS = { lifecycle: "Session", death: "Death", dimension: "Dimension", kill: "Kill",
   mine: "Mined", place: "Placed", container: "Opened", inventory: "Inventory", drop: "Dropped",
   damage: "Damage", heal: "Healed", advancement: "Advancement", biome: "Biome", weather: "Weather", time: "Day" };
@@ -210,13 +219,17 @@ function bodySize(element) {
 function layoutInventory() {
   const { width, height } = bodySize(inventoryBody);
   const showArmor = displaySettings().inventory.showArmor;
-  const withHeld = inventoryArrangement(width, height - HELD_LINE_HEIGHT, showArmor);
-  const full = inventoryArrangement(width, height, showArmor);
+  // The accessories row takes one slot row (plus its margin) under the inventory when anything is worn there.
+  const worn = accessorySlots.some(slot => slot.item);
+  const firstGuess = inventoryArrangement(width, height, showArmor);
+  const room = worn ? height - firstGuess.slot - ACCESSORY_ROW_MARGIN : height;
+  const withHeld = inventoryArrangement(width, room - HELD_LINE_HEIGHT, showArmor);
+  const full = inventoryArrangement(width, room, showArmor);
   // The "Holding ..." line is a luxury: show it only when it costs no inventory row and no slot size.
   const showHeld = withHeld.rows.length === full.rows.length && withHeld.wide === full.wide
     && withHeld.slot >= full.slot;
   const arrangement = showHeld ? withHeld : full;
-  const key = JSON.stringify([arrangement, showHeld, showArmor]);
+  const key = JSON.stringify([arrangement, showHeld, showArmor, worn]);
   if (key === inventoryArrangementKey) return;
   inventoryArrangementKey = key;
   setHidden(heldValue, !showHeld);
@@ -224,6 +237,8 @@ function layoutInventory() {
     : ["equipment", "main1", "main2", "main3", "hotbar"]).filter(row => arrangement.rows.includes(row));
   const rowOf = name => visual.indexOf(name) + 1;
   inventoryGrid.style.setProperty("--slot", `${arrangement.slot}px`);
+  accessoriesRow.style.setProperty("--slot", `${arrangement.slot}px`);
+  setHidden(accessoriesRow, !worn);
   inventoryGrid.style.gridTemplateColumns = !arrangement.wide ? "repeat(9, var(--slot))"
     : `${showArmor ? "var(--slot) 6px " : ""}repeat(9, var(--slot)) 6px var(--slot)`;
   const firstStorage = arrangement.wide && showArmor ? 3 : 1;
@@ -281,6 +296,26 @@ function renderInventory(inventory, icons) {
     renderSlot(slot, inventory?.equipment[EQUIPMENT_SLOTS[index][0]] ?? null, false));
   renderSlot(headSlot, icons?.head ?? null, false);
   renderSlot(enderChestSlot, icons?.enderChest ?? null, false);
+  renderAccessories(inventory?.accessories ?? []);
+}
+
+function renderAccessories(accessories) {
+  const wasWorn = accessorySlots.some(slot => slot.item);
+  while (accessorySlots.length < accessories.length) {
+    const index = accessorySlots.length;
+    const slot = createSlot(accessoriesRow);
+    slot.element.addEventListener("click", event => {
+      if (Array.isArray(slot.item?.contents) && !editing) openItemWindow("accessory", index, event);
+    });
+    accessorySlots.push(slot);
+  }
+  accessorySlots.forEach((slot, index) => {
+    const item = accessories[index] ?? null;
+    setHidden(slot.element, !item);
+    slot.base = Array.isArray(item?.contents) ? "slot clickable" : "slot";
+    renderSlot(slot, item, false);
+  });
+  if (accessories.length > 0 !== wasWorn) layoutInventory();
 }
 
 // --------------------------------------------------------------------------------------------------- Tooltips
@@ -774,7 +809,8 @@ function updateView(player = currentPlayerState, now = Date.now()) {
  */
 function applyLayout() {
   const profile = getProfile(layout, shownProfileId());
-  const solved = editing ? null : solveLayout(profile.tiles, view);
+  const solved = editing ? null : solveLayout(profile.tiles.map(tile =>
+    tileAvailable(tile.id) ? tile : { ...tile, enabled: false }), view);
   const focus = editing ? null : view.focus;
   const rectFor = tile => solved?.[tile.id] ?? tile;
   const order = [...profile.tiles].sort((a, b) => rectFor(a).y - rectFor(b).y || rectFor(a).x - rectFor(b).x);
@@ -784,7 +820,8 @@ function applyLayout() {
   for (const tile of profile.tiles) {
     const element = tileElements[tile.id];
     const rect = rectFor(tile);
-    setHidden(element, editing ? !tile.enabled : !(tile.id in solved) && focus !== tile.id);
+    setHidden(element, !tileAvailable(tile.id) || (editing ? !tile.enabled : !(tile.id in solved) && focus !== tile.id));
+    setHidden(tileToggles[tile.id], !tileAvailable(tile.id));
     element.classList.toggle("focused", focus === tile.id);
     if (tile.rulesOnly) element.classList.add("rules-only");
     else element.classList.remove("rules-only");
@@ -1203,6 +1240,13 @@ async function connect() {
       try {
         const message = JSON.parse(event.data);
         currentPlayerState = applyMessage(currentPlayerState, message);
+        if (message.type === "initial") {
+          const version = typeof message.modVersion === "string" ? message.modVersion.split("+")[1] ?? null : null;
+          if (version !== gameVersion) {
+            gameVersion = version;
+            applyLayout();
+          }
+        }
         setConnection(true);
         renderPlayer(currentPlayerState);
       } catch {

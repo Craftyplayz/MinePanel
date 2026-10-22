@@ -500,7 +500,8 @@ public final class LocalDashboardServerTest {
                 + "\"dimension\",\"values\":[\"nether\"]}],[{\"type\":\"elytra\",\"not\":true},{\"type\":\"health\","
                 + "\"min\":2,\"max\":10}]],\"profile\":\"nether\",\"tiles\":{\"movement\":\"show\"},"
                 + "\"settings\":{\"inventory\":{\"showArmor\":false}}}],"
-                + "\"pinned\":[{\"source\":\"inventory\",\"slot\":12,\"x\":40,\"y\":90}],"
+                + "\"pinned\":[{\"source\":\"inventory\",\"slot\":12,\"x\":40,\"y\":90},"
+                + "{\"source\":\"accessory\",\"slot\":0,\"x\":60,\"y\":90}],"
                 + "\"updates\":{\"intervalMillis\":100}}";
         String normalized = LayoutStore.normalize(full);
         check(normalized.equals(full.replace("\"min\":2,\"max\":10", "\"min\":2.0,\"max\":10.0")),
@@ -550,14 +551,31 @@ public final class LocalDashboardServerTest {
         java.util.List<com.google.gson.JsonElement> chest = new java.util.ArrayList<>();
         for (int slot = 0; slot < 27; slot++) chest.add(slot == 4 ? item : com.google.gson.JsonNull.INSTANCE);
         worlds.enderChest(new WorldStore.EnderChest(20, chest));
+        worlds.putBackpack(new WorldStore.Backpack(uuid, 30, java.util.List.of(item, item)));
         check(worlds.revision() > before, "changes bump the revision");
+        long unchanged = worlds.revision();
+        worlds.putBackpack(new WorldStore.Backpack(uuid, 40, java.util.List.of(item, item)));
+        check(worlds.revision() == unchanged && worlds.backpack(uuid).seenAt() == 30,
+                "seeing the same backpack contents again changes nothing");
+        for (int extra = 0; extra < WorldStore.MAX_BACKPACKS; extra++) {
+            worlds.putBackpack(new WorldStore.Backpack(String.format("00000000-0000-0000-0000-%012d", extra), extra,
+                    java.util.List.of()));
+        }
+        check(worlds.backpack(uuid) == null && worlds.backpack("00000000-0000-0000-0000-000000000000") != null,
+                "the backpack seen longest ago is forgotten beyond the limit");
+        worlds.putBackpack(new WorldStore.Backpack(uuid, 50, java.util.List.of(item)));
+        invalid(() -> new WorldStore.Backpack("not-a-uuid", 1, java.util.List.of()));
+        invalid(() -> new WorldStore.Backpack(uuid, 1, java.util.List.of(com.google.gson.JsonNull.INSTANCE)));
+        invalid(() -> new WorldStore.Backpack(uuid, 1, java.util.Collections.nCopies(ItemSnapshot.MAX_CONTENTS + 1, item)));
         worlds.save();
         WorldStore reloadedWorlds = new WorldStore(directory);
         reloadedWorlds.open("server:play.example.net");
-        check(reloadedWorlds.villagers().equals(worlds.villagers()) && reloadedWorlds.enderChest().equals(worlds.enderChest()),
-                "villagers and the ender chest survive a restart");
+        check(reloadedWorlds.villagers().equals(worlds.villagers()) && reloadedWorlds.enderChest().equals(worlds.enderChest())
+                        && reloadedWorlds.backpack(uuid).equals(worlds.backpack(uuid)),
+                "villagers, the ender chest and backpacks survive a restart");
         reloadedWorlds.open("singleplayer:Other World");
-        check(reloadedWorlds.villagers().isEmpty() && reloadedWorlds.enderChest() == null, "each world has its own data");
+        check(reloadedWorlds.villagers().isEmpty() && reloadedWorlds.enderChest() == null
+                && reloadedWorlds.backpack(uuid) == null, "each world has its own data");
 
         try (LocalDashboardServer server = new LocalDashboardServer(new TelemetryStore(), 0, null, null, worlds)) {
             server.start();
@@ -605,5 +623,10 @@ public final class LocalDashboardServerTest {
         if (!condition) {
             throw new AssertionError(message);
         }
+    }
+
+    private static void invalid(Runnable action) {
+        try { action.run(); } catch (IllegalArgumentException expected) { return; }
+        throw new AssertionError("Expected invalid value rejection");
     }
 }

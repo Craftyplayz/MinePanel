@@ -438,6 +438,8 @@ Every action is an object with `"do"` and its parameters.
 | `build` | Build progress, from Litematica (off by default) | 2 × 2 | 6, 33, 6, 4 |
 | `afk` | AFK timer over a crawl of your statistics (off by default) | 3 × 3 | 6, 37, 6, 6 |
 | `model` | 3D render of your player | 2 × 3 | 8, 25, 4, 8 |
+| `backpack` | Personal backpack: the worn backpack's slots (off by default; Minecraft 1.21.1 only) | 3 × 3 | 0, 43, 6, 6 |
+| `backpacks` | Backpacks: a searchable list of known backpacks and the selected one's slots (off by default; Minecraft 1.21.1 only) | 4 × 4 | 6, 43, 6, 8 |
 
 The default spots are what a profile gets when the file leaves `panels` out for a new profile, and what an `"off"` panel remembers. Your own dashboard's arrangement may differ; **Download all rules** includes it.
 
@@ -471,6 +473,7 @@ The default spots are what a profile gets when the file leaves `panels` out for 
 | `afk` | `fontSize` | One of `11`, `13`, `16`, `20`, `24`, `32`: text size of the statistics in px | `13` |
 | `afk` | `speed` | One of `10` (slow), `20` (normal), `40` (fast), `80` (very fast): px a second the statistics move | `20` |
 | `afk` | `hidden` | List of up to 512 statistic ids the panel never shows | `[]` |
+| `backpacks` | `selected` | `"last"` (the backpack opened most recently) or one backpack's UUID in lowercase, like `"123e4567-e89b-12d3-a456-426614174000"` | `"last"` |
 
 ## Importing and exporting
 

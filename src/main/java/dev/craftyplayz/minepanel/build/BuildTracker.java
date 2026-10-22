@@ -138,12 +138,13 @@ public final class BuildTracker {
         return new BuildProgress(true, null, placement, rows);
     }
 
-    /** Items in the main inventory and offhand, including the contents of shulker boxes and bundles. */
+    /** Items in the main inventory, offhand and accessory slots, including shulker box, bundle and backpack contents. */
     static Map<String, Long> carried(InventorySnapshot inventory) {
         Map<String, Long> counts = new HashMap<>();
         if (inventory == null) return counts;
         List<ItemSnapshot> items = new ArrayList<>(inventory.slots());
         items.add(inventory.equipment().get("offhand"));
+        items.addAll(inventory.accessories());
         for (ItemSnapshot item : items) {
             if (item.empty()) continue;
             counts.merge(item.itemId(), (long) item.count(), Long::sum);

@@ -18,7 +18,11 @@ abstract class BlockPlaceMixin {
         var activity = ClientActivity.get();
         if (activity != null && context.getLevel().isClientSide()
                 && context.getPlayer() == Minecraft.getInstance().player
+                //? if >=26.1 {
                 && callback.getReturnValue() instanceof InteractionResult.Success) {
+                //?} else {
+                /*&& callback.getReturnValue().consumesAction()) {
+                *///?}
             activity.blockPlaced(((BlockItem) (Object) this).getBlock(), context.getClickedPos());
         }
     }

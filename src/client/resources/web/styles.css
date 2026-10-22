@@ -107,6 +107,22 @@ button, input, select { font: inherit; }
 .inventory-body { display: flex; flex-direction: column; }
 .held { flex: none; margin: 0 0 4px; height: 18px; line-height: 18px; color: var(--accent); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .inventory-grid { display: grid; grid-template-columns: repeat(9, var(--slot, 40px)); grid-auto-rows: var(--slot, 40px); gap: 3px; }
+/* Items in a mod's extra slots (Curios): one row under the inventory, as many as fit. */
+.inventory-accessories { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 6px; max-height: var(--slot, 40px); overflow: hidden; }
+.inventory-accessories .slot { width: var(--slot, 40px); flex: none; }
+/* Backpack: the worn backpack's slots, sized in features.js so every slot fits without scrolling. */
+.backpack-grid { display: grid; grid-template-columns: repeat(var(--columns, 9), var(--slot, 32px)); grid-auto-rows: var(--slot, 32px); gap: 2px; align-content: start; }
+/* Backpacks: search, a short list of known backpacks, then the selected one's slots in the space left. */
+.backpacks-tools { align-items: end; }
+.backpacks-list { flex: none; max-height: 40%; display: grid; gap: 2px; align-content: start; }
+.backpacks-list:empty { display: none; }
+.backpacks-row { display: grid; grid-template-columns: 1fr auto; gap: 0 8px; padding: 4px 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.backpacks-row:hover { border-color: #2c363c; }
+.backpacks-row[aria-pressed="true"] { border-color: #3a4c43; background: #73e0b118; }
+.backpacks-row .label { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.backpacks-row .meta { grid-column: 1; color: var(--muted); font-size: 10px; }
+.backpacks-row .fill { grid-row: 1 / span 2; grid-column: 2; align-self: center; color: var(--muted); font-size: 11px; }
+.backpacks-view { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
 .head-actions { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .chip.small { padding: 1px 8px; font-size: 10px; }
 .icon-button { display: inline-grid; place-items: center; width: 22px; height: 22px; border: 1px solid #2c363c; border-radius: 6px; background: transparent; color: #9aa5aa; font-size: 12px; cursor: pointer; text-decoration: none; }
