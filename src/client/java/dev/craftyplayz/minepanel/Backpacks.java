@@ -65,16 +65,24 @@ public final class Backpacks {
         Library library(Set<String> watched);
     }
 
-    /** One known backpack; {@code icon} is the backpack's item, or null when unknown. */
+    /**
+     * One known backpack, or placed storage when {@code position} is set; {@code icon} is its item, or null when
+     * unknown.
+     */
     public record Listed(String uuid, String name, String player, Long openedAt, ItemStack icon, List<String> items,
-                         int filled, int slots) {
+                         int filled, int slots, BackpacksSnapshot.Position position) {
     }
 
     /** What {@link Source#library} knows: {@code shown} maps a watched backpack's UUID to its name and contents. */
     public record Library(String source, String last, List<Listed> list, Map<String, Named> shown) {
     }
 
-    public record Named(String name, Contents contents) {
+    /** {@code position} is set for a placed storage, null for a backpack. */
+    public record Named(String name, Contents contents, BackpacksSnapshot.Position position) {
+    }
+
+    private static String kind(BackpacksSnapshot.Position position) {
+        return position == null ? "backpack" : "storage";
     }
 
     /** The Backpacks panels' data, or null without a supported backpack mod. */
@@ -86,13 +94,14 @@ public final class Backpacks {
             for (Listed listed : library.list()) {
                 list.add(new BackpacksSnapshot.Entry(listed.uuid(), listed.name(), listed.player(), listed.openedAt(),
                         listed.icon() == null || listed.icon().isEmpty() ? null : icons.deferredKey(listed.icon()),
-                        listed.items(), listed.filled(), listed.slots()));
+                        listed.items(), listed.filled(), listed.slots(), kind(listed.position()), listed.position()));
             }
             List<BackpacksSnapshot.Shown> shown = new ArrayList<>();
             library.shown().forEach((uuid, named) -> {
                 Contents contents = named.contents();
                 if (contents.items() == null) {
-                    shown.add(new BackpacksSnapshot.Shown(uuid, named.name(), true, List.of()));
+                    shown.add(new BackpacksSnapshot.Shown(uuid, named.name(), true, List.of(), kind(named.position()),
+                            named.position()));
                     return;
                 }
                 ShownCache cached = SHOWN.get(uuid);
@@ -101,7 +110,8 @@ public final class Backpacks {
                             MinecraftInventoryCollector.contents(minecraft, contents, icons));
                     SHOWN.put(uuid, cached);
                 }
-                shown.add(new BackpacksSnapshot.Shown(uuid, named.name(), false, cached.items()));
+                shown.add(new BackpacksSnapshot.Shown(uuid, named.name(), false, cached.items(), kind(named.position()),
+                        named.position()));
             });
             SHOWN.keySet().retainAll(library.shown().keySet());
             return new BackpacksSnapshot(library.source(), library.last(), list, shown);

@@ -12,14 +12,20 @@ const LAYOUT_VERSION = 2;
 const LAYOUT_COLUMNS = 12;
 const LAYOUT_MAX_Y = 1000;
 const LAYOUT_MAX_H = 60;
+/** The Backpacks panels: each shows its own pick from the same list of backpacks. */
+const BACKPACKS_PANELS = ["backpacks", "backpacks2", "backpacks3", "backpacks4"];
+/** The Ender Storage panels: each shows its own pick from the same list of ender chests. */
+const ENDER_STORAGE_PANELS = ["enderStorage", "enderStorage2", "enderStorage3", "enderStorage4"];
 const TILE_IDS = ["player", "inventory", "statistics", "history", "map", "build",
-  "movement", "xp", "pickups", "advancements", "villagers", "performance", "afk", "model", "backpack", "backpacks"];
+  "movement", "xp", "pickups", "advancements", "villagers", "performance", "afk", "model", "backpack", ...BACKPACKS_PANELS, "crafting",
+  ...ENDER_STORAGE_PANELS];
 const TILE_MINIMUMS = {
   player: { w: 2, h: 2 }, inventory: { w: 3, h: 2 }, statistics: { w: 2, h: 3 },
   history: { w: 3, h: 3 }, map: { w: 2, h: 2 }, build: { w: 2, h: 2 },
   movement: { w: 2, h: 2 }, xp: { w: 2, h: 2 }, pickups: { w: 2, h: 2 }, advancements: { w: 3, h: 3 },
   villagers: { w: 3, h: 3 }, performance: { w: 2, h: 2 }, afk: { w: 3, h: 3 }, model: { w: 2, h: 3 },
-  backpack: { w: 3, h: 3 }, backpacks: { w: 4, h: 4 }
+  backpack: { w: 3, h: 3 }, ...Object.fromEntries(BACKPACKS_PANELS.map(id => [id, { w: 4, h: 4 }])),
+  crafting: { w: 3, h: 3 }, ...Object.fromEntries(ENDER_STORAGE_PANELS.map(id => [id, { w: 4, h: 4 }]))
 };
 const MAX_STATISTIC_SETTINGS = 512;
 const DEFAULT_MAP_URL = "http://127.0.0.1:8080/";
@@ -68,8 +74,10 @@ function defaultSettings() {
     model: { spin: true, axis: "y", speed: 30 },
     // hidden: statistics the AFK crawl never shows.
     afk: { fontSize: 13, speed: 20, hidden: [] },
-    // "last" (the most recently opened backpack) or one backpack's UUID.
-    backpacks: { selected: "last" }
+    // Each Backpacks panel: "last" (the most recently opened backpack) or one backpack's UUID.
+    ...Object.fromEntries(BACKPACKS_PANELS.map(id => [id, { selected: "last" }])),
+    // Each Ender Storage panel: "last" (the most recently opened chest) or one chest's frequency key.
+    ...Object.fromEntries(ENDER_STORAGE_PANELS.map(id => [id, { selected: "last" }]))
   };
 }
 
@@ -80,6 +88,7 @@ const validStatisticIds = value => Array.isArray(value) && value.length <= MAX_S
     && /^[a-z0-9_.-]+:[a-z0-9_.-]+\/[a-z0-9_.-]+:[a-z0-9/._-]+$/.test(id));
 const validItemIds = value => Array.isArray(value) && value.length <= 64
   && value.every(id => typeof id === "string" && id.length <= 256 && /^[a-z0-9_.-]+:[a-z0-9/._-]+$/.test(id));
+const MAX_BACKPACK_NAMES = 256;
 const isObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
 const wholeIn = (value, min, max) => Number.isSafeInteger(value) && value >= min && value <= max;
 
@@ -110,8 +119,8 @@ const SETTING_RULES = [
   ["afk", "fontSize", value => AFK_FONT_SIZE_CHOICES.includes(value)],
   ["afk", "speed", value => AFK_SPEED_CHOICES.includes(value)],
   ["afk", "hidden", validStatisticIds],
-  ["backpacks", "selected", value => value === "last" || typeof value === "string"
-    && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value)]
+  ...BACKPACKS_PANELS.map(id => [id, "selected", value => value === "last" || validUuid(value)]),
+  ...ENDER_STORAGE_PANELS.map(id => [id, "selected", value => value === "last" || validEnderKey(value)])
 ];
 
 /** Copies only known, valid settings out of {@code value}; rejects present-but-malformed ones. */
@@ -158,9 +167,17 @@ function defaultLayout() {
     { id: "afk", enabled: false, x: 6, y: 37, w: 6, h: 6 },
     { id: "model", enabled: true, x: 8, y: 25, w: 4, h: 8 },
     { id: "backpack", enabled: false, x: 0, y: 43, w: 6, h: 6 },
-    { id: "backpacks", enabled: false, x: 6, y: 43, w: 6, h: 8 }
+    { id: "backpacks", enabled: false, x: 6, y: 43, w: 6, h: 8 },
+    { id: "backpacks2", enabled: false, x: 0, y: 51, w: 6, h: 8 },
+    { id: "backpacks3", enabled: false, x: 6, y: 51, w: 6, h: 8 },
+    { id: "backpacks4", enabled: false, x: 0, y: 59, w: 6, h: 8 },
+    { id: "crafting", enabled: false, x: 6, y: 59, w: 6, h: 8 },
+    { id: "enderStorage", enabled: false, x: 0, y: 67, w: 6, h: 10 },
+    { id: "enderStorage2", enabled: false, x: 6, y: 67, w: 6, h: 10 },
+    { id: "enderStorage3", enabled: false, x: 0, y: 77, w: 6, h: 10 },
+    { id: "enderStorage4", enabled: false, x: 6, y: 77, w: 6, h: 10 }
   ], profiles: [], pinned: [], updates: { intervalMillis: DEFAULT_UPDATE_INTERVAL },
-  animation: { ...DEFAULT_ANIMATION }, folders: [], places: [], toggles: [], rules: [] };
+  animation: { ...DEFAULT_ANIMATION }, folders: [], places: [], toggles: [], rules: [], backpackNames: {} };
 }
 
 const wholeNumber = value => Number.isSafeInteger(value);
@@ -358,7 +375,20 @@ function normalizeLayout(value) {
   return { version: LAYOUT_VERSION, settings: normalizeSettings(value.settings), tiles, profiles,
     pinned: normalizePinned(value.pinned), updates: normalizeUpdates(value.updates),
     animation: value.animation === undefined ? { ...DEFAULT_ANIMATION } : normalizeAnimation(value.animation),
-    folders, places, toggles, rules };
+    folders, places, toggles, rules, backpackNames: normalizeBackpackNames(value.backpackNames) };
+}
+
+/**
+ * Dashboard-only nicknames for backpacks and storages (by UUID) and Ender Storage chests (by frequency key) → name.
+ * Global, never sent to the game.
+ */
+function normalizeBackpackNames(value) {
+  if (value === undefined) return {};
+  if (!isObject(value) || Object.keys(value).length > MAX_BACKPACK_NAMES) throw new Error("Invalid backpack names");
+  for (const [uuid, name] of Object.entries(value)) {
+    if (!(validUuid(uuid) || validEnderKey(uuid)) || !validName(name)) throw new Error("Invalid backpack name");
+  }
+  return { ...value };
 }
 
 /** An optional list with unique ids. */

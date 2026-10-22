@@ -38,6 +38,8 @@ See [Panels](Panels.md) for every panel.
 
 Hover over any item (inventory, pickups, materials, villager trades) to see its full in-game tooltip, including enchantments, lore and the advanced details you'd see with F3+H (item ID, durability, component count). Icons are drawn by the game itself, so resource packs and modded items look the same as in game. They are shown without the enchantment glint.
 
+Big counts are shortened on the slot, rounded down: **3.9K** is 3,900 to 3,999, **42K** is 42,000 to 42,999, **2.3M** is 2.3 to 2.4 million. The tooltip ends with the exact count (**× 2,300,000**). Upgraded backpacks can hold up to about 2.1 billion of one item in a slot.
+
 ## Item windows
 
 Click a **shulker box**, **bundle** or [backpack](Integrations.md#sophisticated-backpacks) in the Inventory panel to open a window showing what's inside. The **ender chest** slot in the Inventory panel opens your ender chest's contents.
@@ -47,6 +49,7 @@ Click a **shulker box**, **bundle** or [backpack](Integrations.md#sophisticated-
 - **📌 Pin** keeps a window open. You can have several pinned windows; only one unpinned window is open at a time. Pinned windows are remembered with your layout.
 - **×** closes a window.
 - The ender chest shows what it held **the last time you opened it in game**, with how long ago that was. Until you open it once in a world, it asks you to.
+- With [Ender Storage](Integrations.md#ender-storage), the ender chest slot opens the **Ender Storage chest you opened last** instead, titled with its colours (or your name for it). In singleplayer it says **Live**; on a server, how long ago you last saw it. An **Ender Pouch** in your inventory opens its colour code's chest the same way.
 - On a server, a backpack shows what it held the last time you opened it. Until then its window says *Contents not known yet*.
 
 ## Player menu

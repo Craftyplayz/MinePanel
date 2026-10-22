@@ -225,17 +225,73 @@
     </article>
     <article class="tile" id="tile-backpacks" data-tile="backpacks" aria-labelledby="backpacks-title">
       <header class="tile-head" id="head-backpacks"><h2 id="backpacks-title">Backpacks</h2>
-        <span class="head-actions"><span class="badge muted" id="backpacks-status">Unavailable</span></span></header>
+        <span class="head-actions"><span class="badge muted" id="backpacks-status">Unavailable</span><input class="backpacks-name" id="backpacks-name" type="text" maxlength="64" aria-label="Name shown on the dashboard" hidden><button type="button" class="icon-button" id="backpacks-rename" aria-label="Rename this backpack on the dashboard" title="Rename (only on the dashboard)" hidden>✎</button><button type="button" class="icon-button" id="backpacks-pick" aria-expanded="true" aria-controls="backpacks-picker" aria-label="Choose a backpack" title="Choose a backpack">☰</button></span></header>
       <div class="tile-body column">
+        <div class="backpacks-picker" id="backpacks-picker">
         <div class="history-filters backpacks-tools">
-          <label>Search <input id="backpacks-search" type="search" placeholder="Search backpacks or items" maxlength="100"></label>
+          <label>Search <input id="backpacks-search" type="search" placeholder="Search backpacks, storage or items" maxlength="100"></label>
           <button type="button" class="button quiet small" id="backpacks-last" aria-pressed="true">Last opened</button>
         </div>
         <p class="empty-note" id="backpacks-note" hidden>On a server, only backpacks you've opened are listed, as you last saw them.</p>
         <div class="backpacks-list scroll" id="backpacks-list" aria-label="Backpacks"></div>
+        </div>
         <div class="backpacks-view" id="backpacks-view">
           <p class="hint" id="backpacks-message">Join a world to see your backpacks.</p>
           <div class="backpack-grid" id="backpacks-grid" aria-label="Selected backpack contents"></div>
+        </div>
+      </div>
+    </article>
+    <article class="tile" id="tile-backpacks2" data-tile="backpacks2" aria-labelledby="backpacks2-title">
+      <header class="tile-head" id="head-backpacks2"><h2 id="backpacks2-title">Backpacks 2</h2>
+        <span class="head-actions"><span class="badge muted" id="backpacks2-status">Unavailable</span><input class="backpacks-name" id="backpacks2-name" type="text" maxlength="64" aria-label="Name shown on the dashboard" hidden><button type="button" class="icon-button" id="backpacks2-rename" aria-label="Rename this backpack on the dashboard" title="Rename (only on the dashboard)" hidden>✎</button><button type="button" class="icon-button" id="backpacks2-pick" aria-expanded="true" aria-controls="backpacks2-picker" aria-label="Choose a backpack" title="Choose a backpack">☰</button></span></header>
+      <div class="tile-body column">
+        <div class="backpacks-picker" id="backpacks2-picker">
+        <div class="history-filters backpacks-tools">
+          <label>Search <input id="backpacks2-search" type="search" placeholder="Search backpacks, storage or items" maxlength="100"></label>
+          <button type="button" class="button quiet small" id="backpacks2-last" aria-pressed="true">Last opened</button>
+        </div>
+        <p class="empty-note" id="backpacks2-note" hidden>On a server, only backpacks you've opened are listed, as you last saw them.</p>
+        <div class="backpacks-list scroll" id="backpacks2-list" aria-label="Backpacks"></div>
+        </div>
+        <div class="backpacks-view" id="backpacks2-view">
+          <p class="hint" id="backpacks2-message">Join a world to see your backpacks.</p>
+          <div class="backpack-grid" id="backpacks2-grid" aria-label="Selected backpack contents"></div>
+        </div>
+      </div>
+    </article>
+    <article class="tile" id="tile-backpacks3" data-tile="backpacks3" aria-labelledby="backpacks3-title">
+      <header class="tile-head" id="head-backpacks3"><h2 id="backpacks3-title">Backpacks 3</h2>
+        <span class="head-actions"><span class="badge muted" id="backpacks3-status">Unavailable</span><input class="backpacks-name" id="backpacks3-name" type="text" maxlength="64" aria-label="Name shown on the dashboard" hidden><button type="button" class="icon-button" id="backpacks3-rename" aria-label="Rename this backpack on the dashboard" title="Rename (only on the dashboard)" hidden>✎</button><button type="button" class="icon-button" id="backpacks3-pick" aria-expanded="true" aria-controls="backpacks3-picker" aria-label="Choose a backpack" title="Choose a backpack">☰</button></span></header>
+      <div class="tile-body column">
+        <div class="backpacks-picker" id="backpacks3-picker">
+        <div class="history-filters backpacks-tools">
+          <label>Search <input id="backpacks3-search" type="search" placeholder="Search backpacks, storage or items" maxlength="100"></label>
+          <button type="button" class="button quiet small" id="backpacks3-last" aria-pressed="true">Last opened</button>
+        </div>
+        <p class="empty-note" id="backpacks3-note" hidden>On a server, only backpacks you've opened are listed, as you last saw them.</p>
+        <div class="backpacks-list scroll" id="backpacks3-list" aria-label="Backpacks"></div>
+        </div>
+        <div class="backpacks-view" id="backpacks3-view">
+          <p class="hint" id="backpacks3-message">Join a world to see your backpacks.</p>
+          <div class="backpack-grid" id="backpacks3-grid" aria-label="Selected backpack contents"></div>
+        </div>
+      </div>
+    </article>
+    <article class="tile" id="tile-backpacks4" data-tile="backpacks4" aria-labelledby="backpacks4-title">
+      <header class="tile-head" id="head-backpacks4"><h2 id="backpacks4-title">Backpacks 4</h2>
+        <span class="head-actions"><span class="badge muted" id="backpacks4-status">Unavailable</span><input class="backpacks-name" id="backpacks4-name" type="text" maxlength="64" aria-label="Name shown on the dashboard" hidden><button type="button" class="icon-button" id="backpacks4-rename" aria-label="Rename this backpack on the dashboard" title="Rename (only on the dashboard)" hidden>✎</button><button type="button" class="icon-button" id="backpacks4-pick" aria-expanded="true" aria-controls="backpacks4-picker" aria-label="Choose a backpack" title="Choose a backpack">☰</button></span></header>
+      <div class="tile-body column">
+        <div class="backpacks-picker" id="backpacks4-picker">
+        <div class="history-filters backpacks-tools">
+          <label>Search <input id="backpacks4-search" type="search" placeholder="Search backpacks, storage or items" maxlength="100"></label>
+          <button type="button" class="button quiet small" id="backpacks4-last" aria-pressed="true">Last opened</button>
+        </div>
+        <p class="empty-note" id="backpacks4-note" hidden>On a server, only backpacks you've opened are listed, as you last saw them.</p>
+        <div class="backpacks-list scroll" id="backpacks4-list" aria-label="Backpacks"></div>
+        </div>
+        <div class="backpacks-view" id="backpacks4-view">
+          <p class="hint" id="backpacks4-message">Join a world to see your backpacks.</p>
+          <div class="backpack-grid" id="backpacks4-grid" aria-label="Selected backpack contents"></div>
         </div>
       </div>
     </article>
@@ -304,6 +360,110 @@
         <div class="model-stage" id="model-stage">
           <canvas class="model-canvas" id="model-canvas" aria-label="Your player in 3D. Drag to turn, scroll to zoom, double-click to reset." role="img"></canvas>
           <p class="empty-note model-message" id="model-message">Join a world to see your player.</p>
+        </div>
+      </div>
+    </article>
+    <article class="tile" id="tile-crafting" data-tile="crafting" aria-labelledby="crafting-title">
+      <header class="tile-head" id="head-crafting"><h2 id="crafting-title">AE2 crafting</h2>
+        <span class="head-actions"><span class="badge muted" id="crafting-status">Unavailable</span></span></header>
+      <div class="tile-body column crafting-body scroll">
+        <p class="empty-note" id="crafting-message">Join a world to see your crafting jobs.</p>
+        <h3 class="crafting-heading" id="crafting-jobs-title" hidden>Your jobs</h3>
+        <div class="crafting-list" id="crafting-jobs" aria-labelledby="crafting-jobs-title"></div>
+        <h3 class="crafting-heading" id="crafting-cpus-title" hidden>Crafting CPUs</h3>
+        <p class="empty-note" id="crafting-cpus-note"></p>
+        <div class="crafting-list" id="crafting-cpus" aria-labelledby="crafting-cpus-title"></div>
+        <h3 class="crafting-heading" id="crafting-detail-title" hidden>Selected CPU</h3>
+        <div class="build-progress" id="crafting-detail-progress" hidden><strong id="crafting-detail-count">—</strong>
+          <div class="build-bar" role="progressbar" aria-labelledby="crafting-detail-title" aria-valuemin="0" aria-valuemax="100" id="crafting-detail-bar"><span id="crafting-detail-fill"></span></div></div>
+        <div class="crafting-list" id="crafting-detail" aria-labelledby="crafting-detail-title"></div>
+      </div>
+    </article>
+    <article class="tile" id="tile-enderStorage" data-tile="enderStorage" aria-labelledby="enderStorage-title">
+      <header class="tile-head" id="head-enderStorage"><h2 id="enderStorage-title">Ender Storage</h2>
+        <span class="head-actions"><span class="ender-colours" id="enderStorage-colours" hidden></span><span class="badge muted" id="enderStorage-status">Unavailable</span><input class="backpacks-name" id="enderStorage-name" type="text" maxlength="64" aria-label="Name shown on the dashboard" hidden><button type="button" class="icon-button" id="enderStorage-rename" aria-label="Rename this chest on the dashboard" title="Rename (only on the dashboard)" hidden>✎</button><button type="button" class="icon-button" id="enderStorage-pick" aria-expanded="true" aria-controls="enderStorage-picker" aria-label="Choose a chest" title="Choose a chest">☰</button></span></header>
+      <div class="tile-body column">
+        <div class="backpacks-picker" id="enderStorage-picker">
+        <div class="history-filters backpacks-tools">
+          <label>Search <input id="enderStorage-search" type="search" placeholder="Search colours, owners or items" maxlength="100"></label>
+          <button type="button" class="button quiet small" id="enderStorage-last" aria-pressed="true">Last opened</button>
+        </div>
+        <p class="empty-note" id="enderStorage-note" hidden>On a server, only chests you've opened are listed, as you last saw them.</p>
+        <div class="backpacks-list scroll" id="enderStorage-list" aria-label="Ender Storage chests"></div>
+        </div>
+        <div class="backpacks-view" id="enderStorage-view">
+          <p class="hint" id="enderStorage-message">Join a world to see your ender chests.</p>
+          <div class="backpack-grid" id="enderStorage-grid" aria-label="Selected chest contents"></div>
+        </div>
+        <div class="ender-log" id="enderStorage-changes" hidden>
+          <h3 class="crafting-heading" id="enderStorage-log-title">Changes</h3>
+          <div class="ender-log-list scroll" id="enderStorage-log" aria-labelledby="enderStorage-log-title"></div>
+        </div>
+      </div>
+    </article>
+    <article class="tile" id="tile-enderStorage2" data-tile="enderStorage2" aria-labelledby="enderStorage2-title">
+      <header class="tile-head" id="head-enderStorage2"><h2 id="enderStorage2-title">Ender Storage 2</h2>
+        <span class="head-actions"><span class="ender-colours" id="enderStorage2-colours" hidden></span><span class="badge muted" id="enderStorage2-status">Unavailable</span><input class="backpacks-name" id="enderStorage2-name" type="text" maxlength="64" aria-label="Name shown on the dashboard" hidden><button type="button" class="icon-button" id="enderStorage2-rename" aria-label="Rename this chest on the dashboard" title="Rename (only on the dashboard)" hidden>✎</button><button type="button" class="icon-button" id="enderStorage2-pick" aria-expanded="true" aria-controls="enderStorage2-picker" aria-label="Choose a chest" title="Choose a chest">☰</button></span></header>
+      <div class="tile-body column">
+        <div class="backpacks-picker" id="enderStorage2-picker">
+        <div class="history-filters backpacks-tools">
+          <label>Search <input id="enderStorage2-search" type="search" placeholder="Search colours, owners or items" maxlength="100"></label>
+          <button type="button" class="button quiet small" id="enderStorage2-last" aria-pressed="true">Last opened</button>
+        </div>
+        <p class="empty-note" id="enderStorage2-note" hidden>On a server, only chests you've opened are listed, as you last saw them.</p>
+        <div class="backpacks-list scroll" id="enderStorage2-list" aria-label="Ender Storage chests"></div>
+        </div>
+        <div class="backpacks-view" id="enderStorage2-view">
+          <p class="hint" id="enderStorage2-message">Join a world to see your ender chests.</p>
+          <div class="backpack-grid" id="enderStorage2-grid" aria-label="Selected chest contents"></div>
+        </div>
+        <div class="ender-log" id="enderStorage2-changes" hidden>
+          <h3 class="crafting-heading" id="enderStorage2-log-title">Changes</h3>
+          <div class="ender-log-list scroll" id="enderStorage2-log" aria-labelledby="enderStorage2-log-title"></div>
+        </div>
+      </div>
+    </article>
+    <article class="tile" id="tile-enderStorage3" data-tile="enderStorage3" aria-labelledby="enderStorage3-title">
+      <header class="tile-head" id="head-enderStorage3"><h2 id="enderStorage3-title">Ender Storage 3</h2>
+        <span class="head-actions"><span class="ender-colours" id="enderStorage3-colours" hidden></span><span class="badge muted" id="enderStorage3-status">Unavailable</span><input class="backpacks-name" id="enderStorage3-name" type="text" maxlength="64" aria-label="Name shown on the dashboard" hidden><button type="button" class="icon-button" id="enderStorage3-rename" aria-label="Rename this chest on the dashboard" title="Rename (only on the dashboard)" hidden>✎</button><button type="button" class="icon-button" id="enderStorage3-pick" aria-expanded="true" aria-controls="enderStorage3-picker" aria-label="Choose a chest" title="Choose a chest">☰</button></span></header>
+      <div class="tile-body column">
+        <div class="backpacks-picker" id="enderStorage3-picker">
+        <div class="history-filters backpacks-tools">
+          <label>Search <input id="enderStorage3-search" type="search" placeholder="Search colours, owners or items" maxlength="100"></label>
+          <button type="button" class="button quiet small" id="enderStorage3-last" aria-pressed="true">Last opened</button>
+        </div>
+        <p class="empty-note" id="enderStorage3-note" hidden>On a server, only chests you've opened are listed, as you last saw them.</p>
+        <div class="backpacks-list scroll" id="enderStorage3-list" aria-label="Ender Storage chests"></div>
+        </div>
+        <div class="backpacks-view" id="enderStorage3-view">
+          <p class="hint" id="enderStorage3-message">Join a world to see your ender chests.</p>
+          <div class="backpack-grid" id="enderStorage3-grid" aria-label="Selected chest contents"></div>
+        </div>
+        <div class="ender-log" id="enderStorage3-changes" hidden>
+          <h3 class="crafting-heading" id="enderStorage3-log-title">Changes</h3>
+          <div class="ender-log-list scroll" id="enderStorage3-log" aria-labelledby="enderStorage3-log-title"></div>
+        </div>
+      </div>
+    </article>
+    <article class="tile" id="tile-enderStorage4" data-tile="enderStorage4" aria-labelledby="enderStorage4-title">
+      <header class="tile-head" id="head-enderStorage4"><h2 id="enderStorage4-title">Ender Storage 4</h2>
+        <span class="head-actions"><span class="ender-colours" id="enderStorage4-colours" hidden></span><span class="badge muted" id="enderStorage4-status">Unavailable</span><input class="backpacks-name" id="enderStorage4-name" type="text" maxlength="64" aria-label="Name shown on the dashboard" hidden><button type="button" class="icon-button" id="enderStorage4-rename" aria-label="Rename this chest on the dashboard" title="Rename (only on the dashboard)" hidden>✎</button><button type="button" class="icon-button" id="enderStorage4-pick" aria-expanded="true" aria-controls="enderStorage4-picker" aria-label="Choose a chest" title="Choose a chest">☰</button></span></header>
+      <div class="tile-body column">
+        <div class="backpacks-picker" id="enderStorage4-picker">
+        <div class="history-filters backpacks-tools">
+          <label>Search <input id="enderStorage4-search" type="search" placeholder="Search colours, owners or items" maxlength="100"></label>
+          <button type="button" class="button quiet small" id="enderStorage4-last" aria-pressed="true">Last opened</button>
+        </div>
+        <p class="empty-note" id="enderStorage4-note" hidden>On a server, only chests you've opened are listed, as you last saw them.</p>
+        <div class="backpacks-list scroll" id="enderStorage4-list" aria-label="Ender Storage chests"></div>
+        </div>
+        <div class="backpacks-view" id="enderStorage4-view">
+          <p class="hint" id="enderStorage4-message">Join a world to see your ender chests.</p>
+          <div class="backpack-grid" id="enderStorage4-grid" aria-label="Selected chest contents"></div>
+        </div>
+        <div class="ender-log" id="enderStorage4-changes" hidden>
+          <h3 class="crafting-heading" id="enderStorage4-log-title">Changes</h3>
+          <div class="ender-log-list scroll" id="enderStorage4-log" aria-labelledby="enderStorage4-log-title"></div>
         </div>
       </div>
     </article>

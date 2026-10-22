@@ -12,7 +12,8 @@ public record ItemSnapshot(boolean empty, String itemId, String name, int count,
     public static final int MAX_TEXT_LENGTH = 256;
     /** Shulker boxes hold 27 slots; bundles hold at most 64 separate stacks. */
     public static final int MAX_CONTENTS = 128;
-    public static final int MAX_COUNT = 1_000_000;
+    // Upgraded backpack and storage slots hold up to an int's worth of one item.
+    public static final int MAX_COUNT = Integer.MAX_VALUE;
     public static final int MAX_ENCHANTMENTS = 64;
     public static final int MAX_ENCHANTMENT_LEVEL = 255;
     public static final int MAX_TOOLTIP_LINES = 64;

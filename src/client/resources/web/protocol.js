@@ -52,8 +52,8 @@ function validateItemFields(item) {
   requireValid(object(item) && typeof item.empty === "boolean"
     && (item.itemId === null || typeof item.itemId === "string")
     && (item.name === null || typeof item.name === "string")
-    && integer(item.count) && item.count <= 1000000
-    && integer(item.maxCount) && item.maxCount <= 1000000
+    && integer(item.count) && item.count <= 2147483647
+    && integer(item.maxCount) && item.maxCount <= 2147483647
     && ["damage", "maxDamage", "remainingDurability"].every(key =>
       item[key] === null || integer(item[key]))
     && Array.isArray(item.enchantments) && item.enchantments.length <= 64
@@ -229,7 +229,7 @@ function applyHistory(previous, patch) {
 // ------------------------------------------------------------------------------- World, motion and other details
 
 const DETAIL_FIELDS = ["world", "motion", "xp", "portal", "pickups", "advancements", "villagers", "enderChest",
-  "performance", "build", "icons", "sensors", "registries", "appearance", "backpacks"];
+  "performance", "build", "icons", "sensors", "registries", "appearance", "backpacks", "ae2", "enderStorage"];
 const WEATHER = ["clear", "rain", "thunder"];
 const GAME_MODES = ["survival", "creative", "adventure", "spectator"];
 const MOTION_MODES = ["ground", "elytra", "swimming", "riding", "flying", "falling"];
@@ -505,8 +505,17 @@ const validUuid = value => typeof value === "string"
   && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
 const backpackName = value => typeof value === "string" && value.length <= 256 && validUnicode(value);
 const slotCount = value => integer(value) && value <= 128;
+const BACKPACK_KINDS = ["backpack", "storage"];
+const blockCoordinate = (value, limit) => Number.isSafeInteger(value) && Math.abs(value) <= limit;
+/** Where a placed storage is: a dimension and whole block coordinates; null for a backpack. */
+const validPosition = value => value === null || object(value) && validIdentifier(value.dimension)
+  && blockCoordinate(value.x, 30_000_000) && blockCoordinate(value.y, 2048) && blockCoordinate(value.z, 30_000_000);
+const copyPosition = value => value && { dimension: value.dimension, x: value.x, y: value.y, z: value.z };
+/** kind and position, required on list and shown entries. */
+const validPlace = entry => BACKPACK_KINDS.includes(entry.kind) && validPosition(entry.position);
 
-/** Sophisticated Backpacks' backpacks (null without the mod); mirrors Backpacks on the Java side. */
+/** Sophisticated Backpacks' backpacks and placed Sophisticated Storage blocks (null without the mods); mirrors
+ * Backpacks on the Java side. */
 function validateBackpacks(backpacks) {
   if (backpacks === null) return null;
   requireValid(object(backpacks) && BACKPACK_SOURCES.includes(backpacks.source)
@@ -517,18 +526,96 @@ function validateBackpacks(backpacks) {
     requireValid(object(entry) && validUuid(entry.uuid) && backpackName(entry.name)
       && (entry.player === null || validText(entry.player, 64)) && (entry.openedAt === null || integer(entry.openedAt))
       && validIcon(entry.icon) && Array.isArray(entry.items) && entry.items.length <= 64
-      && entry.items.every(validIdentifier) && slotCount(entry.filled) && slotCount(entry.slots));
-    return { uuid: entry.uuid, name: entry.name, player: entry.player, openedAt: entry.openedAt, icon: entry.icon,
+      && entry.items.every(validIdentifier) && slotCount(entry.filled) && slotCount(entry.slots) && validPlace(entry));
+    return { uuid: entry.uuid, name: entry.name, kind: entry.kind, position: copyPosition(entry.position),
+      player: entry.player, openedAt: entry.openedAt, icon: entry.icon,
       items: [...entry.items], filled: entry.filled, slots: entry.slots };
   });
   const shown = backpacks.shown.map(entry => {
     requireValid(object(entry) && validUuid(entry.uuid) && backpackName(entry.name)
       && typeof entry.contentsUnknown === "boolean" && Array.isArray(entry.contents) && entry.contents.length <= 128
-      && (!entry.contentsUnknown || entry.contents.length === 0));
-    return { uuid: entry.uuid, name: entry.name, contentsUnknown: entry.contentsUnknown,
+      && (!entry.contentsUnknown || entry.contents.length === 0) && validPlace(entry));
+    return { uuid: entry.uuid, name: entry.name, kind: entry.kind, position: copyPosition(entry.position),
+      contentsUnknown: entry.contentsUnknown,
       contents: entry.contents.map(item => validateItem(item, true)) };
   });
   return { source: backpacks.source, last: backpacks.last, list, shown };
+}
+
+/** An Ender Storage chest: its three colours (left to right), then its owner's UUID for a personal chest. */
+const validEnderKey = value => typeof value === "string" && value.length <= 140
+  && /^[a-z_]{1,32}\.[a-z_]{1,32}\.[a-z_]{1,32}(\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$/.test(value);
+const MAX_ENDER_LOG = 500;
+
+/** Ender Storage's ender chests (null without the mod); mirrors EnderStorageSnapshot on the Java side. */
+function validateEnderStorage(ender) {
+  if (ender === null) return null;
+  requireValid(object(ender) && BACKPACK_SOURCES.includes(ender.source)
+    && (ender.last === null || validEnderKey(ender.last))
+    && Array.isArray(ender.list) && ender.list.length <= MAX_BACKPACKS
+    && Array.isArray(ender.shown) && ender.shown.length <= MAX_SHOWN_BACKPACKS);
+  const chest = entry => object(entry) && validEnderKey(entry.key) && (entry.owner === null || validText(entry.owner, 64))
+    && (entry.seenAt === null || integer(entry.seenAt));
+  const list = ender.list.map(entry => {
+    requireValid(chest(entry) && Array.isArray(entry.items) && entry.items.length <= 64
+      && entry.items.every(validIdentifier) && slotCount(entry.filled) && slotCount(entry.slots));
+    return { key: entry.key, owner: entry.owner, seenAt: entry.seenAt, items: [...entry.items], filled: entry.filled,
+      slots: entry.slots };
+  });
+  const shown = ender.shown.map(entry => {
+    requireValid(chest(entry) && typeof entry.contentsUnknown === "boolean" && Array.isArray(entry.contents)
+      && entry.contents.length <= 128 && (!entry.contentsUnknown || entry.contents.length === 0)
+      && Array.isArray(entry.log) && entry.log.length <= MAX_ENDER_LOG);
+    const log = entry.log.map(change => {
+      requireValid(object(change) && integer(change.at) && Number.isSafeInteger(change.delta) && change.delta !== 0);
+      return { at: change.at, delta: change.delta, item: validateItem(change.item, true) };
+    });
+    return { key: entry.key, owner: entry.owner, seenAt: entry.seenAt, contentsUnknown: entry.contentsUnknown,
+      contents: entry.contents.map(item => validateItem(item, true)), log };
+  });
+  return { source: ender.source, last: ender.last, list, shown };
+}
+
+const AE2_JOB_STATES = ["running", "finished", "cancelled"];
+const ae2Amount = value => typeof value === "string" && value.length <= 32 && validUnicode(value);
+const ae2Time = value => value === null || integer(value);
+
+/** AE2 crafting jobs and CPUs (null without AE2; cpus null until Crafting Status is opened); mirrors Ae2Snapshot. */
+function validateAe2(ae2) {
+  if (ae2 === null) return null;
+  requireValid(object(ae2) && Array.isArray(ae2.jobs) && ae2.jobs.length <= 16 && (ae2.cpus === null || object(ae2.cpus)));
+  const jobs = ae2.jobs.map(job => {
+    requireValid(object(job) && validText(job.id, 64) && ae2Amount(job.amount) && AE2_JOB_STATES.includes(job.state)
+      && ae2Time(job.startedAt) && ae2Time(job.endedAt) && (job.state === "running") === (job.endedAt === null));
+    return { id: job.id, item: filledItem(job.item), amount: job.amount, state: job.state, startedAt: job.startedAt,
+      endedAt: job.endedAt };
+  });
+  if (ae2.cpus === null) return { jobs, cpus: null };
+  const cpus = ae2.cpus;
+  requireValid(integer(cpus.seenAt) && typeof cpus.open === "boolean" && Number.isSafeInteger(cpus.selected)
+    && Array.isArray(cpus.list) && cpus.list.length <= 64 && (cpus.detail === null || object(cpus.detail)));
+  const list = cpus.list.map(cpu => {
+    requireValid(object(cpu) && Number.isSafeInteger(cpu.serial) && typeof cpu.name === "string" && cpu.name.length <= 256
+      && validUnicode(cpu.name) && integer(cpu.storage) && integer(cpu.coProcessors)
+      && (cpu.job === null) === (cpu.amount === null) && (cpu.amount === null || ae2Amount(cpu.amount))
+      && finite(cpu.progress) && cpu.progress >= 0 && cpu.progress <= 1 && integer(cpu.elapsedMillis));
+    return { serial: cpu.serial, name: cpu.name, storage: cpu.storage, coProcessors: cpu.coProcessors,
+      job: cpu.job === null ? null : filledItem(cpu.job), amount: cpu.amount, progress: cpu.progress,
+      elapsedMillis: cpu.elapsedMillis };
+  });
+  let detail = null;
+  if (cpus.detail !== null) {
+    const value = cpus.detail;
+    requireValid(integer(value.elapsedMillis) && integer(value.remaining) && integer(value.total)
+      && value.remaining <= value.total && typeof value.suspended === "boolean" && Array.isArray(value.entries)
+      && value.entries.length <= 64);
+    detail = { elapsedMillis: value.elapsedMillis, remaining: value.remaining, total: value.total,
+      suspended: value.suspended, entries: value.entries.map(entry => {
+        requireValid(object(entry) && ["stored", "active", "pending"].every(key => ae2Amount(entry[key])));
+        return { item: filledItem(entry.item), stored: entry.stored, active: entry.active, pending: entry.pending };
+      }) };
+  }
+  return { jobs, cpus: { seenAt: cpus.seenAt, open: cpus.open, selected: cpus.selected, list, detail } };
 }
 
 /** Validates the detail fields: required while in a world (advancements and ender chest may be null), else null. */
@@ -542,7 +629,7 @@ function validateDetails(state) {
     pickups: validatePickups, advancements: validateAdvancements, villagers: validateVillagers,
     enderChest: validateEnderChest, performance: validatePerformance, build: validateBuild, icons: validateIcons,
     sensors: validateSensors, registries: validateRegistries, appearance: validateAppearance,
-    backpacks: validateBackpacks };
+    backpacks: validateBackpacks, ae2: validateAe2, enderStorage: validateEnderStorage };
   return Object.fromEntries(DETAIL_FIELDS.map(key => {
     const value = state[key];
     // Deltas carry over unchanged fields from the previous state, which were validated when they arrived.

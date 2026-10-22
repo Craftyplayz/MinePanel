@@ -13,27 +13,47 @@ public final class InventorySnapshotTest {
         testCollectionAndValidation();
         testChangesAndBaselines();
         testBackpacks();
+        testAe2();
+        testEnderStorage();
         System.out.println("MinePanel immutable inventory telemetry tests passed.");
     }
 
     private static void testBackpacks() {
         String uuid = "123e4567-e89b-12d3-a456-426614174000";
-        var entry = new BackpacksSnapshot.Entry(uuid, "Mining \"bag\"", "Steve", 1000L, null, List.of("minecraft:stone"), 1, 27);
-        var shown = new BackpacksSnapshot.Shown(uuid, "Mining", false, List.of(item(3), ItemSnapshot.emptyItem()));
-        var snapshot = new BackpacksSnapshot("world", uuid, List.of(entry), List.of(shown));
+        var entry = new BackpacksSnapshot.Entry(uuid, "Mining \"bag\"", "Steve", 1000L, null, List.of("minecraft:stone"), 1, 27,
+                "backpack", null);
+        var shown = new BackpacksSnapshot.Shown(uuid, "Mining", false, List.of(item(3), ItemSnapshot.emptyItem()),
+                "backpack", null);
+        var at = new BackpacksSnapshot.Position("minecraft:the_nether", -5, 64, 12);
+        var storage = new BackpacksSnapshot.Entry(uuid, "Chest", null, null, null, List.of(), 0, 27, "storage", at);
+        var shownStorage = new BackpacksSnapshot.Shown(uuid, "Chest", true, List.of(), "storage", at);
+        var snapshot = new BackpacksSnapshot("world", uuid, List.of(entry, storage), List.of(shown, shownStorage));
+        String position = "{\"dimension\":\"minecraft:the_nether\",\"x\":-5,\"y\":64,\"z\":12}";
         check(snapshot.toJson().equals("{\"source\":\"world\",\"last\":\"" + uuid + "\",\"list\":[{\"uuid\":\"" + uuid
                 + "\",\"name\":\"Mining \\\"bag\\\"\",\"player\":\"Steve\",\"openedAt\":1000,\"icon\":null,"
-                + "\"items\":[\"minecraft:stone\"],\"filled\":1,\"slots\":27}],\"shown\":[{\"uuid\":\"" + uuid
+                + "\"items\":[\"minecraft:stone\"],\"filled\":1,\"slots\":27,\"kind\":\"backpack\",\"position\":null},"
+                + "{\"uuid\":\"" + uuid + "\",\"name\":\"Chest\",\"player\":null,\"openedAt\":null,\"icon\":null,"
+                + "\"items\":[],\"filled\":0,\"slots\":27,\"kind\":\"storage\",\"position\":" + position + "}],"
+                + "\"shown\":[{\"uuid\":\"" + uuid
                 + "\",\"name\":\"Mining\",\"contentsUnknown\":false,\"contents\":[" + item(3).toJson() + ","
-                + ItemSnapshot.emptyItem().toJson() + "]}]}"), "backpacks JSON: " + snapshot.toJson());
+                + ItemSnapshot.emptyItem().toJson() + "],\"kind\":\"backpack\",\"position\":null},{\"uuid\":\"" + uuid
+                + "\",\"name\":\"Chest\",\"contentsUnknown\":true,\"contents\":[],\"kind\":\"storage\",\"position\":"
+                + position + "}]}"), "backpacks JSON: " + snapshot.toJson());
         invalid(() -> new BackpacksSnapshot("server", null, List.of(), List.of()));
         invalid(() -> new BackpacksSnapshot("world", "nope", List.of(), List.of()));
         invalid(() -> new BackpacksSnapshot("world", null, List.of(), java.util.Collections.nCopies(9, shown)));
-        invalid(() -> new BackpacksSnapshot.Entry("bad", "", null, null, null, List.of(), 0, 0));
-        invalid(() -> new BackpacksSnapshot.Entry(uuid, "", null, null, null, List.of("Bad Id"), 0, 0));
-        invalid(() -> new BackpacksSnapshot.Entry(uuid, "", null, null, null, List.of(), 0, 129));
-        invalid(() -> new BackpacksSnapshot.Shown(uuid, "", true, List.of(item(1))));
-        invalid(() -> new BackpacksSnapshot.Shown(uuid, "", false, java.util.Collections.nCopies(129, item(1))));
+        invalid(() -> new BackpacksSnapshot.Entry("bad", "", null, null, null, List.of(), 0, 0, "backpack", null));
+        invalid(() -> new BackpacksSnapshot.Entry(uuid, "", null, null, null, List.of("Bad Id"), 0, 0, "backpack", null));
+        invalid(() -> new BackpacksSnapshot.Entry(uuid, "", null, null, null, List.of(), 0, 129, "backpack", null));
+        invalid(() -> new BackpacksSnapshot.Entry(uuid, "", null, null, null, List.of(), 0, 0, "chest", null));
+        invalid(() -> new BackpacksSnapshot.Entry(uuid, "", null, null, null, List.of(), 0, 0, "storage", null));
+        invalid(() -> new BackpacksSnapshot.Entry(uuid, "", null, null, null, List.of(), 0, 0, "backpack", at));
+        invalid(() -> new BackpacksSnapshot.Shown(uuid, "", true, List.of(item(1)), "backpack", null));
+        invalid(() -> new BackpacksSnapshot.Shown(uuid, "", false, java.util.Collections.nCopies(129, item(1)),
+                "backpack", null));
+        invalid(() -> new BackpacksSnapshot.Shown(uuid, "", true, List.of(), "storage", null));
+        invalid(() -> new BackpacksSnapshot.Shown(uuid, "", true, List.of(), null, null));
+        invalid(() -> new BackpacksSnapshot.Position("Overworld", 0, 0, 0));
     }
 
     private static void testItems() {
@@ -245,6 +265,65 @@ public final class InventorySnapshotTest {
 
     private static InventorySnapshot collect(List<ItemSnapshot> slots, int selected, Map<String, ItemSnapshot> equipment) {
         return InventorySnapshot.collect(slots::get, selected, equipment::get);
+    }
+
+    private static void testAe2() {
+        var job = new Ae2Snapshot.Job("j1", item(1), "64", "running", 1000L, null);
+        var done = new Ae2Snapshot.Job("j2", item(1), "1,024", "finished", null, 2000L);
+        var busy = new Ae2Snapshot.Cpu(2, "Main", 65536, 4, item(1), "64", 0.25, 90_000);
+        var idle = new Ae2Snapshot.Cpu(1, "", 1024, 0, null, null, 0, 0);
+        var detail = new Ae2Snapshot.Detail(90_000, 48, 64, false,
+                List.of(new Ae2Snapshot.Entry(item(1), "", "8", "40")));
+        var snapshot = new Ae2Snapshot(List.of(job, done), new Ae2Snapshot.Cpus(5000, true, 2, List.of(idle, busy), detail));
+        String stone = item(1).toJson();
+        check(snapshot.toJson().equals("{\"jobs\":[{\"id\":\"j1\",\"item\":" + stone + ",\"amount\":\"64\",\"state\":"
+                + "\"running\",\"startedAt\":1000,\"endedAt\":null},{\"id\":\"j2\",\"item\":" + stone + ",\"amount\":"
+                + "\"1,024\",\"state\":\"finished\",\"startedAt\":null,\"endedAt\":2000}],\"cpus\":{\"seenAt\":5000,"
+                + "\"open\":true,\"selected\":2,\"list\":[{\"serial\":1,\"name\":\"\",\"storage\":1024,\"coProcessors\":0,"
+                + "\"job\":null,\"amount\":null,\"progress\":0.0,\"elapsedMillis\":0},{\"serial\":2,\"name\":\"Main\","
+                + "\"storage\":65536,\"coProcessors\":4,\"job\":" + stone + ",\"amount\":\"64\",\"progress\":0.25,"
+                + "\"elapsedMillis\":90000}],\"detail\":{\"elapsedMillis\":90000,\"remaining\":48,\"total\":64,"
+                + "\"suspended\":false,\"entries\":[{\"item\":" + stone + ",\"stored\":\"\",\"active\":\"8\","
+                + "\"pending\":\"40\"}]}}}"), "AE2 crafting JSON");
+        check(new Ae2Snapshot(List.of(), null).toJson().equals("{\"jobs\":[],\"cpus\":null}"), "no CPUs seen yet");
+        invalid(() -> new Ae2Snapshot(java.util.Collections.nCopies(17, job), null));
+        invalid(() -> new Ae2Snapshot.Job("j", item(1), "1", "running", null, 5L));
+        invalid(() -> new Ae2Snapshot.Job("j", item(1), "1", "finished", null, null));
+        invalid(() -> new Ae2Snapshot.Job("j", item(1), "1", "paused", null, 5L));
+        invalid(() -> new Ae2Snapshot.Cpu(1, "", 0, 0, item(1), null, 0, 0));
+        invalid(() -> new Ae2Snapshot.Cpu(1, "", 0, 0, null, null, 1.5, 0));
+        invalid(() -> new Ae2Snapshot.Detail(0, 65, 64, false, List.of()));
+    }
+
+    private static void testEnderStorage() {
+        String personal = "purple.purple.black.8667ba71-b85a-4004-af54-457a9734eed7";
+        var entry = new EnderStorageSnapshot.Entry("white.red.light_blue", null, 1000L, List.of("minecraft:stone"), 1, 27);
+        var mine = new EnderStorageSnapshot.Entry(personal, "Steve", null, List.of(), 0, 9);
+        var change = new EnderStorageSnapshot.Change(2000, -3, item(1));
+        var shown = new EnderStorageSnapshot.Shown("white.red.light_blue", null, 1000L, false,
+                List.of(item(3), ItemSnapshot.emptyItem()), List.of(change));
+        var unseen = new EnderStorageSnapshot.Shown(personal, "Steve", null, true, List.of(), List.of());
+        var snapshot = new EnderStorageSnapshot("remembered", "white.red.light_blue", List.of(entry, mine),
+                List.of(shown, unseen));
+        check(snapshot.toJson().equals("{\"source\":\"remembered\",\"last\":\"white.red.light_blue\",\"list\":["
+                + "{\"key\":\"white.red.light_blue\",\"owner\":null,\"seenAt\":1000,\"items\":[\"minecraft:stone\"],"
+                + "\"filled\":1,\"slots\":27},{\"key\":\"" + personal + "\",\"owner\":\"Steve\",\"seenAt\":null,"
+                + "\"items\":[],\"filled\":0,\"slots\":9}],\"shown\":[{\"key\":\"white.red.light_blue\",\"owner\":null,"
+                + "\"seenAt\":1000,\"contentsUnknown\":false,\"contents\":[" + item(3).toJson() + ","
+                + ItemSnapshot.emptyItem().toJson() + "],\"log\":[{\"at\":2000,\"delta\":-3,\"item\":" + item(1).toJson()
+                + "}]},{\"key\":\"" + personal + "\",\"owner\":\"Steve\",\"seenAt\":null,\"contentsUnknown\":true,"
+                + "\"contents\":[],\"log\":[]}]}"), "Ender Storage JSON");
+        invalid(() -> new EnderStorageSnapshot("server", null, List.of(), List.of()));
+        invalid(() -> new EnderStorageSnapshot("world", "White.red.blue", List.of(), List.of()));
+        invalid(() -> new EnderStorageSnapshot.Entry("white.red", null, null, List.of(), 0, 27));
+        invalid(() -> new EnderStorageSnapshot.Entry("white.red.blue.STEVE", null, null, List.of(), 0, 27));
+        invalid(() -> new EnderStorageSnapshot.Entry("white.red.blue", "", null, List.of(), 0, 27));
+        invalid(() -> new EnderStorageSnapshot.Entry("white.red.blue", null, null, List.of(), 28, 27));
+        invalid(() -> new EnderStorageSnapshot.Change(0, 0, item(1)));
+        invalid(() -> new EnderStorageSnapshot.Change(0, 1, ItemSnapshot.emptyItem()));
+        invalid(() -> new EnderStorageSnapshot.Shown("white.red.blue", null, null, true, List.of(item(1)), List.of()));
+        invalid(() -> new EnderStorageSnapshot.Shown("white.red.blue", null, null, false, List.of(),
+                Collections.nCopies(EnderStorageSnapshot.MAX_LOG + 1, change)));
     }
 
     public static ItemSnapshot item(int count) {

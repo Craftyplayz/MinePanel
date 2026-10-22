@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import dev.craftyplayz.minepanel.telemetry.EnderStorageSnapshot;
 import dev.craftyplayz.minepanel.telemetry.ItemSnapshot;
 import dev.craftyplayz.minepanel.telemetry.VillagerSnapshot;
 
@@ -91,12 +92,43 @@ public final class WorldStore {
 
     public static final int MAX_BACKPACKS = 64;
 
+    /**
+     * An Ender Storage chest (one frequency) as last seen, with what changed in it: {@code slots} holds every slot
+     * (JSON null when empty); {@code owner} names a personal chest's owner; {@code log}, oldest first, holds at most {@link #MAX_ENDER_LOG} changes.
+     */
+    public record EnderStorage(String key, String owner, long seenAt, List<JsonElement> slots, List<EnderChange> log) {
+        public EnderStorage {
+            slots = List.copyOf(slots);
+            log = List.copyOf(log);
+            if (key == null || !EnderStorageSnapshot.KEY.matcher(key).matches() || owner != null
+                    && (owner.isEmpty() || owner.length() > 64) || slots.size() > ItemSnapshot.MAX_CONTENTS
+                    || log.size() > MAX_ENDER_LOG) {
+                throw new IllegalArgumentException("Invalid stored ender storage");
+            }
+            slots.forEach(slot -> {
+                if (!slot.isJsonNull()) item(slot);
+            });
+        }
+    }
+
+    /** {@code delta} more (or, negative, fewer) of {@code item} (one of it, as item JSON) at {@code at}. */
+    public record EnderChange(long at, int delta, JsonElement item) {
+        public EnderChange {
+            if (delta == 0) throw new IllegalArgumentException("Invalid ender storage change");
+            WorldStore.item(item);
+        }
+    }
+
+    public static final int MAX_ENDER_STORAGES = 64;
+    public static final int MAX_ENDER_LOG = 500;
+
     private final Path directory;
     private String worldKey;
     private Path file;
     private final Map<String, Villager> villagers = new LinkedHashMap<>();
     private EnderChest enderChest;
     private final Map<String, Backpack> backpacks = new LinkedHashMap<>();
+    private final Map<String, EnderStorage> enderStorages = new LinkedHashMap<>();
     private long revision;
     private boolean dirty;
 
@@ -114,6 +146,7 @@ public final class WorldStore {
             villagers.clear();
             enderChest = null;
             backpacks.clear();
+            enderStorages.clear();
             dirty = false;
             revision++;
             target = file;
@@ -195,6 +228,25 @@ public final class WorldStore {
         backpacks.remove(backpack.uuid());
         if (backpacks.size() >= MAX_BACKPACKS) backpacks.remove(backpacks.keySet().iterator().next());
         backpacks.put(backpack.uuid(), backpack);
+        changed();
+    }
+
+    public synchronized EnderStorage enderStorage(String key) {
+        return enderStorages.get(key);
+    }
+
+    /** Every remembered Ender Storage chest in this world, the one changed longest ago first. */
+    public synchronized List<EnderStorage> enderStorages() {
+        return List.copyOf(enderStorages.values());
+    }
+
+    /** Remembers a chest; the one changed longest ago is forgotten beyond {@link #MAX_ENDER_STORAGES}. */
+    public synchronized void putEnderStorage(EnderStorage chest) {
+        EnderStorage known = enderStorages.get(chest.key());
+        if (worldKey == null || chest.equals(known)) return;
+        enderStorages.remove(chest.key());
+        if (enderStorages.size() >= MAX_ENDER_STORAGES) enderStorages.remove(enderStorages.keySet().iterator().next());
+        enderStorages.put(chest.key(), chest);
         changed();
     }
 
@@ -287,6 +339,27 @@ public final class WorldStore {
             packs.add(entry);
         }
         root.add("backpacks", packs);
+        JsonArray chests = new JsonArray();
+        for (EnderStorage chest : enderStorages.values()) {
+            JsonObject entry = new JsonObject();
+            entry.addProperty("key", chest.key());
+            if (chest.owner() != null) entry.addProperty("owner", chest.owner());
+            entry.addProperty("seenAt", chest.seenAt());
+            JsonArray slots = new JsonArray();
+            chest.slots().forEach(slots::add);
+            entry.add("slots", slots);
+            JsonArray log = new JsonArray();
+            for (EnderChange change : chest.log()) {
+                JsonObject value = new JsonObject();
+                value.addProperty("at", change.at());
+                value.addProperty("delta", change.delta());
+                value.add("item", change.item());
+                log.add(value);
+            }
+            entry.add("log", log);
+            chests.add(entry);
+        }
+        root.add("enderStorage", chests);
         return root;
     }
 
@@ -339,6 +412,27 @@ public final class WorldStore {
                     if (backpacks.size() < MAX_BACKPACKS) backpacks.put(backpack.uuid(), backpack);
                 } catch (RuntimeException malformed) {
                     LOGGER.fine("Skipped a malformed saved backpack.");
+                }
+            }
+        }
+        if (root.has("enderStorage") && root.get("enderStorage").isJsonArray()) {
+            for (JsonElement element : root.getAsJsonArray("enderStorage")) {
+                try {
+                    JsonObject entry = element.getAsJsonObject();
+                    List<JsonElement> slots = new ArrayList<>();
+                    entry.getAsJsonArray("slots").forEach(slots::add);
+                    List<EnderChange> log = new ArrayList<>();
+                    for (JsonElement change : entry.getAsJsonArray("log")) {
+                        JsonObject value = change.getAsJsonObject();
+                        log.add(new EnderChange(value.get("at").getAsLong(), value.get("delta").getAsInt(),
+                                value.get("item")));
+                    }
+                    EnderStorage chest = new EnderStorage(entry.get("key").getAsString(),
+                            entry.has("owner") ? entry.get("owner").getAsString() : null,
+                            entry.get("seenAt").getAsLong(), slots, log);
+                    if (enderStorages.size() < MAX_ENDER_STORAGES) enderStorages.put(chest.key(), chest);
+                } catch (RuntimeException malformed) {
+                    LOGGER.fine("Skipped a malformed saved ender storage chest.");
                 }
             }
         }

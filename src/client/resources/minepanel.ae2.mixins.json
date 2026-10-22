@@ -1,0 +1,13 @@
+{
+  "required": false,
+  "package": "dev.craftyplayz.minepanel.ae2.mixin",
+  "plugin": "dev.craftyplayz.minepanel.ae2.mixin.Ae2MixinPlugin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "CraftingCPUScreenAccessor",
+    "PendingCraftingJobsMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}

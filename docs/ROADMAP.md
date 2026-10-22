@@ -6,7 +6,7 @@ MinePanel is client-only and read-only (see `ARCHITECTURE.md`). Every item below
 
 | # | Item | Status | Effort |
 |---|---|---|---|
-| 1 | [AE2 crafting jobs panel](#1-ae2-crafting-jobs-panel) | Planned | ~1 day |
+| 1 | [AE2 crafting jobs panel](#1-ae2-crafting-jobs-panel) | Built, not tested in game | Rules still to do |
 | 2 | [Curios in the Inventory panel](#2-curios-in-the-inventory-panel) | Built, not tested in game | Testing only |
 | 3 | [Sophisticated Storage in the Backpacks panel, several panels](#3-sophisticated-storage-and-several-backpacks-panels) | Planned | 1–2 days |
 | 4 | [More integrations](#4-more-integrations) | Candidates | Per item |
@@ -29,19 +29,25 @@ Nothing lets the client get CPU data without the screen. Opening it sends `Switc
 
 AdvancedAE quantum computers send the same `CraftingJobStatusPacket`. `QuantumComputerMenu.cpuList` mirrors the AE2 fields (its own `CraftingCpuListEntry` type). ExtendedAE, MEGA Cells and ae2wtlib don't change crafting sync.
 
-### Design
+### What was built
 
-- Isolated package `dev.craftyplayz.minepanel.ae2`. Add `'ae2': 'appeng.'` (and AdvancedAE's package) to `isolatedMods` in `gradle/shared.gradle`, and use a `compileOnly` dependency in `build.neoforge.gradle`, following the Curios and Backpacks pattern.
-- **Job list (always live):** a client mixin `@Inject(method = "jobStatus", at = @At("HEAD"), require = 0)` on `PendingCraftingJobs`. It records the item, the amount, the start time from the client clock, and the result and duration on finish or cancel. Keep the last N finished jobs.
-- **CPU stats (live while the screen is open, then "last seen"):** each client tick, when `player.containerMenu instanceof CraftingStatusMenu m`, copy `m.cpuList.cpus()`. Read the selected CPU's detail through an `@Accessor("status")` on `CraftingCPUScreen`, or a TAIL inject on `postUpdate`. Stamp the capture time. After the screen closes, the dashboard shows "as of 2m ago" and can keep counting elapsed time, but not progress.
-- The panel shows: active jobs (item, amount, CPU, progress bar, elapsed), idle and busy CPUs, and the selected CPU's item breakdown (stored / crafting / scheduled).
-- Rules: a condition "crafting job finished" and a notification on finish or cancel.
-- `cpuList`, `status` and `postUpdate` are internal AE2 names. Guard every hook (`require = 0`, check the class exists) so a different AE2 version only turns the panel off.
+- **Code:**
+  - Facade `Ae2` and the isolated package `dev.craftyplayz.minepanel.ae2`, which `isolatedMods` in `gradle/shared.gradle` enforces with `'ae2': 'appeng.'`.
+  - `compileOnly maven.modrinth:ae2:19.2.17` in `build.neoforge.gradle`.
+  - Snapshot field `ae2` (`Ae2Snapshot`).
+  - Panel id `crafting`, labelled **AE2 crafting**.
+- **Job list:** `PendingCraftingJobsMixin` (HEAD of `PendingCraftingJobs.jobStatus`) queues each notice. The panel keeps the last 16 jobs: item, amount, start time from the client clock, and result and time on finish or cancel.
+- **CPU list and selected CPU:** read from `CraftingStatusMenu.cpuList` and `CraftingCPUScreenAccessor` (`status`) while the screen is open, then kept as last seen. The panel shows "Live" or "Seen 2m ago".
+- **Mixin config:** the AE2 mixins live in their own `minepanel.ae2.mixins.json` (`required: false`, `defaultRequire: 0`). Its `Ae2MixinPlugin` applies them only when AE2 is loaded. Any failure turns the panel off for the session.
+- **Decisions:**
+  - Jobs stay in memory only and clear when you leave the world.
+  - Quantum computers share the AE2 list, if AdvancedAE adds them to `getCpus()`. That is inferred; AdvancedAE's own Quantum Computer screen is not read.
 
-### Open questions
+### Not done yet
 
-- Should finished jobs persist across sessions (`WorldStore`) or stay in memory only?
-- Show quantum computers in the same list or apart?
+- A rule condition "crafting job finished" and a notification on finish or cancel.
+- Elapsed time keeps the last seen value after the screen closes; it doesn't count on.
+- Not tested in game.
 
 ## 2. Curios in the Inventory panel
 

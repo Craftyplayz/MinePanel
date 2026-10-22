@@ -36,6 +36,9 @@ MinePanel only knows your ender chest's contents from the last time you opened i
 **A backpack says "Contents not known yet".**
 On a server, MinePanel only knows a backpack's contents from the last time you opened it. Open it once. In singleplayer it fills in within a second or two. See [Sophisticated Backpacks](Integrations.md#sophisticated-backpacks).
 
+**An Ender Storage chest says "Contents not known yet", or the panel lists only some chests.**
+On a server, MinePanel only knows the Ender Storage chests you've opened, as they were when you last had them open. Open the chest once. In singleplayer every chest is listed and fills in within a second. See [Ender Storage](Integrations.md#ender-storage).
+
 **The 3D render shows a default skin or nothing.**
 Your skin may still be downloading; it appears once the game has it.
 

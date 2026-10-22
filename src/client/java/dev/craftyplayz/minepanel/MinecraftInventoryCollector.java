@@ -80,8 +80,10 @@ final class MinecraftInventoryCollector {
         }
         // The signed-in account rather than the in-game profile: offline-mode servers hand out stand-in UUIDs.
         var user = minecraft.getUser();
+        // With Ender Storage, the slot opens its most recently used chest, so it shows that mod's chest.
+        ItemStack enderChest = EnderStorage.chestItem();
         return new PlayerDetails.Icons(user.getName(), user.getProfileId().toString(), head,
-                item(minecraft, ENDER_CHEST, icons));
+                item(minecraft, enderChest == null ? ENDER_CHEST : enderChest, icons));
     }
 
     /** Client thread: the dashboard value of one stack, including the contents of shulker boxes, bundles, backpacks. */
@@ -93,6 +95,8 @@ final class MinecraftInventoryCollector {
         }
         // Backpack contents live outside the stack, so they are part of the key (by identity).
         Backpacks.Contents backpack = Backpacks.contents(stack);
+        // An Ender Storage pouch (or chest item) shows its frequency's chest, as last seen.
+        if (backpack == null) backpack = EnderStorage.contents(stack);
         CachedStack key = new CachedStack(stack, backpack);
         ItemSnapshot cached = CACHE.get(key);
         if (cached != null) return cached;

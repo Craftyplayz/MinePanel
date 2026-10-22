@@ -59,9 +59,13 @@ const layoutFile = $("#layout-file");
 const TILE_LABELS = { player: "Player", inventory: "Inventory", statistics: "Statistics",
   history: "Activity log", map: "JourneyMap", build: "Build progress", movement: "Movement", xp: "Experience",
   pickups: "Recent pickups", advancements: "Advancements", villagers: "Villager trades", performance: "Performance",
-  afk: "AFK", model: "3D render", backpack: "Personal backpack", backpacks: "Backpacks" };
-/** Panels that exist only on some Minecraft versions (the backpack panels need the 1.21.1 backpack and Curios mods). */
-const TILE_VERSIONS = { backpack: ["1.21.1"], backpacks: ["1.21.1"] };
+  afk: "AFK", model: "3D render", backpack: "Personal backpack", backpacks: "Backpacks",
+  backpacks2: "Backpacks 2", backpacks3: "Backpacks 3", backpacks4: "Backpacks 4", crafting: "AE2 crafting",
+  enderStorage: "Ender Storage", enderStorage2: "Ender Storage 2", enderStorage3: "Ender Storage 3",
+  enderStorage4: "Ender Storage 4" };
+/** Panels that exist only on some Minecraft versions (the backpack and AE2 panels need 1.21.1 mods). */
+const TILE_VERSIONS = { backpack: ["1.21.1"], crafting: ["1.21.1"],
+  ...Object.fromEntries([...BACKPACKS_PANELS, ...ENDER_STORAGE_PANELS].map(id => [id, ["1.21.1"]])) };
 /** The game's Minecraft version, from the mod version ("0.12+1.21.1") the dashboard gets on connect; null if unknown. */
 let gameVersion = null;
 const tileAvailable = id => !TILE_VERSIONS[id] || gameVersion === null || TILE_VERSIONS[id].includes(gameVersion);
@@ -148,6 +152,18 @@ function initials(name) {
   return (words.length > 1 ? words[0][0] + words[1][0] : name.slice(0, 2)).toUpperCase();
 }
 
+/** A slot's count as the game would fit it: 3923 → 3.9K, 42373 → 42K, 2300000 → 2.3M; rounded down, never up. */
+function compactCount(count) {
+  const units = [[1e9, "B"], [1e6, "M"], [1e3, "K"]];
+  for (const [size, unit] of units) {
+    if (count < size) continue;
+    // Whole numbers of tenths, so float rounding can't turn 2.3M into 2.2M.
+    const tenths = Math.floor(count * 10 / size);
+    return `${tenths < 100 ? tenths / 10 : Math.floor(tenths / 10)}${unit}`;
+  }
+  return String(count);
+}
+
 function renderSlot(slot, item, selected) {
   const className = `${slot.base ?? "slot"}${selected ? " selected" : ""}`;
   if (slot.element.className !== className) slot.element.className = className;
@@ -173,7 +189,7 @@ function renderSlot(slot, item, selected) {
       setHidden(slot.icon, false);
       setHidden(slot.fallback, true);
     }
-    writeText(slot.count, item.count > 1 ? String(item.count) : "");
+    writeText(slot.count, item.count > 1 ? compactCount(item.count) : "");
     const damaged = item.maxDamage !== null && item.damage > 0;
     setHidden(slot.durability, !damaged);
     if (damaged) {
@@ -329,7 +345,11 @@ function shadowColor(color) {
 
 function showTooltip(item, event) {
   if (!item || item.empty) return hideTooltip();
-  const lines = item.tooltip.length ? item.tooltip : [[{ text: item.name, color: null, format: "" }]];
+  const lines = [...(item.tooltip.length ? item.tooltip : [[{ text: item.name, color: null, format: "" }]])];
+  // Slots show big counts shortened (42K); the tooltip gives the exact number.
+  if (item.count >= 1000) {
+    lines.push([{ text: `× ${item.count.toLocaleString("en-US")}`, color: "#aaaaaa", format: "" }]);
+  }
   tooltip.replaceChildren(...lines.map(line => {
     const row = create("div", "line");
     for (const segment of line) {

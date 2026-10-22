@@ -57,7 +57,7 @@ function details() {
     icons: { name: "Steve", uuid: "8667ba71-b85a-4004-af54-457a9734eed7",
       head: item({ itemId: "minecraft:player_head", name: "Steve's Head", count: 1, icon: "e0-head" }),
       enderChest: item({ itemId: "minecraft:ender_chest", name: "Ender Chest", count: 1, icon: "e0-ender" }) },
-    sensors: sensors(), registries: registries(), appearance: appearance(), backpacks: null
+    sensors: sensors(), registries: registries(), appearance: appearance(), backpacks: null, ae2: null, enderStorage: null
   };
 }
 
@@ -109,7 +109,7 @@ function unavailable(overrides = {}) {
     absorption: null, inventory: null, statistics: null, history: history({ active: false }),
     food: null, saturation: null, effects: null, world: null, motion: null, xp: null, portal: null, pickups: null,
     advancements: null, villagers: null, enderChest: null, performance: null, build: null, icons: null, sensors: null,
-    registries: null, appearance: null, backpacks: null, ...overrides });
+    registries: null, appearance: null, backpacks: null, ae2: null, enderStorage: null, ...overrides });
 }
 
 function defaultFetch(storedLayout = null, requests = []) {
@@ -336,7 +336,7 @@ test("item names, empty maxCount, bounds and derived durability must be consiste
   const h = harness();
   for (const bad of [
     emptyWithMaxCount(), item({ name: null }), item({ name: "" }),
-    item({ maxCount: 1000001 }), item({ damage: 1 }),
+    item({ maxCount: 2147483648 }), item({ damage: 1 }),
     item({ maxDamage: 10, damage: 11, remainingDurability: 0 }),
     item({ maxDamage: 10, damage: 1, remainingDurability: 8 }),
     item({ maxDamage: 10, damage: null, remainingDurability: null })
@@ -422,7 +422,7 @@ test("all full item fields, slot count and equipment keys are validated", () => 
     inv => delete inv.equipment.head, inv => { inv.equipment.unknown = empty(); },
     inv => { inv.selectedHotbarSlot = 9; }, inv => { inv.equipment.mainhand = empty(); },
     inv => { inv.slots[9] = item({ count: -1 }); },
-    inv => { inv.slots[9] = item({ count: 1000001 }); },
+    inv => { inv.slots[9] = item({ count: 2147483648 }); },
     inv => { inv.slots[9] = item({ enchantments: [{ id: "x", level: 1 }] }); }
   ]) {
     const state = snapshot();
@@ -1210,7 +1210,7 @@ test("imported or stored layouts are validated and completed", () => {
   const normalize = value => h.run(`normalizeLayout(${JSON.stringify(value)})`);
   const partial = normalize({ version: 1, tiles: [{ id: "history", enabled: true, x: 0, y: 5, w: 12, h: 2 }] });
   assert.deepEqual(plain(partial.tiles[0]), { id: "history", enabled: true, x: 0, y: 0, w: 12, h: 3 });
-  assert.equal(partial.tiles.length, 16);
+  assert.equal(partial.tiles.length, h.run("TILE_IDS.length"));
   assert.equal(partial.tiles.filter(tile => tile.enabled).length, 1, "missing tiles are added disabled");
   for (const bad of [null, [], { version: 3, tiles: [] }, { version: 1 }, { version: 2 },
     { version: 1, tiles: [{ id: "chat", enabled: true, x: 0, y: 0, w: 1, h: 1 }] },
@@ -1240,7 +1240,9 @@ test("the saved layout is loaded after the session and applied to tile grid plac
     [["Player", "false"], ["Inventory", "true"], ["Statistics", "false"], ["Activity log", "false"],
       ["JourneyMap", "false"], ["Build progress", "false"], ["Movement", "false"], ["Experience", "false"],
       ["Recent pickups", "false"], ["Advancements", "false"], ["Villager trades", "false"], ["Performance", "false"],
-      ["AFK", "false"], ["3D render", "false"], ["Personal backpack", "false"], ["Backpacks", "false"]]);
+      ["AFK", "false"], ["3D render", "false"], ["Personal backpack", "false"], ["Backpacks", "false"],
+      ["Backpacks 2", "false"], ["Backpacks 3", "false"], ["Backpacks 4", "false"], ["AE2 crafting", "false"],
+      ["Ender Storage", "false"], ["Ender Storage 2", "false"], ["Ender Storage 3", "false"], ["Ender Storage 4", "false"]]);
   await h.runTimers(400);
   const saves = requests.filter(request => request.url === "/api/layout" && request.method === "PUT");
   assert.equal(saves.length, 1, "a version 1 layout is saved back converted");
@@ -1736,7 +1738,7 @@ test("rules v2: the documented layout round-trips and missing parts get defaults
   for (const key of ["rules", "folders", "places", "toggles", "animation", "pinned"]) {
     assert.deepEqual(layout[key], docLayout()[key], key);
   }
-  assert.equal(layout.profiles[0].tiles.length, 16);
+  assert.equal(layout.profiles[0].tiles.length, R.defaultLayout().tiles.length);
   assert.equal(layout.profiles[0].settings.xp.window, 60, "profile settings are completed with defaults");
   assert.deepEqual(plain(R.normalizeLayout(layout)), layout, "normalizing is idempotent");
   assert.deepEqual(plain(R.normalizeLayout(plain(R.defaultLayout()))), plain(R.defaultLayout()));
@@ -2500,7 +2502,7 @@ test("rules v2: rule sets arrange profiles: Default, existing ones by name and n
   const mining = next.profiles.find(profile => profile.id === "mine");
   assert.equal(mining.settings.pickups.maxRows, 12);
   assert.equal(mining.settings.xp.window, 3600);
-  assert.equal(mining.tiles.length, 16, "Mining keeps its panels");
+  assert.equal(mining.tiles.length, R.defaultLayout().tiles.length, "Mining keeps its panels");
   const flying = next.profiles.find(profile => profile.name === "Flying");
   assert.equal(flying.id, "fly");
   assert.deepEqual(plain(next.profiles.map(profile => profile.id)), ["keep", "mine", "fly"], "others stay unless replacing");
@@ -2951,11 +2953,12 @@ const GOLD_PACK = "123e4567-e89b-12d3-a456-426614174001";
 function backpacks(overrides = {}) {
   const now = Date.now();
   return { source: "world", last: IRON_PACK, list: [
-    { uuid: IRON_PACK, name: "Iron Backpack", player: "Steve", openedAt: now - 120_000, icon: "e0-iron",
+    { uuid: IRON_PACK, name: "Iron Backpack", kind: "backpack", position: null, player: "Steve", openedAt: now - 120_000,
+      icon: "e0-iron",
       items: ["minecraft:diamond"], filled: 1, slots: 27 },
-    { uuid: GOLD_PACK, name: "", player: null, openedAt: null, icon: null,
+    { uuid: GOLD_PACK, name: "", kind: "backpack", position: null, player: null, openedAt: null, icon: null,
       items: ["minecraft:ender_pearl", "minecraft:emerald"], filled: 2, slots: 54 }
-  ], shown: [{ uuid: IRON_PACK, name: "Iron Backpack", contentsUnknown: false,
+  ], shown: [{ uuid: IRON_PACK, name: "Iron Backpack", kind: "backpack", position: null, contentsUnknown: false,
     contents: [item({ itemId: "minecraft:diamond", name: "Diamond" }), ...Array.from({ length: 26 }, empty)] }],
   ...overrides };
 }
@@ -2967,6 +2970,12 @@ test("backpacks are validated like the Java model", () => {
   assert.equal(h.apply(undefined, initial()).backpacks, null, "null without the backpack mod");
   const entry = valid.list[0];
   const shown = valid.shown[0];
+  const place = { dimension: "minecraft:the_nether", x: -30_000_000, y: -2048, z: 30_000_000 };
+  const storage = { ...valid, list: [{ ...entry, kind: "storage", position: place }],
+    shown: [{ ...shown, kind: "storage", position: { ...place, y: 2048 } }] };
+  assert.deepEqual(plain(h.apply(undefined, initial(snapshot({ backpacks: storage }))).backpacks), storage);
+  const { kind: _kind, ...noKind } = entry;
+  const { position: _position, ...noPosition } = shown;
   for (const bad of [{ ...valid, source: "server" }, { ...valid, last: "LAST" },
     { ...valid, list: [{ ...entry, uuid: "123E4567-E89B-12D3-A456-426614174000" }] },
     { ...valid, list: Array.from({ length: 257 }, () => entry) },
@@ -2977,7 +2986,14 @@ test("backpacks are validated like the Java model", () => {
     { ...valid, list: [{ ...entry, items: Array.from({ length: 65 }, () => "minecraft:stone") }] },
     { ...valid, shown: [{ ...shown, contents: Array.from({ length: 129 }, empty) }] },
     { ...valid, shown: [{ ...shown, contentsUnknown: true }] },
-    { ...valid, shown: [{ ...shown, contents: [item({ contents: [] })] }] }, "none", undefined]) {
+    { ...valid, shown: [{ ...shown, contents: [item({ contents: [] })] }] },
+    { ...valid, list: [noKind] }, { ...valid, shown: [noPosition] }, { ...valid, list: [{ ...entry, kind: "chest" }] },
+    { ...valid, shown: [{ ...shown, kind: "Storage" }] },
+    ...[{ ...place, x: 30_000_001 }, { ...place, y: 2049 }, { ...place, z: -30_000_001 }, { ...place, x: 1.5 },
+      { ...place, y: "64" }, { ...place, dimension: "Overworld" }, { x: 0, y: 0, z: 0 }, "0 64 0", []]
+      .flatMap(position => [{ ...valid, list: [{ ...entry, kind: "storage", position }] },
+        { ...valid, shown: [{ ...shown, kind: "storage", position }] }]),
+    "none", undefined]) {
     assert.throws(() => h.apply(undefined, initial(snapshot({ backpacks: bad }))), JSON.stringify(bad)?.slice(0, 200));
   }
 });
@@ -3037,7 +3053,7 @@ test("the Backpacks panel lists, searches and shows the selected backpack, only 
   assert.equal(h.get("#backpacks-message").textContent, "Loading…", "until the game sends its contents");
   assert.equal(visible().length, 0);
 
-  const gold = contents => ({ uuid: GOLD_PACK, name: "", contentsUnknown: false,
+  const gold = contents => ({ uuid: GOLD_PACK, name: "", kind: "backpack", position: null, contentsUnknown: false,
     contents: [...contents, ...Array.from({ length: 54 - contents.length }, empty)] });
   h.sockets[0].message(update({ baseRevision: 7, revision: 8, capturedAt: 102,
     backpacks: backpacks({ shown: [...backpacks().shown, gold([item({ itemId: "minecraft:emerald", name: "Emerald" })])] }) }));
@@ -3067,13 +3083,170 @@ test("the Backpacks panel lists, searches and shows the selected backpack, only 
   assert.equal(rows().length, 0);
 });
 
+test("the backpack list folds away behind ☰ once a backpack is shown, and big counts are shortened", async () => {
+  const h = harness();
+  await h.flush();
+  const bigStack = item({ itemId: "minecraft:cobblestone", name: "Cobblestone", count: 2_300_000, maxCount: 64 });
+  const counts = [bigStack, item({ count: 3923 }), item({ count: 42_373 }), item({ count: 999 }), item({ count: 1000 })];
+  const valid = backpacks({ last: null, shown: [] });
+  h.sockets[0].message({ ...initial(snapshot({ backpacks: valid })), modVersion: "0.12+1.21.1" });
+  const picker = h.get("#backpacks-picker");
+  assert.equal(picker.hidden, false, "the list shows while nothing is picked");
+  h.get("#backpacks-list").children[0].emit("click");
+  assert.equal(picker.hidden, true, "picking a backpack folds the list away");
+  assert.equal(h.get("#backpacks-pick").attributes["aria-expanded"], "false");
+  h.get("#backpacks-pick").emit("click");
+  assert.equal(picker.hidden, false, "☰ brings the search and list back");
+  h.get("#backpacks-pick").emit("click");
+  assert.equal(picker.hidden, true, "and folds them away again");
+  h.get("#backpacks-pick").emit("click");
+  h.get("#backpacks-last").emit("click");
+  assert.equal(picker.hidden, true, "Last opened folds the list away too");
+
+  h.sockets[0].message(update({ backpacks: { ...valid, last: IRON_PACK, shown: [{ ...backpacks().shown[0],
+    contents: counts }] } }));
+  const shown = h.get("#backpacks-grid").children.filter(slot => !slot.hidden).map(slot => slotParts(slot).count.textContent);
+  assert.deepEqual(shown, ["2.3M", "3.9K", "42K", "999", "1K"], "shortened, rounded down");
+  h.get("#backpacks-grid").children[0].emit("pointerenter", { clientX: 1, clientY: 1 });
+  assert.match(h.get("#tooltip").textContent, /× 2,300,000/, "the tooltip gives the exact count");
+});
+
 test("the Backpacks panel's selection is a validated setting", () => {
   const h = harness();
   const normalize = value => h.run(`normalizeSettings(${JSON.stringify(value)})`);
   assert.equal(normalize({}).backpacks.selected, "last");
   assert.equal(normalize({ backpacks: { selected: GOLD_PACK } }).backpacks.selected, GOLD_PACK);
-  for (const bad of ["LAST", "123e4567", GOLD_PACK.toUpperCase(), 7, null]) {
-    assert.throws(() => normalize({ backpacks: { selected: bad } }), String(bad));
+  for (const id of ["backpacks", "backpacks2", "backpacks3", "backpacks4"]) {
+    assert.equal(normalize({})[id].selected, "last", id);
+    assert.equal(normalize({ [id]: { selected: GOLD_PACK } })[id].selected, GOLD_PACK, id);
+    for (const bad of ["LAST", "123e4567", GOLD_PACK.toUpperCase(), 7, null]) {
+      assert.throws(() => normalize({ [id]: { selected: bad } }), `${id} ${bad}`);
+    }
+  }
+  const backpacks3 = h.run(`normalizeLayout({ version: 2, tiles: [], rules: [{ id: "r", name: "R", enabled: true,
+    when: [], then: [{ do: "set", panel: "backpacks3", setting: "selected", value: "${GOLD_PACK}" }] }] })`);
+  assert.equal(backpacks3.rules[0].then[0].value, GOLD_PACK, "a rule can pick Backpacks 3's backpack");
+});
+
+test("Backpacks 2 to 4 are offered on 1.21.1 only, and each panel shows its own backpack, search and fold", async () => {
+  const extra = ["Backpacks", "Backpacks 2", "Backpacks 3", "Backpacks 4"];
+  const chips = h => h.get("#tile-toggles").children.filter(element => extra.includes(element.textContent));
+  const modern = harness();
+  await modern.flush();
+  modern.sockets[0].message({ ...initial(snapshot()), modVersion: "0.12+26.1.2" });
+  assert.deepEqual(chips(modern).map(chip => chip.hidden), [true, true, true, true], "none on 26.1.2");
+
+  const requests = [];
+  const h = harness(defaultFetch(null, requests));
+  await h.flush();
+  h.sockets[0].message({ ...initial(snapshot({ backpacks: backpacks() })), modVersion: "0.12+1.21.1" });
+  assert.deepEqual(chips(h).map(chip => [chip.textContent, chip.hidden]),
+    extra.map(label => [label, false]), "four Backpacks panels on 1.21.1");
+  assert.deepEqual(plain(h.run("defaultLayout().tiles.filter(tile => tile.id.startsWith('backpacks'))")), [
+    { id: "backpacks", enabled: false, x: 6, y: 43, w: 6, h: 8 }, { id: "backpacks2", enabled: false, x: 0, y: 51, w: 6, h: 8 },
+    { id: "backpacks3", enabled: false, x: 6, y: 51, w: 6, h: 8 }, { id: "backpacks4", enabled: false, x: 0, y: 59, w: 6, h: 8 }]);
+
+  h.get("#backpacks2-list").children[1].emit("click");
+  assert.equal(h.run("displaySettings().backpacks2.selected"), GOLD_PACK);
+  assert.equal(h.run("displaySettings().backpacks.selected"), "last", "the first panel keeps its own pick");
+  const gold = { uuid: GOLD_PACK, name: "", kind: "backpack", position: null, contentsUnknown: false,
+    contents: [item({ itemId: "minecraft:emerald", name: "Emerald" }), ...Array.from({ length: 53 }, empty)] };
+  h.sockets[0].message(update({ backpacks: backpacks({ shown: [...backpacks().shown, gold] }) }));
+  const visible = id => h.get(`#${id}-grid`).children.filter(slot => !slot.hidden);
+  assert.equal(h.get("#backpacks-status").textContent, "Iron Backpack");
+  assert.equal(h.get("#backpacks2-status").textContent, "Backpack");
+  assert.equal(visible("backpacks").length, 27, "two backpacks at once");
+  assert.equal(visible("backpacks2").length, 54);
+  assert.equal(slotParts(visible("backpacks2")[0]).fallback.textContent, "EM");
+
+  assert.equal(h.get("#backpacks2-picker").hidden, true, "picking folds only that panel's list");
+  assert.equal(h.get("#backpacks-picker").hidden, true, "the first panel shows the last opened, folded");
+  h.get("#backpacks-pick").emit("click");
+  assert.equal(h.get("#backpacks-picker").hidden, false);
+  assert.equal(h.get("#backpacks2-picker").hidden, true, "folds are per panel");
+  h.get("#backpacks-search").value = "iron";
+  h.get("#backpacks-search").emit("input");
+  assert.equal(h.get("#backpacks-list").children.length, 1);
+  assert.equal(h.get("#backpacks2-list").children.length, 2, "searches are per panel");
+  await h.runTimers(400);
+  const saved = savedLayout(requests).settings;
+  assert.deepEqual([saved.backpacks.selected, saved.backpacks2.selected, saved.backpacks3.selected], ["last", GOLD_PACK, "last"]);
+});
+
+test("placed storages are listed with a Storage tag and coordinates, and found by both", async () => {
+  const h = harness();
+  await h.flush();
+  const STORAGE = "323e4567-e89b-12d3-a456-426614174000";
+  const chest = { uuid: STORAGE, name: "Copper Chest", kind: "storage",
+    position: { dimension: "minecraft:overworld", x: 120, y: 64, z: -340 }, player: null, openedAt: null, icon: null,
+    items: ["minecraft:cobblestone"], filled: 3, slots: 45 };
+  h.sockets[0].message({ ...initial(snapshot({ backpacks: backpacks({ list: [...backpacks().list, chest] }) })),
+    modVersion: "0.12+1.21.1" });
+  const rows = () => h.get("#backpacks-list").children;
+  assert.deepEqual(rows()[2].children.map(part => part.textContent), ["Copper Chest", "3/45", "Storage · 120, 64, -340"]);
+  const search = text => {
+    h.get("#backpacks-search").value = text;
+    h.get("#backpacks-search").emit("input");
+    return rows().map(row => row.children[0].textContent);
+  };
+  assert.deepEqual(search("storage"), ["Copper Chest"], "by the word storage");
+  assert.deepEqual(search("64, -340"), ["Copper Chest"], "by coordinates");
+  assert.deepEqual(search("-340"), ["Copper Chest"]);
+});
+
+test("backpacks can be renamed on the dashboard only, and clearing the name brings the game's back", async () => {
+  const requests = [];
+  const h = harness(defaultFetch(null, requests));
+  await h.flush();
+  h.sockets[0].message({ ...initial(snapshot({ backpacks: backpacks() })), modVersion: "0.12+1.21.1" });
+  const rename = h.get("#backpacks-rename");
+  const input = h.get("#backpacks-name");
+  assert.equal(rename.hidden, false, "the shown backpack can be renamed");
+  assert.equal(input.hidden, true);
+  rename.emit("click");
+  assert.equal(input.hidden, false);
+  assert.equal(h.get("#backpacks-status").hidden, true);
+  assert.equal(input.value, "Iron Backpack", "starts from the game's name");
+  input.value = "Ore bag";
+  input.emit("keydown", { key: "Escape" });
+  assert.equal(input.hidden, true, "Escape cancels");
+  assert.equal(h.get("#backpacks-status").textContent, "Iron Backpack");
+
+  rename.emit("click");
+  input.value = "  Ore bag ";
+  input.emit("keydown", { key: "Enter" });
+  input.emit("blur");
+  assert.equal(h.get("#backpacks-status").textContent, "Ore bag");
+  assert.equal(h.get("#backpacks-status").hidden, false);
+  assert.equal(h.get("#backpacks-list").children[0].children[0].textContent, "Ore bag", "the row shows it");
+  assert.equal(h.get("#backpacks2-status").textContent, "Ore bag", "every panel shows it");
+  await h.runTimers(400);
+  assert.deepEqual(savedLayout(requests).backpackNames, { [IRON_PACK]: "Ore bag" });
+  for (const [text, found] of [["ore bag", 1], ["iron backpack", 1], ["nothing", 0]]) {
+    h.get("#backpacks2-search").value = text;
+    h.get("#backpacks2-search").emit("input");
+    assert.equal(h.get("#backpacks2-list").children.length, found, text);
+  }
+
+  rename.emit("click");
+  input.value = "";
+  input.emit("blur");
+  assert.equal(h.get("#backpacks-status").textContent, "Iron Backpack", "an empty name removes the nickname");
+  await h.runTimers(400);
+  assert.deepEqual(savedLayout(requests).backpackNames, {});
+});
+
+test("backpack nicknames are validated", () => {
+  const h = harness();
+  const normalize = value => h.run(`normalizeLayout(${JSON.stringify({ version: 2, tiles: [], ...value })})`);
+  assert.deepEqual(plain(normalize({}).backpackNames), {});
+  assert.deepEqual(plain(normalize({ backpackNames: { [IRON_PACK]: "x".repeat(64) } }).backpackNames),
+    { [IRON_PACK]: "x".repeat(64) });
+  const many = Object.fromEntries(Array.from({ length: 257 }, (_, index) =>
+    [`123e4567-e89b-12d3-a456-${String(index).padStart(12, "0")}`, "Bag"]));
+  for (const bad of [{ [IRON_PACK.toUpperCase()]: "Bag" }, { last: "Bag" }, { [IRON_PACK]: "" },
+    { [IRON_PACK]: "x".repeat(65) }, { [IRON_PACK]: 7 }, [], "names", many]) {
+    assert.throws(() => normalize({ backpackNames: bad }), JSON.stringify(bad).slice(0, 80));
   }
 });
 
@@ -3835,4 +4008,224 @@ test("3D render tile: settings are saved, and it explains when there is nothing 
   assert.deepEqual(savedLayout(requests).settings.model, { spin: false, axis: "z", speed: 60 });
   assert.throws(() => h.run(`normalizeSettings({ model: { speed: 45 } })`), /Invalid model settings/);
   assert.throws(() => h.run(`normalizeSettings({ model: { axis: "w" } })`), /Invalid model settings/);
+});
+
+function ae2(overrides = {}) {
+  const now = Date.now();
+  const pick = item({ itemId: "minecraft:diamond_pickaxe", name: "Diamond Pickaxe", count: 1, maxCount: 1 });
+  const chip = item({ itemId: "ae2:logic_processor", name: "Logic Processor", count: 1 });
+  return { jobs: [
+    { id: "job-1", item: chip, amount: "64", state: "running", startedAt: now - 90_000, endedAt: null },
+    { id: "job-2", item: pick, amount: "1", state: "finished", startedAt: now - 300_000, endedAt: now - 120_000 },
+    { id: "job-3", item: pick, amount: "2", state: "cancelled", startedAt: null, endedAt: now - 60_000 }],
+  cpus: { seenAt: now - 5_000, open: true, selected: 2, list: [
+    { serial: 1, name: "", storage: 65536, coProcessors: 4, job: null, amount: null, progress: 0, elapsedMillis: 0 },
+    { serial: 2, name: "Main CPU", storage: 1048576, coProcessors: 16, job: chip, amount: "64", progress: 0.25,
+      elapsedMillis: 90_000 }],
+  detail: { elapsedMillis: 90_000, remaining: 48, total: 64, suspended: false, entries: [
+    { item: chip, stored: "", active: "8", pending: "40" }] } }, ...overrides };
+}
+
+test("AE2 crafting is validated like the Java model", () => {
+  const h = harness();
+  const valid = ae2();
+  assert.deepEqual(plain(h.apply(undefined, initial(snapshot({ ae2: valid }))).ae2), valid);
+  assert.equal(h.apply(undefined, initial()).ae2, null, "null without AE2");
+  assert.equal(h.apply(undefined, initial(snapshot({ ae2: { jobs: [], cpus: null } }))).ae2.cpus, null,
+    "no CPUs until Crafting Status is opened");
+  const [job] = valid.jobs;
+  const cpu = valid.cpus.list[1];
+  for (const bad of [{ ...valid, jobs: Array.from({ length: 17 }, () => job) },
+    { ...valid, jobs: [{ ...job, state: "paused" }] }, { ...valid, jobs: [{ ...job, endedAt: 5 }] },
+    { ...valid, jobs: [{ ...job, state: "finished" }] }, { ...valid, jobs: [{ ...job, amount: "9".repeat(33) }] },
+    { ...valid, jobs: [{ ...job, item: empty() }] },
+    { ...valid, cpus: { ...valid.cpus, list: [{ ...cpu, progress: 1.5 }] } },
+    { ...valid, cpus: { ...valid.cpus, list: [{ ...cpu, amount: null }] } },
+    { ...valid, cpus: { ...valid.cpus, detail: { ...valid.cpus.detail, remaining: 65 } } },
+    { ...valid, cpus: { ...valid.cpus, list: Array.from({ length: 65 }, () => cpu) } }, "none", undefined]) {
+    assert.throws(() => h.apply(undefined, initial(snapshot({ ae2: bad }))), JSON.stringify(bad)?.slice(0, 200));
+  }
+});
+
+test("the AE2 crafting panel shows jobs, CPUs and the selected CPU's items", async () => {
+  const h = harness();
+  await h.flush();
+  h.sockets[0].message({ ...initial(snapshot()), modVersion: "0.12+1.21.1" });
+  assert.equal(h.get("#crafting-message").textContent, "Needs Applied Energistics 2.");
+  assert.equal(h.get("#crafting-status").textContent, "Unavailable");
+
+  h.sockets[0].message(update({ ae2: { jobs: [], cpus: null } }));
+  assert.equal(h.get("#crafting-status").textContent, "No CPUs seen");
+  assert.equal(h.get("#crafting-message").textContent, "Jobs you start from an ME terminal appear here.");
+  assert.match(h.get("#crafting-cpus-note").textContent, /Open Crafting Status/);
+
+  h.sockets[0].message(update({ baseRevision: 7, revision: 8, ae2: ae2() }));
+  assert.equal(h.get("#crafting-status").textContent, "Live");
+  const rows = id => h.get(id).children.map(row => row.children[1].children.map(part => part.textContent));
+  const jobs = rows("#crafting-jobs");
+  assert.deepEqual(jobs.map(([name]) => name), ["Logic Processor × 64", "Diamond Pickaxe × 2", "Diamond Pickaxe × 1"],
+    "running first, then the most recently ended");
+  assert.equal(jobs[0][1], "Crafting · 25% · 1m 30s", "progress from the CPU crafting the same item and amount");
+  assert.equal(jobs[1][1], "Cancelled · 1m ago");
+  assert.equal(jobs[2][1], "Done · 2m ago · took 3m 0s");
+  const cpus = rows("#crafting-cpus");
+  assert.deepEqual(cpus[0].slice(0, 2), ["CPU 1", "Idle · 65,536 bytes · 4 co-processors"]);
+  assert.deepEqual(cpus[1].slice(0, 2), ["Main CPU (selected)", "Logic Processor × 64 · 25% · 1m 30s"]);
+  assert.equal(h.get("#crafting-detail-count").textContent, "25%");
+  assert.deepEqual(rows("#crafting-detail")[0].slice(0, 2), ["Logic Processor", "crafting 8 · scheduled 40"]);
+
+  h.sockets[0].message(update({ baseRevision: 8, revision: 9, ae2: ae2({ cpus: { ...ae2().cpus, open: false, detail: null } }) }));
+  assert.equal(h.get("#crafting-status").textContent, "Seen 5s ago", "as last seen once the screen closes");
+  assert.equal(h.get("#crafting-detail-progress").hidden, true);
+});
+
+// ------------------------------------------------------------------------------------------------ Ender Storage
+
+const PERSONAL = "purple.purple.black.8667ba71-b85a-4004-af54-457a9734eed7";
+
+function enderStorage(overrides = {}) {
+  const now = Date.now();
+  return { source: "world", last: "white.red.light_blue", list: [
+    { key: "white.red.light_blue", owner: null, seenAt: now - 120_000, items: ["minecraft:diamond"], filled: 1, slots: 27 },
+    { key: PERSONAL, owner: "Steve", seenAt: null, items: ["minecraft:ender_pearl"], filled: 1, slots: 27 }
+  ], shown: [{ key: "white.red.light_blue", owner: null, seenAt: now - 120_000, contentsUnknown: false,
+    contents: [item({ itemId: "minecraft:diamond", name: "Diamond" }), ...Array.from({ length: 26 }, empty)],
+    log: [{ at: now - 60_000, delta: -3, item: item({ itemId: "minecraft:diamond", name: "Diamond", count: 1 }) },
+      { at: now - 90_000, delta: 12, item: item({ itemId: "minecraft:cobblestone", name: "Cobblestone", count: 1 }) }] }],
+  ...overrides };
+}
+
+test("Ender Storage chests are validated like the Java model", () => {
+  const h = harness();
+  const valid = enderStorage();
+  assert.deepEqual(plain(h.apply(undefined, initial(snapshot({ enderStorage: valid }))).enderStorage), valid);
+  assert.equal(h.apply(undefined, initial()).enderStorage, null, "null without Ender Storage");
+  const entry = valid.list[0];
+  const shown = valid.shown[0];
+  const change = shown.log[0];
+  for (const bad of [{ ...valid, source: "server" }, { ...valid, last: "White.red.blue" },
+    { ...valid, last: "white.red" }, { ...valid, list: [{ ...entry, key: "white.red.blue.STEVE" }] },
+    { ...valid, list: [{ ...entry, owner: "" }] }, { ...valid, list: [{ ...entry, seenAt: "now" }] },
+    { ...valid, list: [{ ...entry, filled: 129 }] }, { ...valid, list: [{ ...entry, items: ["Diamond"] }] },
+    { ...valid, list: Array.from({ length: 257 }, () => entry) },
+    { ...valid, shown: Array.from({ length: 9 }, () => shown) },
+    { ...valid, shown: [{ ...shown, contentsUnknown: true }] },
+    { ...valid, shown: [{ ...shown, log: Array.from({ length: 501 }, () => change) }] },
+    { ...valid, shown: [{ ...shown, log: [{ ...change, delta: 0 }] }] },
+    { ...valid, shown: [{ ...shown, log: [{ ...change, delta: 1.5 }] }] },
+    { ...valid, shown: [{ ...shown, log: [{ ...change, item: null }] }] },
+    "none", undefined]) {
+    assert.throws(() => h.apply(undefined, initial(snapshot({ enderStorage: bad }))), JSON.stringify(bad)?.slice(0, 200));
+  }
+});
+
+test("the Ender Storage panel lists chests with their colours, searches, and shows the chest and its changes", async () => {
+  const requests = [];
+  const h = harness(defaultFetch(null, requests));
+  await h.flush();
+  const pearl = { id: "minecraft:ender_pearl", name: "Ender Pearl", icon: null };
+  h.sockets[0].message({ ...initial(snapshot({ registries: registries({ items: [pearl] }) })),
+    modVersion: "0.12+1.21.1" });
+  assert.equal(h.get("#enderStorage-message").textContent, "Needs Ender Storage.");
+  assert.equal(h.get("#enderStorage-status").textContent, "Unavailable");
+
+  h.sockets[0].message(update({ enderStorage: enderStorage() }));
+  const rows = () => h.get("#enderStorage-list").children;
+  const names = () => rows().map(row => row.children[0].textContent);
+  const swatches = element => element.children.map(swatch => swatch.title);
+  assert.deepEqual(rows().map(row => row.children.map(part => part.textContent)), [
+    ["White / Red / Light Blue", "1/27", "public · seen 2m ago"],
+    ["Purple / Purple / Black · Steve", "1/27", "personal · Steve"]]);
+  assert.deepEqual(swatches(rows()[0].children[0].children[0]), ["White", "Red", "Light Blue"], "rows show the colour code");
+  assert.deepEqual(swatches(h.get("#enderStorage-colours")), ["White", "Red", "Light Blue"], "and so does the header");
+  assert.equal(h.get("#enderStorage-status").textContent, "White / Red / Light Blue");
+  assert.equal(h.get("#enderStorage-picker").hidden, true, "the last opened chest is shown, the search folded away");
+  const visible = () => h.get("#enderStorage-grid").children.filter(slot => !slot.hidden);
+  assert.equal(visible().length, 27);
+  assert.equal(slotParts(visible()[0]).fallback.textContent, "DI");
+
+  const log = () => h.get("#enderStorage-log").children.map(row => row.children.slice(1).map(part => part.textContent));
+  assert.equal(h.get("#enderStorage-changes").hidden, false);
+  assert.deepEqual(log(), [["−3", "Diamond", "1m ago"], ["+12", "Cobblestone", "1m ago"]], "newest first");
+  assert.equal(h.get("#enderStorage-log").children[0].className, "ender-log-row loss");
+
+  h.get("#enderStorage-pick").emit("click");
+  assert.equal(h.get("#enderStorage-picker").hidden, false, "☰ brings the search back");
+  const search = text => {
+    h.get("#enderStorage-search").value = text;
+    h.get("#enderStorage-search").emit("input");
+  };
+  search("light blue");
+  assert.deepEqual(names(), ["White / Red / Light Blue"], "by colour");
+  search("light_blue");
+  assert.deepEqual(names(), ["White / Red / Light Blue"], "by colour id");
+  search("steve");
+  assert.deepEqual(names(), ["Purple / Purple / Black · Steve"], "by owner");
+  search("ender pearl");
+  assert.deepEqual(names(), ["Purple / Purple / Black · Steve"], "by item name");
+  search("");
+
+  rows()[1].emit("click");
+  assert.equal(h.get("#enderStorage-picker").hidden, true, "picking a chest hides the search");
+  assert.equal(h.run("displaySettings().enderStorage.selected"), PERSONAL);
+  assert.equal(h.get("#enderStorage-message").textContent, "Loading…");
+  assert.equal(h.get("#enderStorage-changes").hidden, true, "no log until it arrives");
+  h.sockets[0].message(update({ baseRevision: 7, revision: 8, capturedAt: 102, enderStorage: enderStorage({ source: "remembered",
+    shown: [{ key: PERSONAL, owner: "Steve", seenAt: null, contentsUnknown: true, contents: [], log: [] }] }) }));
+  assert.equal(h.get("#enderStorage-message").textContent, "Contents not known yet. Open the chest once in game.");
+  assert.equal(h.get("#enderStorage-note").hidden, false, "servers list only opened chests");
+  await h.runTimers(400);
+  assert.equal(savedLayout(requests).settings.enderStorage.selected, PERSONAL);
+});
+
+test("Ender Storage 1 to 4 each show their own chest, and chests can be renamed on the dashboard", async () => {
+  const requests = [];
+  const h = harness(defaultFetch(null, requests));
+  await h.flush();
+  h.sockets[0].message({ ...initial(snapshot({ enderStorage: enderStorage() })), modVersion: "0.12+1.21.1" });
+  const chips = h.get("#tile-toggles").children.filter(element => element.textContent.startsWith("Ender Storage"));
+  assert.deepEqual(chips.map(chip => [chip.textContent, chip.hidden]),
+    ["Ender Storage", "Ender Storage 2", "Ender Storage 3", "Ender Storage 4"].map(label => [label, false]));
+  h.get("#enderStorage2-pick").emit("click");
+  h.get("#enderStorage2-list").children[1].emit("click");
+  assert.equal(h.run("displaySettings().enderStorage.selected"), "last", "the first panel keeps its own pick");
+  assert.equal(h.get("#enderStorage2-status").textContent, "Purple / Purple / Black · Steve");
+  assert.equal(h.get("#enderStorage-status").textContent, "White / Red / Light Blue");
+
+  h.get("#enderStorage-rename").emit("click");
+  h.get("#enderStorage-name").value = "Ores";
+  h.get("#enderStorage-name").emit("keydown", { key: "Enter" });
+  assert.equal(h.get("#enderStorage-status").textContent, "Ores");
+  assert.equal(h.get("#enderStorage2-list").children[0].children[0].textContent, "Ores");
+  await h.runTimers(400);
+  const saved = savedLayout(requests);
+  assert.deepEqual(saved.backpackNames, { "white.red.light_blue": "Ores" });
+  assert.equal(saved.settings.enderStorage2.selected, PERSONAL);
+});
+
+test("the Ender Storage panels' selection is a validated setting", () => {
+  const h = harness();
+  const normalize = value => h.run(`normalizeSettings(${JSON.stringify(value)})`);
+  for (const id of ["enderStorage", "enderStorage2", "enderStorage3", "enderStorage4"]) {
+    assert.equal(normalize({})[id].selected, "last", id);
+    assert.equal(normalize({ [id]: { selected: PERSONAL } })[id].selected, PERSONAL, id);
+    for (const bad of ["LAST", "white.red", "White.red.blue", `${PERSONAL}x`, IRON_PACK, 7, null]) {
+      assert.throws(() => normalize({ [id]: { selected: bad } }), `${id} ${bad}`);
+    }
+  }
+});
+
+test("with Ender Storage, the inventory's ender chest slot opens the chest opened last", async () => {
+  const h = harness();
+  await h.flush();
+  h.sockets[0].message({ ...initial(snapshot({ enderStorage: enderStorage() })), modVersion: "0.12+1.21.1" });
+  extras(h)[1].emit("click", { clientX: 50, clientY: 60 });
+  const windows = () => h.get("#windows").children;
+  assert.equal(windows().length, 1);
+  const [head, note, grid] = windows()[0].children;
+  assert.equal(head.children[0].textContent, "White / Red / Light Blue");
+  assert.equal(note.textContent, "Live", "singleplayer reads it live");
+  assert.equal(slotParts(grid.children[0]).fallback.textContent, "DI");
+  h.sockets[0].message(update({ enderStorage: enderStorage({ last: null }) }));
+  assert.match(windows()[0].children[1].textContent, /Open an Ender Storage chest/);
 });

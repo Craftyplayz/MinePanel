@@ -318,8 +318,9 @@ public final class WorldFeaturesTest {
                 InventorySnapshot.empty(), null, GameplayHistory.empty(), 20, 5.0, List.of(), details);
         var after = new PlayerSnapshot(2, 2, true, 0L, "minecraft:overworld", 0.0, 0.0, 0.0, 20.0, 20.0, 0.0,
                 InventorySnapshot.empty(), null, GameplayHistory.empty(), 20, 5.0, List.of(), dressed);
-        check(before.toJson().contains(",\"appearance\":" + Appearance.EMPTY.toJson() + ",\"backpacks\":null}"),
-                "full snapshots end with the appearance, then backpacks (null without a backpack mod)");
+        check(before.toJson().contains(",\"appearance\":" + Appearance.EMPTY.toJson() + ",\"backpacks\":null,\"ae2\":null,"
+                        + "\"enderStorage\":null}"),
+                "full snapshots end with the appearance, backpacks, ae2 and enderStorage (null without those mods)");
         check(after.toDeltaJson(before).contains(",\"appearance\":" + appearance.toJson()), "a changed appearance is sent");
     }
 

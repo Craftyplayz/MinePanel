@@ -75,8 +75,24 @@ public final class SophisticatedBackpacks implements Backpacks.Source {
     private long indexedAt;
     private UUID lastOpened;
     private final Map<String, ItemStack> icons = new HashMap<>();
+    // Placed Sophisticated Storage blocks, when that mod is installed; turned off alone after a failure.
+    private boolean storage = net.neoforged.fml.ModList.get().isLoaded("sophisticatedstorage");
+    private List<SophisticatedStorage.Found> storageIndex;
+    // Known storages by UUID: the last index, plus watched ones that dropped out of it (so they can still be read).
+    private Map<UUID, SophisticatedStorage.Found> storages = Map.of();
+    private final Map<UUID, Backpacks.Contents> storageRead = bounded();
+    // Storages seen open on this client: when and by whom, and (what servers give) their slots as last seen.
+    private final Map<UUID, SeenStorage> storageSeen = bounded();
+    private Object openStorage;
 
     private record Remembered(WorldStore.Backpack stored, Backpacks.Contents contents) {
+    }
+
+    private record SeenStorage(SophisticatedStorage.Found found, Backpacks.Contents contents, long seenAt,
+                               String player) {
+    }
+
+    private record StorageResult(SophisticatedStorage.Read read, Throwable failure) {
     }
 
     private record Padded(Backpacks.Contents source, Backpacks.Contents contents) {
@@ -141,7 +157,46 @@ public final class SophisticatedBackpacks implements Backpacks.Source {
         if (menu != null && ticks % RECORD_INTERVAL_TICKS == 0) record(minecraft, menu);
         if (menu != openMenu && openMenu != null) record(minecraft, openMenu);
         openMenu = menu;
+        if (storage) {
+            try {
+                Object storageMenu = SophisticatedStorage.menu(minecraft);
+                if (storageMenu != null && ticks % RECORD_INTERVAL_TICKS == 0) recordStorage(minecraft, storageMenu);
+                if (storageMenu != openStorage && openStorage != null) recordStorage(minecraft, openStorage);
+                openStorage = storageMenu;
+            } catch (LinkageError | RuntimeException failed) {
+                storageFailed(failed);
+            }
+        }
         requestRead(minecraft);
+    }
+
+    // Storage support fails on its own: backpacks keep working.
+    private void storageFailed(Throwable failed) {
+        storage = false;
+        clearStorages();
+        java.util.logging.Logger.getLogger("MinePanel").log(java.util.logging.Level.WARNING,
+                "Sophisticated Storage support failed; placed storages are off for this session.", failed);
+    }
+
+    private void clearStorages() {
+        storageIndex = null;
+        storages = Map.of();
+        storageRead.clear();
+        storageSeen.clear();
+        openStorage = null;
+    }
+
+    private void recordStorage(Minecraft minecraft, Object menu) {
+        SophisticatedStorage.Opened opened = SophisticatedStorage.opened(minecraft, menu);
+        if (opened == null) return;
+        UUID uuid = opened.found().uuid();
+        SeenStorage old = storageSeen.get(uuid);
+        // Unchanged contents keep their instance, so the dashboard's item cache stays valid.
+        Backpacks.Contents contents = old != null && matches(old.contents().items(), opened.stacks()) ? old.contents()
+                : new Backpacks.Contents(opened.stacks());
+        String player = minecraft.player.getGameProfile().getName();
+        storageSeen.put(uuid, new SeenStorage(opened.found(), contents, System.currentTimeMillis(),
+                player.isEmpty() ? null : bounded(player, 64)));
     }
 
     @Override
@@ -153,6 +208,7 @@ public final class SophisticatedBackpacks implements Backpacks.Source {
         index = null;
         lastOpened = null;
         icons.clear();
+        clearStorages();
         openMenu = null;
         inFlight = false;
         generation++;
@@ -207,9 +263,19 @@ public final class SophisticatedBackpacks implements Backpacks.Source {
         Set<UUID> wanted = new LinkedHashSet<>(seen);
         wanted.addAll(watched);
         if (lastOpened != null) wanted.add(lastOpened);
+        // Watched storages are read by position, from their block entity; the rest are backpacks.
+        Map<UUID, BackpacksSnapshot.Position> storageIds = storage ? new LinkedHashMap<>() : null;
+        if (storage) {
+            for (UUID uuid : wanted) {
+                SophisticatedStorage.Found found = storages.get(uuid);
+                if (found != null) storageIds.put(uuid, found.position());
+            }
+            wanted.removeAll(storageIds.keySet());
+        }
         boolean indexDue = index == null || now - indexedAt >= INDEX_INTERVAL_MILLIS;
         boolean appeared = wanted.stream().anyMatch(uuid -> !read.containsKey(uuid));
-        if (!indexDue && (wanted.isEmpty() || !appeared && now - requestedAt < READ_INTERVAL_MILLIS)) return;
+        boolean watching = !wanted.isEmpty() || storageIds != null && !storageIds.isEmpty();
+        if (!indexDue && (!watching || !appeared && now - requestedAt < READ_INTERVAL_MILLIS)) return;
         List<UUID> ids = List.copyOf(wanted);
         seen.clear();
         inFlight = true;
@@ -219,8 +285,19 @@ public final class SophisticatedBackpacks implements Backpacks.Source {
             // execute() runs the task in place when the server no longer takes tasks; never read it off its thread.
             if (!server.isSameThread()) return;
             ReadResult result = readOnServer(server, ids, indexDue);
-            minecraft.execute(() -> apply(request, ids, result));
+            StorageResult placed = storageIds == null ? null : readStorages(server, storageIds, indexDue);
+            minecraft.execute(() -> apply(request, ids, result, placed));
         });
+    }
+
+    // Server thread.
+    private static StorageResult readStorages(MinecraftServer server, Map<UUID, BackpacksSnapshot.Position> ids,
+                                              boolean withIndex) {
+        try {
+            return new StorageResult(SophisticatedStorage.read(server, ids, withIndex), null);
+        } catch (LinkageError | RuntimeException failed) {
+            return new StorageResult(null, failed);
+        }
     }
 
     // Server thread. Copies of the stored stacks (null contents for a backpack the storage could not answer for), and
@@ -313,12 +390,19 @@ public final class SophisticatedBackpacks implements Backpacks.Source {
         return text.length() > length ? text.substring(0, length) : text;
     }
 
-    private void apply(int request, List<UUID> ids, ReadResult result) {
+    private void apply(int request, List<UUID> ids, ReadResult result, StorageResult storageResult) {
         if (request != generation) return;
         inFlight = false;
         if (result.failure() != null) {
             failure = result.failure();
             return;
+        }
+        if (storageResult != null && storage) {
+            if (storageResult.failure() != null) {
+                storageFailed(storageResult.failure());
+            } else {
+                applyStorages(storageResult.read());
+            }
         }
         if (result.index() != null) {
             index = result.index();
@@ -332,6 +416,28 @@ public final class SophisticatedBackpacks implements Backpacks.Source {
             boolean same = items != null && old != null && old.items() != null && matches(old.items(), items);
             read.put(uuid, same ? old : items == null ? Backpacks.Contents.UNKNOWN : new Backpacks.Contents(items));
         }
+    }
+
+    private void applyStorages(SophisticatedStorage.Read result) {
+        result.contents().forEach((uuid, items) -> {
+            if (items == null) {
+                // Its chunk isn't loaded: the last contents read stay; never read means not known.
+                storageRead.putIfAbsent(uuid, Backpacks.Contents.UNKNOWN);
+                return;
+            }
+            Backpacks.Contents old = storageRead.get(uuid);
+            boolean same = old != null && old.items() != null && matches(old.items(), items);
+            storageRead.put(uuid, same ? old : new Backpacks.Contents(items));
+        });
+        if (result.index() == null) return;
+        storageIndex = result.index();
+        Map<UUID, SophisticatedStorage.Found> known = new HashMap<>();
+        for (UUID uuid : watched) {
+            SophisticatedStorage.Found found = storages.get(uuid);
+            if (found != null) known.put(uuid, found);
+        }
+        for (SophisticatedStorage.Found found : storageIndex) known.put(found.uuid(), found);
+        storages = known;
     }
 
     // ------------------------------------------------------------------------------------ The Backpacks panels
@@ -351,16 +457,36 @@ public final class SophisticatedBackpacks implements Backpacks.Source {
         for (Indexed entry : index == null ? List.<Indexed>of() : index) {
             byUuid.put(entry.uuid(), entry);
             list.add(new Backpacks.Listed(entry.uuid().toString(), entry.name(), entry.player(), entry.openedAt(),
-                    icon(entry.item()), entry.items(), entry.filled(), entry.slots()));
+                    icon(entry.item()), entry.items(), entry.filled(), entry.slots(), null));
+        }
+        // Then placed storages near players: the ones opened here first (newest first), then nearest first.
+        List<SophisticatedStorage.Found> placed = new ArrayList<>(storageIndex == null ? List.of() : storageIndex);
+        placed.sort(Comparator.comparing((SophisticatedStorage.Found found) -> {
+            SeenStorage seen = storageSeen.get(found.uuid());
+            return seen == null ? Long.MIN_VALUE : seen.seenAt();
+        }).reversed());
+        for (SophisticatedStorage.Found found : placed) {
+            if (list.size() >= BackpacksSnapshot.MAX_LIST) break;
+            SeenStorage seen = storageSeen.get(found.uuid());
+            list.add(listed(found, seen == null ? null : seen.player(), seen == null ? null : seen.seenAt()));
         }
         Map<String, Backpacks.Named> shown = new LinkedHashMap<>();
         for (UUID uuid : shownIds()) {
+            SophisticatedStorage.Found found = storages.get(uuid);
+            if (found != null) {
+                Backpacks.Contents contents = storageRead.get(uuid);
+                if (contents != null) {
+                    shown.put(uuid.toString(), new Backpacks.Named(found.name(), contents == Backpacks.Contents.UNKNOWN
+                            ? contents : padded(uuid, contents, found.slots()), found.position()));
+                }
+                continue;
+            }
             Backpacks.Contents contents = read.get(uuid);
             // Not read yet: left out, so the panel says it is loading rather than "not known".
             if (contents == null || contents == Backpacks.Contents.UNKNOWN) continue;
             Indexed entry = byUuid.get(uuid);
             shown.put(uuid.toString(), new Backpacks.Named(entry == null ? "" : entry.name(),
-                    padded(uuid, contents, entry == null ? 0 : entry.slots())));
+                    padded(uuid, contents, entry == null ? 0 : entry.slots()), null));
         }
         return new Backpacks.Library("world", lastOpened == null ? null : lastOpened.toString(), list, shown);
     }
@@ -380,15 +506,32 @@ public final class SophisticatedBackpacks implements Backpacks.Source {
                 if (ids.size() < BackpacksSnapshot.MAX_ITEM_IDS && ITEM_ID.matcher(id).matches()) ids.add(id);
             }
             list.add(new Backpacks.Listed(backpack.uuid(), "", null, backpack.seenAt(), null, List.copyOf(ids), filled,
-                    backpack.items().size()));
+                    backpack.items().size(), null));
         }
         lastOpened = list.isEmpty() ? null : uuid(list.get(0).uuid());
+        // Then the storages opened this session (not saved: the world file only keeps backpacks), newest first.
+        List<SeenStorage> opened = new ArrayList<>(storageSeen.values());
+        opened.sort(Comparator.comparingLong(SeenStorage::seenAt).reversed());
+        for (SeenStorage seen : opened) {
+            if (list.size() >= BackpacksSnapshot.MAX_LIST) break;
+            list.add(listed(seen.found(), seen.player(), seen.seenAt()));
+        }
         Map<String, Backpacks.Named> shown = new LinkedHashMap<>();
         for (UUID uuid : shownIds()) {
+            SeenStorage seen = storageSeen.get(uuid);
+            if (seen != null) {
+                shown.put(uuid.toString(), new Backpacks.Named(seen.found().name(), seen.contents(), seen.found().position()));
+                continue;
+            }
             Backpacks.Contents contents = remembered(uuid);
-            if (contents != null) shown.put(uuid.toString(), new Backpacks.Named("", contents));
+            if (contents != null) shown.put(uuid.toString(), new Backpacks.Named("", contents, null));
         }
         return new Backpacks.Library("remembered", lastOpened == null ? null : lastOpened.toString(), list, shown);
+    }
+
+    private Backpacks.Listed listed(SophisticatedStorage.Found found, String player, Long openedAt) {
+        return new Backpacks.Listed(found.uuid().toString(), found.name(), player, openedAt, icon(found.item()),
+                found.items(), found.filled(), found.slots(), found.position());
     }
 
     private List<UUID> shownIds() {

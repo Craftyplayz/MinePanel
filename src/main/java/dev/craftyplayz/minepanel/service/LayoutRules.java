@@ -71,7 +71,11 @@ final class LayoutRules {
             Map.entry("pickups", new int[] {2, 2}), Map.entry("advancements", new int[] {3, 3}),
             Map.entry("villagers", new int[] {3, 3}), Map.entry("performance", new int[] {2, 2}),
             Map.entry("afk", new int[] {3, 3}), Map.entry("model", new int[] {2, 3}),
-            Map.entry("backpack", new int[] {3, 3}), Map.entry("backpacks", new int[] {4, 4}));
+            Map.entry("backpack", new int[] {3, 3}), Map.entry("backpacks", new int[] {4, 4}),
+            Map.entry("backpacks2", new int[] {4, 4}), Map.entry("backpacks3", new int[] {4, 4}),
+            Map.entry("backpacks4", new int[] {4, 4}), Map.entry("crafting", new int[] {3, 3}),
+            Map.entry("enderStorage", new int[] {4, 4}), Map.entry("enderStorage2", new int[] {4, 4}),
+            Map.entry("enderStorage3", new int[] {4, 4}), Map.entry("enderStorage4", new int[] {4, 4}));
     private static final Pattern ID = Pattern.compile("[a-z0-9-]{1,32}");
     private static final Pattern REGISTRY_ID = Pattern.compile("[a-z0-9_.-]+:[a-z0-9/._-]+");
     private static final Pattern STATISTIC_ID = Pattern.compile("[a-z0-9_.-]+:[a-z0-9_.-]+/[a-z0-9_.-]+:[a-z0-9/._-]+");

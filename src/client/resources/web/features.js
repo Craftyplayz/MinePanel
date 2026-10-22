@@ -1010,50 +1010,119 @@ function renderBackpack(player) {
   drawBackpack(backpackParts.grid, backpack && !backpack.contentsUnknown ? backpack.contents : []);
 }
 
-// The Backpacks panel: every backpack the mod knows of, searchable, and the selected one (by default the one opened
-// last) drawn slot by slot. The selection is the panel's "selected" setting, so it is saved per profile.
-const backpacksParts = { status: $("#backpacks-status"), search: $("#backpacks-search"), last: $("#backpacks-last"),
-  note: $("#backpacks-note"), list: $("#backpacks-list"), message: $("#backpacks-message"),
-  grid: backpackGrid($("#backpacks-view"), $("#backpacks-grid")) };
-let backpacksListKey;
+// The Backpacks panels: every backpack (and placed storage) the mod knows of, searchable, and the selected one (by
+// default the one opened last) drawn slot by slot. Each panel's selection is its own "selected" setting, so it is
+// saved per profile; its search text and ☰ fold state are its own too and aren't saved.
+function backpacksPanel(id) {
+  const part = name => $(`#${id}-${name}`);
+  const panel = { id, status: part("status"), search: part("search"), last: part("last"), note: part("note"),
+    list: part("list"), message: part("message"), picker: part("picker"), pick: part("pick"),
+    rename: part("rename"), name: part("name"), grid: backpackGrid(part("view"), part("grid")), listKey: undefined,
+    render: renderBackpacksPanel,
+    // The shown backpack's UUID and game name, and the UUID being renamed (null when not renaming).
+    uuid: null, gameName: "", renaming: null,
+    // Whether the search and list are shown: null follows the selection (shown until a backpack is picked).
+    pickerOpen: null };
+  panel.search.addEventListener("input", () => renderBackpacksPanel(panel, currentPlayerState));
+  panel.last.addEventListener("click", () => pickBackpack(panel, "last"));
+  for (const control of [panel.pick, panel.rename, panel.name]) {
+    control.addEventListener("pointerdown", event => event.stopPropagation());
+  }
+  panel.rename.addEventListener("click", () => {
+    panel.renaming = panel.uuid;
+    panel.name.value = backpackLabel(panel.uuid, panel.gameName);
+    renderBackpacksPanel(panel, currentPlayerState);
+    panel.name.focus?.();
+    panel.name.select?.();
+  });
+  panel.name.addEventListener("keydown", event => {
+    if (event.key === "Enter") finishRename(panel, true);
+    else if (event.key === "Escape") finishRename(panel, false);
+  });
+  panel.name.addEventListener("blur", () => finishRename(panel, true));
+  panel.pick.addEventListener("click", () => {
+    panel.pickerOpen = panel.picker.hidden;
+    renderBackpacksPanel(panel, currentPlayerState);
+    if (panel.pickerOpen) panel.search.focus?.();
+  });
+  return panel;
+}
+const backpacksPanels = BACKPACKS_PANELS.map(backpacksPanel);
 
-backpacksParts.search.addEventListener("input", () => renderBackpacks(currentPlayerState));
-backpacksParts.last.addEventListener("click", () => changeSettings("backpacks", { selected: "last" }));
+/** Picking a backpack (or Last opened) tucks the list away behind the ☰ button. */
+function pickBackpack(panel, selected) {
+  panel.pickerOpen = false;
+  changeSettings(panel.id, { selected });
+  renderBackpacksPanel(panel, currentPlayerState);
+}
 
-const backpackLabel = name => name || "Backpack";
-/** What a search matches: the backpack's name, who opened it, and the ids and names of the items inside. */
-const backpackText = entry => [backpackLabel(entry.name), entry.player ?? "", ...entry.items,
-  ...entry.items.map(id => knownId("item", id)?.name ?? "")].join(" ").toLowerCase();
+/** The dashboard's nickname for a backpack or storage, else its game name, else "Backpack". */
+const backpackLabel = (uuid, name) => layout.backpackNames[uuid] || name || "Backpack";
+
+/** Ends renaming; saving an empty name (or the game's own) drops the nickname so the game's name shows again. */
+function finishRename(panel, save) {
+  const uuid = panel.renaming;
+  if (uuid === null) return;
+  panel.renaming = null;
+  if (save) {
+    const name = panel.name.value.trim().slice(0, 64);
+    const { [uuid]: _old, ...names } = layout.backpackNames;
+    // At the limit, a new nickname is not kept (an existing one can still change).
+    const keep = name && name !== panel.gameName && (uuid in layout.backpackNames
+      || Object.keys(names).length < MAX_BACKPACK_NAMES);
+    const next = keep ? { ...names, [uuid]: name } : names;
+    if (JSON.stringify(next) !== JSON.stringify(layout.backpackNames)) changeLayout({ ...layout, backpackNames: next });
+  }
+  panel.render(panel, currentPlayerState);
+}
+const storagePlace = entry => entry.position ? `${entry.position.x}, ${entry.position.y}, ${entry.position.z}` : "";
+/** What a search matches: the nickname and game name, who opened it, the ids and names of the items inside, and for a placed storage
+ * the word "storage" and its coordinates. */
+const backpackText = entry => [backpackLabel(entry.uuid, entry.name), entry.name, entry.player ?? "", ...entry.items,
+  ...entry.items.map(id => knownId("item", id)?.name ?? ""),
+  ...entry.kind === "storage" ? ["storage", storagePlace(entry)] : []].join(" ").toLowerCase();
 
 function renderBackpacks(player) {
+  for (const panel of backpacksPanels) renderBackpacksPanel(panel, player);
+}
+
+function renderBackpacksPanel(panel, player) {
   const backpacks = player?.available ? player.backpacks : null;
-  const selected = displaySettings().backpacks.selected;
+  const selected = displaySettings()[panel.id].selected;
   const uuid = selected === "last" ? backpacks?.last ?? null : selected;
   const shown = backpacks?.shown.find(entry => entry.uuid === uuid) ?? null;
   const listed = backpacks?.list.find(entry => entry.uuid === uuid) ?? null;
-  writeText(backpacksParts.status, !backpacks ? "Unavailable" : uuid === null ? "None"
-    : backpackLabel(shown?.name || listed?.name));
-  backpacksParts.last.setAttribute("aria-pressed", String(selected === "last"));
-  setHidden(backpacksParts.note, backpacks?.source !== "remembered");
+  panel.uuid = shown || listed ? uuid : null;
+  panel.gameName = shown?.name || listed?.name || "";
+  writeText(panel.status, !backpacks ? "Unavailable" : uuid === null ? "None" : backpackLabel(uuid, panel.gameName));
+  if (panel.renaming !== null && panel.renaming !== panel.uuid) panel.renaming = null;
+  setHidden(panel.status, panel.renaming !== null);
+  setHidden(panel.name, panel.renaming === null);
+  setHidden(panel.rename, panel.uuid === null || panel.renaming !== null);
+  panel.last.setAttribute("aria-pressed", String(selected === "last"));
+  setHidden(panel.note, backpacks?.source !== "remembered");
+  const pickerOpen = panel.pickerOpen ?? (uuid === null || !backpacks);
+  setHidden(panel.picker, !pickerOpen);
+  panel.pick.setAttribute("aria-expanded", String(pickerOpen));
 
-  const query = backpacksParts.search.value.trim().toLowerCase();
+  const query = panel.search.value.trim().toLowerCase();
   const now = Date.now();
   const rows = (backpacks?.list ?? []).filter(entry => !query || backpackText(entry).includes(query)).map(entry => ({
-    uuid: entry.uuid, name: backpackLabel(entry.name),
-    meta: [entry.player, entry.openedAt === null ? null : `opened ${formatAgo(now - entry.openedAt)}`]
-      .filter(Boolean).join(" · "),
+    uuid: entry.uuid, name: backpackLabel(entry.uuid, entry.name),
+    meta: [entry.kind === "storage" ? "Storage" : null, storagePlace(entry), entry.player,
+      entry.openedAt === null ? null : `opened ${formatAgo(now - entry.openedAt)}`].filter(Boolean).join(" · "),
     fill: entry.slots ? `${entry.filled}/${entry.slots}` : "", selected: entry.uuid === uuid }));
   const key = JSON.stringify(rows);
-  if (key !== backpacksListKey) {
-    backpacksListKey = key;
-    backpacksParts.list.replaceChildren(...rows.map(row => {
+  if (key !== panel.listKey) {
+    panel.listKey = key;
+    panel.list.replaceChildren(...rows.map(row => {
       const element = create("button", "backpacks-row");
       element.type = "button";
       element.setAttribute("aria-pressed", String(row.selected));
       element.appendChild(create("span", "label", row.name));
       element.appendChild(create("span", "fill", row.fill));
       element.appendChild(create("span", "meta", row.meta));
-      element.addEventListener("click", () => changeSettings("backpacks", { selected: row.uuid }));
+      element.addEventListener("click", () => pickBackpack(panel, row.uuid));
       return element;
     }));
   }
@@ -1064,9 +1133,9 @@ function renderBackpacks(player) {
         : uuid === null ? "Pick a backpack from the list."
           : !shown ? "Loading…"
             : shown.contentsUnknown ? "Contents not known yet. Open the backpack once in game." : "";
-  writeText(backpacksParts.message, message);
-  setHidden(backpacksParts.message, message === "");
-  drawBackpack(backpacksParts.grid, shown && !shown.contentsUnknown ? shown.contents : []);
+  writeText(panel.message, message);
+  setHidden(panel.message, message === "");
+  drawBackpack(panel.grid, shown && !shown.contentsUnknown ? shown.contents : []);
 }
 
 function renderBuild(player) {
@@ -1426,9 +1495,16 @@ let openWindows = [];
 function windowItem(player, source, slot) {
   if (!player?.available) return null;
   if (source === "enderchest") {
-    return player.enderChest ? { name: "Ender Chest", contents: player.enderChest.slots, enderChest: true } : null;
+    // With Ender Storage, the slot opens the Ender Storage chest opened last.
+    if (player.enderStorage) {
+      const chest = lastEnderChest(player);
+      return chest ? { name: enderLabel(chest.key, chest.owner), contents: chest.contents, enderChest: true,
+        seenAt: player.enderStorage.source === "world" ? null : chest.seenAt } : null;
+    }
+    return player.enderChest ? { name: "Ender Chest", contents: player.enderChest.slots, enderChest: true,
+      seenAt: player.enderChest.seenAt } : null;
   }
-  if (source === "enderchest-item") return player.enderChest?.slots[slot] ?? null;
+  if (source === "enderchest-item") return windowItem(player, "enderchest", 0)?.contents[slot] ?? null;
   if (source === "accessory") return player.inventory.accessories?.[slot] ?? null;
   return slot < 36 ? player.inventory.slots[slot] : player.inventory.equipment[EQUIPMENT_INDEX[slot]] ?? null;
 }
@@ -1530,9 +1606,12 @@ function renderWindows(player) {
     pin.setAttribute("aria-pressed", String(entry.pinned));
     pin.title = entry.pinned ? "Unpin" : "Pin: keep this window open";
     entry.element.className = `float-window${entry.pinned ? " pinned" : ""}${current ? "" : " stale"}`;
-    writeText(note, current ? (entry.source === "enderchest" ? `As of ${formatAgo(Date.now() - player.enderChest.seenAt)}`
+    // A singleplayer Ender Storage chest is read live and has no "as of" time.
+    writeText(note, current ? (entry.source === "enderchest"
+      ? current.seenAt === null ? "Live" : `As of ${formatAgo(Date.now() - current.seenAt)}`
       : current.contentsUnknown ? "Contents not known yet. Open the backpack once in game." : "")
-      : entry.source === "enderchest" ? "Open your ender chest in game to see its contents."
+      : entry.source === "enderchest" ? (player?.enderStorage ? "Open an Ender Storage chest in game to see it here."
+        : "Open your ender chest in game to see its contents.")
         : "Not in your inventory any more; showing what it last held.");
     const contents = shown?.contents ?? [];
     while (slots.length < contents.length) {
@@ -3680,6 +3759,290 @@ function showRuleToasts(notifications) {
   }
 }
 
+// ------------------------------------------------------------------------------------------------ Ender Storage
+
+// The Ender Storage panels: every Ender Storage chest the mod knows of (one per colour frequency), searchable by
+// colour, owner and item, and the selected one (by default the one opened last) drawn slot by slot with its log of
+// changes. Like the Backpacks panels, each panel's selection is its own "selected" setting, saved per profile; its
+// search text and ☰ fold state aren't saved.
+
+/** Minecraft's dye colours, which Ender Storage's frequencies are made of. */
+const DYE_COLOURS = { white: "#f9fffe", orange: "#f9801d", magenta: "#c74ebd", light_blue: "#3ab3da",
+  yellow: "#fed83d", lime: "#80c71f", pink: "#f38baa", gray: "#474f52", light_gray: "#9d9d97", cyan: "#169c9c",
+  purple: "#8932b8", blue: "#3c44aa", brown: "#835432", green: "#5e7c16", red: "#b02e26", black: "#1d1d21" };
+
+const enderColours = key => key.split(".").slice(0, 3);
+const colourName = colour => colour.split("_").map(word => word[0].toUpperCase() + word.slice(1)).join(" ");
+/** "White / Red / Light Blue", and for a personal chest whose it is. */
+function enderChestName(key, owner) {
+  const name = enderColours(key).map(colourName).join(" / ");
+  return key.split(".").length > 3 ? `${name} · ${owner ?? "personal"}` : name;
+}
+/** The dashboard's nickname for a chest, else its colours. */
+const enderLabel = (key, owner) => layout.backpackNames[key] || enderChestName(key, owner);
+
+/** Three swatches showing a chest's colours, left to right. */
+function enderSwatches(key) {
+  const element = create("span", "ender-colours");
+  fillSwatches(element, key);
+  return element;
+}
+
+function fillSwatches(element, key) {
+  element.replaceChildren(...enderColours(key).map(colour => {
+    const swatch = create("span", "ender-swatch");
+    swatch.style.setProperty("background", DYE_COLOURS[colour] ?? "#888888");
+    swatch.title = colourName(colour);
+    return swatch;
+  }));
+}
+
+function enderStoragePanel(id) {
+  const part = name => $(`#${id}-${name}`);
+  const panel = { id, status: part("status"), colours: part("colours"), search: part("search"), last: part("last"),
+    note: part("note"), list: part("list"), message: part("message"), picker: part("picker"), pick: part("pick"),
+    rename: part("rename"), name: part("name"), grid: backpackGrid(part("view"), part("grid")),
+    changes: part("changes"), log: part("log"), listKey: undefined, logKey: undefined, logRows: [],
+    coloursKey: undefined, render: renderEnderStoragePanel,
+    // The shown chest's key and name (its colours), and the key being renamed (null when not renaming).
+    uuid: null, gameName: "", renaming: null,
+    // Whether the search and list are shown: null follows the selection (shown until a chest is picked).
+    pickerOpen: null };
+  panel.search.addEventListener("input", () => renderEnderStoragePanel(panel, currentPlayerState));
+  panel.last.addEventListener("click", () => pickEnderChest(panel, "last"));
+  for (const control of [panel.pick, panel.rename, panel.name]) {
+    control.addEventListener("pointerdown", event => event.stopPropagation());
+  }
+  panel.rename.addEventListener("click", () => {
+    panel.renaming = panel.uuid;
+    panel.name.value = layout.backpackNames[panel.uuid] || panel.gameName;
+    renderEnderStoragePanel(panel, currentPlayerState);
+    panel.name.focus?.();
+    panel.name.select?.();
+  });
+  panel.name.addEventListener("keydown", event => {
+    if (event.key === "Enter") finishRename(panel, true);
+    else if (event.key === "Escape") finishRename(panel, false);
+  });
+  panel.name.addEventListener("blur", () => finishRename(panel, true));
+  panel.pick.addEventListener("click", () => {
+    panel.pickerOpen = panel.picker.hidden;
+    renderEnderStoragePanel(panel, currentPlayerState);
+    if (panel.pickerOpen) panel.search.focus?.();
+  });
+  return panel;
+}
+const enderStoragePanels = ENDER_STORAGE_PANELS.map(enderStoragePanel);
+
+/** Picking a chest (or Last opened) tucks the list away behind the ☰ button. */
+function pickEnderChest(panel, selected) {
+  panel.pickerOpen = false;
+  changeSettings(panel.id, { selected });
+  renderEnderStoragePanel(panel, currentPlayerState);
+}
+
+/** What a search matches: the nickname, colours (in either spelling), owner, and the ids and names of the items. */
+const enderText = entry => [enderLabel(entry.key, entry.owner), enderChestName(entry.key, entry.owner),
+  ...enderColours(entry.key), entry.owner ?? "", ...entry.items, ...entry.items.map(id => knownId("item", id)?.name ?? "")]
+  .join(" ").toLowerCase();
+
+/** The chest shown for the inventory's ender chest slot: the one opened last, while its contents are known. */
+function lastEnderChest(player) {
+  const ender = player?.available ? player.enderStorage : null;
+  const shown = ender?.shown.find(entry => entry.key === ender.last);
+  return shown && !shown.contentsUnknown ? shown : null;
+}
+
+function renderEnderStorage(player) {
+  for (const panel of enderStoragePanels) renderEnderStoragePanel(panel, player);
+}
+
+function renderEnderStoragePanel(panel, player, now = Date.now()) {
+  const ender = player?.available ? player.enderStorage : null;
+  const selected = displaySettings()[panel.id].selected;
+  const key = selected === "last" ? ender?.last ?? null : selected;
+  const shown = ender?.shown.find(entry => entry.key === key) ?? null;
+  const listed = ender?.list.find(entry => entry.key === key) ?? null;
+  panel.uuid = shown || listed ? key : null;
+  panel.gameName = panel.uuid === null ? "" : enderChestName(key, shown?.owner ?? listed?.owner ?? null);
+  writeText(panel.status, !ender ? "Unavailable" : key === null ? "None"
+    : enderLabel(key, shown?.owner ?? listed?.owner ?? null));
+  const coloursKey = ender && key !== null ? key : null;
+  if (coloursKey !== panel.coloursKey) {
+    panel.coloursKey = coloursKey;
+    if (coloursKey === null) panel.colours.replaceChildren();
+    else fillSwatches(panel.colours, coloursKey);
+  }
+  setHidden(panel.colours, coloursKey === null || panel.renaming !== null);
+  if (panel.renaming !== null && panel.renaming !== panel.uuid) panel.renaming = null;
+  setHidden(panel.status, panel.renaming !== null);
+  setHidden(panel.name, panel.renaming === null);
+  setHidden(panel.rename, panel.uuid === null || panel.renaming !== null);
+  panel.last.setAttribute("aria-pressed", String(selected === "last"));
+  setHidden(panel.note, ender?.source !== "remembered");
+  const pickerOpen = panel.pickerOpen ?? (key === null || !ender);
+  setHidden(panel.picker, !pickerOpen);
+  panel.pick.setAttribute("aria-expanded", String(pickerOpen));
+
+  const query = panel.search.value.trim().toLowerCase();
+  const rows = (ender?.list ?? []).filter(entry => !query || enderText(entry).includes(query)).map(entry => ({
+    key: entry.key, name: enderLabel(entry.key, entry.owner),
+    meta: [entry.key.split(".").length > 3 ? `personal · ${entry.owner ?? "unknown owner"}` : "public",
+      entry.seenAt === null ? null : `seen ${formatAgo(now - entry.seenAt)}`].filter(Boolean).join(" · "),
+    fill: entry.slots ? `${entry.filled}/${entry.slots}` : "", selected: entry.key === key }));
+  const listKey = JSON.stringify(rows);
+  if (listKey !== panel.listKey) {
+    panel.listKey = listKey;
+    panel.list.replaceChildren(...rows.map(row => {
+      const element = create("button", "backpacks-row");
+      element.type = "button";
+      element.setAttribute("aria-pressed", String(row.selected));
+      const label = create("span", "label");
+      label.appendChild(enderSwatches(row.key));
+      label.appendChild(create("span", "", row.name));
+      element.appendChild(label);
+      element.appendChild(create("span", "fill", row.fill));
+      element.appendChild(create("span", "meta", row.meta));
+      element.addEventListener("click", () => pickEnderChest(panel, row.key));
+      return element;
+    }));
+  }
+
+  const message = !player?.available ? "Join a world to see your ender chests."
+    : !ender ? "Needs Ender Storage."
+      : ender.list.length === 0 && !shown ? "No ender chests found yet. Open one in game."
+        : key === null ? "Pick a chest from the list."
+          : !shown ? "Loading…"
+            : shown.contentsUnknown ? "Contents not known yet. Open the chest once in game." : "";
+  writeText(panel.message, message);
+  setHidden(panel.message, message === "");
+  drawBackpack(panel.grid, shown && !shown.contentsUnknown ? shown.contents : []);
+  renderEnderLog(panel, shown?.log ?? [], now);
+}
+
+/** The chest's changes, newest first: rows are rebuilt only when the log changes; their times update every render. */
+function renderEnderLog(panel, log, now) {
+  setHidden(panel.changes, log.length === 0);
+  const logKey = log.length === 0 ? "" : `${panel.uuid}:${log.length}:${log[0].at}:${log[log.length - 1].at}`;
+  if (logKey !== panel.logKey) {
+    panel.logKey = logKey;
+    panel.logRows = log.map(change => {
+      const row = create("div", `ender-log-row${change.delta < 0 ? " loss" : ""}`);
+      const slot = createSlot(row);
+      renderSlot(slot, { ...change.item, count: 1 }, false);
+      row.appendChild(create("span", "delta", `${change.delta > 0 ? "+" : "−"}${formatCount(Math.abs(change.delta))}`));
+      row.appendChild(create("span", "name", change.item.name));
+      const when = create("span", "when");
+      row.appendChild(when);
+      return { row, when, at: change.at };
+    });
+    panel.log.replaceChildren(...panel.logRows.map(entry => entry.row));
+  }
+  for (const entry of panel.logRows) writeText(entry.when, formatAgo(now - entry.at));
+}
+
+// ------------------------------------------------------------------------------------------------- AE2 crafting
+
+// The AE2 crafting panel: the player's own jobs (AE2 only tells the client when they start and end) and the crafting
+// CPUs as the Crafting Status screen last showed them, live while it is open in game.
+const craftingParts = { status: $("#crafting-status"), message: $("#crafting-message"),
+  jobsTitle: $("#crafting-jobs-title"), cpusTitle: $("#crafting-cpus-title"), cpusNote: $("#crafting-cpus-note"),
+  detailTitle: $("#crafting-detail-title"), progress: $("#crafting-detail-progress"),
+  count: $("#crafting-detail-count"), bar: $("#crafting-detail-bar"), fill: $("#crafting-detail-fill") };
+const craftingLists = ["jobs", "cpus", "detail"].map(name =>
+  ({ container: $(`#crafting-${name}`), nodes: new Map(), key: "" }));
+const percent = fraction => Math.floor(fraction * 100);
+
+/** Draws rows of { id, item, name, meta, progress (0 to 1 or null) }, reusing each id's row and icon. */
+function renderCraftingRows(list, entries) {
+  const nodes = new Map();
+  const rows = entries.map(entry => {
+    let node = list.nodes.get(entry.id);
+    if (!node) {
+      const row = create("div", "pickup-row crafting-row");
+      const slot = createSlot(row);
+      const text = create("div", "pickup-text");
+      const name = create("span", "pickup-name");
+      const meta = create("span", "pickup-meta");
+      const bar = create("div", "build-bar crafting-bar");
+      const fill = create("span", "crafting-fill");
+      bar.appendChild(fill);
+      for (const part of [name, meta, bar]) text.appendChild(part);
+      row.appendChild(text);
+      node = { row, slot, name, meta, bar, fill };
+    }
+    nodes.set(entry.id, node);
+    renderSlot(node.slot, entry.item, false);
+    writeText(node.name, entry.name);
+    writeText(node.meta, entry.meta);
+    setHidden(node.bar, entry.progress === null);
+    if (entry.progress !== null) node.fill.style.width = `${percent(entry.progress)}%`;
+    return node.row;
+  });
+  list.nodes = nodes;
+  const key = entries.map(entry => entry.id).join(",");
+  if (key !== list.key) {
+    list.key = key;
+    list.container.replaceChildren(...rows);
+  }
+}
+
+function craftingJobMeta(job, cpu, now) {
+  if (job.state === "cancelled") return `Cancelled · ${formatAgo(now - job.endedAt)}`;
+  if (job.state === "finished") {
+    return `Done · ${formatAgo(now - job.endedAt)}`
+      + (job.startedAt === null ? "" : ` · took ${formatDuration((job.endedAt - job.startedAt) / 1000)}`);
+  }
+  return ["Crafting", cpu ? `${percent(cpu.progress)}%` : null,
+    job.startedAt === null ? null : formatDuration((now - job.startedAt) / 1000)].filter(Boolean).join(" · ");
+}
+
+function renderCrafting(player, now = Date.now()) {
+  const ae2 = player?.available ? player.ae2 : null;
+  const cpus = ae2?.cpus ?? null;
+  writeText(craftingParts.status, !ae2 ? "Unavailable" : !cpus ? "No CPUs seen"
+    : cpus.open ? "Live" : `Seen ${formatAgo(now - cpus.seenAt)}`);
+  writeText(craftingParts.message, !player?.available ? "Join a world to see your crafting jobs."
+    : !ae2 ? "Needs Applied Energistics 2." : ae2.jobs.length ? "" : "Jobs you start from an ME terminal appear here.");
+
+  // Running jobs first, then the most recently ended. A running job's progress comes from the CPU crafting it.
+  const busy = cpus?.list.filter(cpu => cpu.job) ?? [];
+  const jobs = (ae2?.jobs ?? []).slice().sort((a, b) => (b.state === "running") - (a.state === "running")
+    || (b.endedAt ?? b.startedAt ?? 0) - (a.endedAt ?? a.startedAt ?? 0));
+  setHidden(craftingParts.jobsTitle, jobs.length === 0);
+  renderCraftingRows(craftingLists[0], jobs.map(job => {
+    const cpu = job.state === "running"
+      ? busy.find(candidate => candidate.job.itemId === job.item.itemId && candidate.amount === job.amount) : null;
+    return { id: job.id, item: job.item, name: `${job.item.name} × ${job.amount}`,
+      meta: craftingJobMeta(job, cpu, now), progress: cpu ? cpu.progress : null };
+  }));
+
+  setHidden(craftingParts.cpusTitle, !ae2);
+  writeText(craftingParts.cpusNote, !ae2 || cpus?.list.length
+    ? "" : "Open Crafting Status in an ME terminal to see your crafting CPUs here.");
+  renderCraftingRows(craftingLists[1], (cpus?.list ?? []).map(cpu => ({
+    id: String(cpu.serial), item: cpu.job,
+    name: (cpu.name || `CPU ${cpu.serial}`) + (cpu.serial === cpus.selected ? " (selected)" : ""),
+    meta: cpu.job
+      ? `${cpu.job.name} × ${cpu.amount} · ${percent(cpu.progress)}% · ${formatDuration(cpu.elapsedMillis / 1000)}`
+      : `Idle · ${formatCount(cpu.storage)} bytes · ${cpu.coProcessors} co-processors`,
+    progress: cpu.job ? cpu.progress : null })));
+
+  const detail = cpus?.detail ?? null;
+  setHidden(craftingParts.detailTitle, !detail);
+  setHidden(craftingParts.progress, !detail);
+  if (detail) {
+    const done = percent((detail.total - detail.remaining) / detail.total);
+    writeText(craftingParts.count, `${done}%${detail.suspended ? " · paused" : ""}`);
+    craftingParts.fill.style.width = `${done}%`;
+    craftingParts.bar.setAttribute("aria-valuenow", String(done));
+  }
+  renderCraftingRows(craftingLists[2], (detail?.entries ?? []).map((entry, index) => ({
+    id: String(index), item: entry.item, name: entry.item.name,
+    meta: [entry.active && `crafting ${entry.active}`, entry.pending && `scheduled ${entry.pending}`,
+      entry.stored && `stored ${entry.stored}`].filter(Boolean).join(" · "), progress: null })));
+}
+
 // ------------------------------------------------------------------------------------------------- Wiring
 
 featureHooks.render.push(player => {
@@ -3692,6 +4055,8 @@ featureHooks.render.push(player => {
   renderBuild(player);
   renderBackpack(player);
   renderBackpacks(player);
+  renderEnderStorage(player);
+  renderCrafting(player);
   renderAdvancements(player);
   checkAdvancementPopup(player);
   renderVillagers(player);
@@ -3710,6 +4075,7 @@ featureHooks.layout.push(() => {
   renderPickupSettings();
   renderBuild(currentPlayerState);
   renderBackpacks(currentPlayerState);
+  renderEnderStorage(currentPlayerState);
   renderAdvancements(currentPlayerState);
   renderAdvancementSettings();
   syncPinnedWindows();
@@ -3721,6 +4087,7 @@ featureHooks.layout.push(() => {
 featureHooks.tick.push(() => {
   renderAfk(currentPlayerState);
   renderPickups(currentPlayerState);
+  renderCrafting(currentPlayerState);
   saveKnownIds();
   if (rulesDialog.hidden) return;
   // Customizing pauses the rules (it can be started while the editor is docked), but the editor stays live.

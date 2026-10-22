@@ -30,7 +30,7 @@ tasks.named('test') {
 
 // Optional mods: only their adapter package may import them, so their absence can never break class loading elsewhere.
 // Package → import prefix (Litematica/Forgematica, Sophisticated Backpacks/Core, Curios).
-def isolatedMods = ['litematica': 'fi.dy.masa.', 'backpacks': 'net.p3pp3rf1y.', 'curios': 'top.theillusivec4.']
+def isolatedMods = ['litematica': 'fi.dy.masa.', 'backpacks': 'net.p3pp3rf1y.', 'curios': 'top.theillusivec4.', 'ae2': 'appeng.', 'enderstorage': 'codechicken.']
 def litematicaIsolation = tasks.register('litematicaIsolation') {
     def sources = rootProject.fileTree('src') { include '**/*.java' }
     inputs.files(sources)

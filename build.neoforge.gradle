@@ -74,9 +74,13 @@ dependencies {
     // Optional mods: compile-time only, never bundled; only their own packages in MinePanel may use them.
     compileOnly("maven.modrinth:sophisticated-backpacks:${project.sophisticated_backpacks_version}") { transitive = false }
     compileOnly("maven.modrinth:sophisticated-core:${project.sophisticated_core_version}") { transitive = false }
+    compileOnly("maven.modrinth:sophisticated-storage:${project.sophisticated_storage_version}") { transitive = false }
     compileOnly("maven.modrinth:forgematica:${project.forgematica_version}") { transitive = false }
     compileOnly("maven.modrinth:mafglib:${project.mafglib_version}") { transitive = false }
     compileOnly("top.theillusivec4.curios:curios-neoforge:${project.curios_version}:api") { transitive = false }
+    compileOnly("maven.modrinth:ae2:${project.ae2_version}") { transitive = false }
+    compileOnly("maven.modrinth:ender-storage:${project.ender_storage_version}") { transitive = false }
+    compileOnly("maven.modrinth:codechicken-lib:${project.codechicken_lib_version}") { transitive = false }
 }
 
 processResources {

@@ -439,7 +439,15 @@ Every action is an object with `"do"` and its parameters.
 | `afk` | AFK timer over a crawl of your statistics (off by default) | 3 × 3 | 6, 37, 6, 6 |
 | `model` | 3D render of your player | 2 × 3 | 8, 25, 4, 8 |
 | `backpack` | Personal backpack: the worn backpack's slots (off by default; Minecraft 1.21.1 only) | 3 × 3 | 0, 43, 6, 6 |
-| `backpacks` | Backpacks: a searchable list of known backpacks and the selected one's slots (off by default; Minecraft 1.21.1 only) | 4 × 4 | 6, 43, 6, 8 |
+| `backpacks` | Backpacks: a searchable list of known backpacks (and placed Sophisticated Storage blocks) and the selected one's slots (off by default; Minecraft 1.21.1 only) | 4 × 4 | 6, 43, 6, 8 |
+| `backpacks2` | Backpacks 2: the same, with its own selection | 4 × 4 | 0, 51, 6, 8 |
+| `backpacks3` | Backpacks 3: the same, with its own selection | 4 × 4 | 6, 51, 6, 8 |
+| `backpacks4` | Backpacks 4: the same, with its own selection | 4 × 4 | 0, 59, 6, 8 |
+| `crafting` | AE2 crafting: your Applied Energistics 2 crafting jobs and crafting CPUs (off by default; NeoForge 1.21.1 with AE2 only) | 3 × 3 | 6, 59, 6, 8 |
+| `enderStorage` | Ender Storage: a searchable list of Ender Storage chests with their colour codes, and the selected one's slots and change log (off by default; NeoForge 1.21.1 with Ender Storage only) | 4 × 4 | 0, 67, 6, 10 |
+| `enderStorage2` | Ender Storage 2: the same, with its own selection | 4 × 4 | 6, 67, 6, 10 |
+| `enderStorage3` | Ender Storage 3: the same, with its own selection | 4 × 4 | 0, 77, 6, 10 |
+| `enderStorage4` | Ender Storage 4: the same, with its own selection | 4 × 4 | 6, 77, 6, 10 |
 
 The default spots are what a profile gets when the file leaves `panels` out for a new profile, and what an `"off"` panel remembers. Your own dashboard's arrangement may differ; **Download all rules** includes it.
 
@@ -473,7 +481,8 @@ The default spots are what a profile gets when the file leaves `panels` out for 
 | `afk` | `fontSize` | One of `11`, `13`, `16`, `20`, `24`, `32`: text size of the statistics in px | `13` |
 | `afk` | `speed` | One of `10` (slow), `20` (normal), `40` (fast), `80` (very fast): px a second the statistics move | `20` |
 | `afk` | `hidden` | List of up to 512 statistic ids the panel never shows | `[]` |
-| `backpacks` | `selected` | `"last"` (the backpack opened most recently) or one backpack's UUID in lowercase, like `"123e4567-e89b-12d3-a456-426614174000"` | `"last"` |
+| `backpacks`, `backpacks2`, `backpacks3`, `backpacks4` | `selected` | `"last"` (the backpack opened most recently) or one backpack's or storage's UUID in lowercase, like `"123e4567-e89b-12d3-a456-426614174000"` | `"last"` |
+| `enderStorage`, `enderStorage2`, `enderStorage3`, `enderStorage4` | `selected` | `"last"` (the chest opened most recently) or one chest's colour code: its three colours left to right, lowercase, joined with dots, like `"white.red.light_blue"`, plus `.` and the owner's lowercase UUID for a personal chest | `"last"` |
 
 ## Importing and exporting
 

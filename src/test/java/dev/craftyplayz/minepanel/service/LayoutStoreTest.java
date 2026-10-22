@@ -32,20 +32,53 @@ public final class LayoutStoreTest {
         testInvalidStoredLayoutIsKept();
         testSensorNeeds();
         testBackpackSelections();
+        testEnderStorageSelections();
         System.out.println("LayoutStoreTest passed");
     }
 
-    /** The game reads in full the backpacks any profile's Backpacks panel or a rule's set action selects. */
+    /** As for backpacks: the chests any Ender Storage panel or rule selects, and chest nicknames, are validated. */
+    private static void testEnderStorageSelections() throws Exception {
+        String chosen = "white.red.light_blue";
+        String personal = "purple.purple.black.8667ba71-b85a-4004-af54-457a9734eed7";
+        String layout = "{\"version\":2,\"tiles\":[],\"settings\":{\"enderStorage\":{\"selected\":\"last\"},"
+                + "\"enderStorage3\":{\"selected\":\"" + chosen + "\"}},\"backpackNames\":{\"" + personal + "\":\"Mine\"},"
+                + "\"rules\":[{\"id\":\"r\",\"name\":\"R\",\"enabled\":true,\"when\":[],\"then\":[{\"do\":\"set\","
+                + "\"panel\":\"enderStorage4\",\"setting\":\"selected\",\"value\":\"" + personal + "\"}]}]}";
+        var json = JsonParser.parseString(LayoutStore.normalize(layout)).getAsJsonObject();
+        check(LayoutStore.enderStorageSelections(json).equals(java.util.Set.of(chosen, personal)),
+                "every Ender Storage panel's settings and rule actions, not \"last\"");
+        check(LayoutStore.backpackSelections(json).isEmpty(), "chests are not backpacks");
+        for (String bad : new String[] {"LAST", "white.red", "White.red.blue", "123e4567-e89b-12d3-a456-426614174000"}) {
+            boolean rejected;
+            try {
+                LayoutStore.normalize("{\"version\":2,\"tiles\":[],\"settings\":{\"enderStorage2\":{\"selected\":\""
+                        + bad + "\"}}}");
+                rejected = false;
+            } catch (IllegalArgumentException expected) {
+                rejected = true;
+            }
+            check(rejected, "selected chest " + bad + " is rejected");
+        }
+    }
+
+    /** The game reads in full the backpacks any profile's Backpacks panels (all four) or a rule's set action selects. */
     private static void testBackpackSelections() throws Exception {
         String chosen = "123e4567-e89b-12d3-a456-426614174000";
         String byRule = "223e4567-e89b-12d3-a456-426614174000";
-        String layout = "{\"version\":2,\"tiles\":[],\"settings\":{\"backpacks\":{\"selected\":\"last\"}},"
+        String second = "323e4567-e89b-12d3-a456-426614174000";
+        String fourth = "423e4567-e89b-12d3-a456-426614174000";
+        String byRule3 = "523e4567-e89b-12d3-a456-426614174000";
+        String layout = "{\"version\":2,\"tiles\":[],\"settings\":{\"backpacks\":{\"selected\":\"last\"},"
+                + "\"backpacks2\":{\"selected\":\"" + second + "\"}},"
                 + "\"profiles\":[{\"id\":\"bags\",\"name\":\"Bags\",\"tiles\":[],\"settings\":{\"backpacks\":"
-                + "{\"selected\":\"" + chosen + "\"}}}],\"rules\":[{\"id\":\"r\",\"name\":\"R\",\"enabled\":true,"
+                + "{\"selected\":\"" + chosen + "\"},\"backpacks4\":{\"selected\":\"" + fourth + "\"}}}],"
+                + "\"rules\":[{\"id\":\"r\",\"name\":\"R\",\"enabled\":true,"
                 + "\"when\":[],\"then\":[{\"do\":\"notify\",\"text\":\"Hi\"},{\"do\":\"set\",\"panel\":\"backpacks\","
-                + "\"setting\":\"selected\",\"value\":\"" + byRule + "\"}]}]}";
+                + "\"setting\":\"selected\",\"value\":\"" + byRule + "\"},{\"do\":\"set\",\"panel\":\"backpacks3\","
+                + "\"setting\":\"selected\",\"value\":\"" + byRule3 + "\"}]}]}";
         var selections = LayoutStore.backpackSelections(JsonParser.parseString(LayoutStore.normalize(layout)).getAsJsonObject());
-        check(selections.equals(java.util.Set.of(chosen, byRule)), "profile settings and rule actions, not \"last\": " + selections);
+        check(selections.equals(java.util.Set.of(chosen, byRule, second, fourth, byRule3)),
+                "every Backpacks panel's settings and rule actions, not \"last\": " + selections);
         Path file = Files.createTempDirectory("minepanel-layout-backpacks").resolve("layout.json");
         LayoutStore store = new LayoutStore(file);
         check(store.backpackSelections().isEmpty(), "nothing before a layout");
@@ -54,7 +87,7 @@ public final class LayoutStoreTest {
         for (String bad : new String[] {"LAST", "123e4567", "123E4567-E89B-12D3-A456-426614174000", ""}) {
             boolean rejected;
             try {
-                LayoutStore.normalize("{\"version\":2,\"tiles\":[],\"settings\":{\"backpacks\":{\"selected\":\"" + bad + "\"}}}");
+                LayoutStore.normalize("{\"version\":2,\"tiles\":[],\"settings\":{\"backpacks3\":{\"selected\":\"" + bad + "\"}}}");
                 rejected = false;
             } catch (IllegalArgumentException expected) {
                 rejected = true;

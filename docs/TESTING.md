@@ -312,3 +312,69 @@ The `backpack` panel is now **Personal backpack**; a new `backpacks` panel (**Ba
 ## Pinned windows that couldn't be closed (2026-10-22)
 
 Reported in game: a pinned item window from the saved layout couldn't be closed or unpinned. Cause: `syncPinnedWindows` replaced each pinned entry with a copy whenever the layout was applied, while the window's ×, 📌 and drag handlers kept the original entry, so closing removed nothing and the copy was saved again. It now updates the entry in place. **Tested:** reproduced in the dashboard harness first (× left the window and re-saved it), then a regression test (close one saved pinned window, unpin another, nothing stays pinned); 125 dashboard tests; `./gradlew releaseBuild`. **Not run:** in a real browser.
+
+## Backpack picker folds away, shortened counts, higher count limit (2026-10-22)
+
+The Backpacks panel's search and list fold away once a backpack is picked and come back with a ☰ button (on-screen state only). Slot counts of 1,000 and more are shortened and rounded down (3.9K, 42K, 2.3M, using integer tenths), with the exact count added to the tooltip. The item count limit was 1,000,000, which clipped stack-upgraded backpack slots (a slot showing exactly "1000000" was larger in game); it is now `Integer.MAX_VALUE` in `ItemSnapshot` and `protocol.js`.
+
+**Tested:** 126 dashboard tests (fold on pick and on Last opened, ☰ toggles both ways, counts 2.3M / 3.9K / 42K / 999 / 1K, exact count in the tooltip, over-limit counts still rejected); `./gradlew releaseBuild` for all three nodes. **Not run:** in game or a real browser.
+
+## Sophisticated Storage in the backpacks list, Java side (2026-10-22)
+
+The `backpacks` field's list and shown entries gain `kind` ("backpack"/"storage") and `position` (null or `{dimension, x, y, z}`), validated in `BackpacksSnapshot` (a storage must have a position, a backpack must not). With Sophisticated Storage 1.5.30 installed (compile-only dependency), placed storages near players are listed in singleplayer and storages opened this session on servers; see `docs/ARCHITECTURE.md` "Container contents and Sophisticated Backpacks" for the facts, read from the 1.5.30.1535 JAR with `javap`.
+
+**Tested:** `./gradlew releaseBuild` passed for all three nodes (132 dashboard tests, service tests, `litematicaIsolation` with the new `backpacks/SophisticatedStorage`, JAR validation). `InventorySnapshotTest` checks the exact JSON of a backpack and a storage entry and shown entry, and rejects an unknown kind, a storage without a position, a backpack with one, a shown storage without a position, a null kind and a bad dimension id.
+
+**Not run:** anything in game. Unverified: the chunk walk and its cost in a large base, names (custom and wood names), slot counts of upgraded and limited barrels, double chests listed once at the main half, contents refreshing every 250 ms, a storage whose chunk unloads keeping its last contents, the client screen capture on a server (position from `getStorageBlockEntity()`), and that nothing changes without Sophisticated Storage installed.
+
+## Backpacks 2–4, storages in the list, nicknames (2026-10-22)
+
+Four Backpacks panels (`backpacks`..`backpacks4`), each with its own selection, search and fold; Sophisticated Storage blocks in loaded chunks listed beside backpacks (`kind`/`position`); dashboard-only nicknames (`backpackNames` in the layout). Built by two agents in parallel while two other sessions (AE2 crafting panel, Ender Storage) worked in the same tree; their edits were kept.
+
+**Tested:** a full `./gradlew releaseBuild` for all three nodes with every session's changes: 132 dashboard tests (four panels on 1.21.1 and none on 26.1.2, two panels showing different backpacks independently, storage rows with tag and coordinates and search by "storage" and coordinates, `kind`/`position` validation, renaming via ✎ with Enter/blur/Escape/clear and the saved `backpackNames`, nickname validation), `LayoutStoreTest` (selections across all four panels, bad values on `backpacks3`), shared fixtures (`backpacks2.selected`, nicknames valid; uppercase key, empty and 65-character names invalid) in both validators, and `BackpacksSnapshot` JSON for backpacks and storages with invalid kind/position cases.
+
+**Not run:** anything in game or a real browser: several panels side by side, renaming, storage names and slot counts, double chests listed once, the cost of the 5 s chunk walk in a big base, storages on servers (kept for the session only), and the Personal backpack panel showing nicknames (it can't: the worn item has no UUID).
+
+## AE2 crafting panel (2026-10-22)
+
+The **AE2 crafting** panel (`crafting`) and the `ae2` snapshot field, from AE2's job notices and its Crafting Status screen (NeoForge 1.21.1). Built while two other sessions (Backpacks/Storage, Ender Storage) worked in the same tree.
+
+**Tested:**
+- `:1.21.1-neoforge:compileClientJava` compiles the `ae2` package and mixins against AE2 19.2.17 (`maven.modrinth:ae2`).
+- Dashboard tests:
+  - `validateAe2` accepts the model and `cpus: null`. It rejects 17 jobs, an unknown state, a running job with an end time, an ended job without one, a 33-character amount, an empty item, progress 1.5, a busy CPU without an amount, `remaining > total` and 65 CPUs.
+  - The panel shows *Needs Applied Energistics 2.*, then no CPUs seen. Then it shows jobs sorted running first, a running job's progress from the CPU crafting the same item and amount, done/cancelled times, idle and busy CPU rows, the selected CPU's percent and per-item counts, and **Seen 5s ago** after the screen closes.
+- The tile id is in both validators. A shared fixture case places the panel and shows it from a rule.
+- `InventorySnapshotTest` checks the exact `Ae2Snapshot` JSON and the invalid cases.
+- `WorldFeaturesTest` checks that full snapshots end with `"ae2":null`.
+
+**Not run:** anything in game:
+- that the mixins apply (and are skipped without AE2), and that `jobStatus` fires for started, finished and cancelled jobs on a server and in singleplayer
+- the CPU list and `status` capture from AE2's screens (also from a wireless terminal and from a crafting CPU opened directly)
+- how fluids and other non-item keys look (`wrapForDisplayOrFilter`)
+- AdvancedAE quantum computers in the list
+- that nothing changes without AE2 installed
+
+## Ender Storage panels (2026-10-22)
+
+The **Ender Storage** panels (`enderStorage` to `enderStorage4`), the `enderStorage` snapshot field with a per-chest change log, Ender Storage's chest in the inventory's ender chest slot, and pouch item windows (NeoForge 1.21.1).
+
+**Tested:**
+- `./gradlew releaseBuild` passes on all three nodes. `:1.21.1-neoforge` compiles `enderstorage/EnderStorageMod` against Ender Storage 2.13.0.191 and CodeChickenLib 4.6.1.529 (`maven.modrinth`), and `litematicaIsolation` covers `codechicken.`.
+- Dashboard tests (137 pass):
+  - `validateEnderStorage` accepts the model. It rejects bad sources and keys, an empty owner, too many entries or shown chests, 501 log entries, a zero or fractional delta and a missing log item.
+  - The panel shows *Needs Ender Storage.*, then lists chests with three colour swatches (row and title bar), names, public/personal, fill and seen time. It searches by colour name, colour id, owner and item name. Picking a chest folds the search away and shows *Loading…*, then *Contents not known yet*. The **Changes** log shows newest first, with removals in red.
+  - Each of the four panels keeps its own pick. Renaming a chest saves `backpackNames` keyed by the chest's key.
+  - The `selected` setting is validated.
+  - With Ender Storage, the inventory's ender chest slot opens the last chest (**Live** in singleplayer), and says to open one when none is known.
+- `LayoutStoreTest`: selections from settings and rules, separate from backpacks, and bad keys rejected. The shared fixture has valid and invalid Ender Storage cases.
+- `InventorySnapshotTest` checks the exact `EnderStorageSnapshot` JSON and the invalid cases.
+- `LocalDashboardServerTest`: a chest with its owner and log survives a WorldStore restart.
+- `WorldFeaturesTest`: full snapshots end with `"enderStorage":null`.
+
+**Not run:** anything in game:
+- the reflection reads in singleplayer (loaded and saved-only chests, personal chests' owner names)
+- capture from an open chest or pouch screen on a server, and logging of changes made while away
+- that the change log diffs correctly in game. `EnderStorage.changes` has no unit test because it needs Minecraft's `ItemStack`
+- Ender Storage's chest icon in the inventory slot, and pouch item windows
+- that nothing changes without Ender Storage installed, and on Fabric

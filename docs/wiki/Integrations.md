@@ -84,7 +84,7 @@ With **Curios** installed (MinePanel for NeoForge), the items in your extra Curi
 With **Sophisticated Backpacks** installed, a backpack in your inventory or worn in a [Curios](#curios) slot opens an [item window](Dashboard.md#item-windows) with what's inside, like a shulker box does, and its contents count as *Have* in [Build progress](#litematica-build-progress). Two panels use it too:
 
 - [Personal backpack](Panels.md#personal-backpack) draws the backpack you wear, slot by slot.
-- [Backpacks](Panels.md#backpacks) lists the backpacks MinePanel knows of, lets you search them by name or by an item inside, and draws the one you pick.
+- [Backpacks](Panels.md#backpacks) (and **Backpacks 2** to **4**) lists the backpacks MinePanel knows of, lets you search them by name or by an item inside, and draws the one you pick.
 
 > New and not tested in game yet.
 
@@ -96,12 +96,72 @@ With **Sophisticated Backpacks** installed, a backpack in your inventory or worn
 
 A backpack keeps its items on the server, so the game doesn't tell MinePanel what's inside on its own.
 
-- **Singleplayer:** MinePanel reads the contents straight from your world while you carry or wear the backpack, so an open window follows what you put in and take out. The backpack you wear and the one the Backpacks panel shows are read about four times a second. The Backpacks panel lists **every backpack in the world**, whoever opened it, and refreshes that list about every 5 seconds. Nothing is changed.
-- **On a server:** MinePanel remembers what a backpack held **the last time you opened it**. Until you open it once, its window says *Contents not known yet. Open the backpack once in game.* What you saw is kept per server, so it's still there next time you join. The Backpacks panel lists **only the backpacks you've opened**, as you last saw them.
+- **Singleplayer:** MinePanel reads the contents straight from your world while you carry or wear the backpack, so an open window follows what you put in and take out. The backpack you wear and the ones the Backpacks panels show are read about four times a second. The Backpacks panels list **every backpack in the world**, whoever opened it, and refresh that list about every 5 seconds. Nothing is changed.
+- **On a server:** MinePanel remembers what a backpack held **the last time you opened it**. Until you open it once, its window says *Contents not known yet. Open the backpack once in game.* What you saw is kept per server, so it's still there next time you join. The Backpacks panels list **only the backpacks you've opened**, as you last saw them.
 
 Things to know:
 
 - A window shows every slot of the backpack in order, empty ones included (up to 128 slots). The [Personal backpack](Panels.md#personal-backpack) and [Backpacks](Panels.md#backpacks) panels draw backpacks the same way.
-- The Backpacks panel lists up to 256 backpacks, most recently opened first.
+- The Backpacks panels list up to 256 backpacks and storages in all, most recently opened first.
 - A backpack inside a backpack shows as an item, without its own contents.
 - MinePanel never sends anything to the server and never changes a backpack. If the backpack mod behaves unexpectedly, MinePanel stops showing backpack contents until you restart the game. Your game isn't affected.
+
+## Sophisticated Storage
+
+With **Sophisticated Storage** installed too, its placed storage blocks (chests, barrels, shulker boxes and so on) show in the [Backpacks](Panels.md#backpacks) panels' list after the backpacks. Each row says **Storage** and the block's coordinates. Pick one to see its contents slot by slot, like a backpack.
+
+> New and not tested in game yet.
+
+- **Singleplayer only**, and only storages in **loaded chunks** (near you). Storages elsewhere aren't listed until their chunks are loaded.
+- A storage shows its custom name if you gave it one, else the block's name. You can also [rename it on the dashboard](Panels.md#backpacks).
+- MinePanel only reads the storage. It never changes it.
+
+## Ender Storage
+
+With **Ender Storage** installed, MinePanel shows its ender chests (one for each colour code):
+
+- The [Ender Storage](Panels.md#ender-storage) panels (and **Ender Storage 2** to **4**) list the chests MinePanel knows of, with their colour codes. You can search them by colour, owner or item, and see the one you pick slot by slot with a log of its changes.
+- The ender chest slot beside the [Inventory panel](Panels.md#inventory) shows Ender Storage's chest. Clicking it opens the Ender Storage chest you opened last in an [item window](Dashboard.md#item-windows).
+- An **Ender Pouch** (or an Ender Storage chest item) in your inventory opens an item window with the contents of its colour code's chest.
+
+> New and not tested in game yet.
+
+### What you need
+
+- MinePanel for **NeoForge** on Minecraft 1.21.1, and **Ender Storage** (with CodeChickenLib). It was built against Ender Storage 2.13.0.191. If another version doesn't fit, MinePanel stops showing Ender Storage chests and the rest carries on.
+- **Ender tanks** (fluids) aren't shown.
+
+### Where the contents come from
+
+An Ender Storage chest keeps its items on the server, so the game only tells MinePanel what's inside while the chest is open.
+
+- **Singleplayer:** MinePanel reads every Ender Storage chest straight from your world about twice a second, so the panels are live and list **every chest in the world**, whoever uses it. Nothing is changed.
+- **On a server:** MinePanel sees a chest while you have it open (placed chest or pouch), and remembers what it held **the last time you opened it**. Until you open it once, it says *Contents not known yet. Open the chest once in game.* The panels list **only the chests you've opened**.
+
+### The change log
+
+Each time MinePanel sees a chest's contents change, it adds a line to that chest's **Changes** log for every kind of item that went up or down, for example **+12 Cobblestone** or **−3 Diamond**. Moving items around inside the chest doesn't count.
+
+- **Singleplayer:** changes are noticed about twice a second, whoever makes them.
+- **On a server:** changes are noticed while you have the chest open. If other players changed it while you were away, the difference is logged when you next open it, at that time.
+- The last **500** changes of each chest are kept, saved per world or server, so they're still there next time you play. MinePanel remembers up to 64 chests per world; the one that changed longest ago is forgotten first.
+- A chest MinePanel has only seen once has no changes yet.
+
+## Applied Energistics 2
+
+With **Applied Energistics 2** (AE2) installed, the [AE2 crafting](Panels.md#ae2-crafting) panel shows your autocrafting jobs and the network's crafting CPUs.
+
+> New and not tested in game yet.
+
+### What you need
+
+- MinePanel for **NeoForge** on Minecraft 1.21.1, and AE2. It was built against AE2 19.2.17 (the version in All the Mods 10). If another AE2 version doesn't fit, the panel stays empty and the rest of MinePanel carries on.
+- AE2 addons such as ExtendedAE, AdvancedAE and MEGA Cells don't need anything extra.
+
+### Where the data comes from
+
+AE2 runs crafting on the server and tells your game only a little, so MinePanel shows only that:
+
+- **Your jobs:** AE2 tells you when a job you started begins, finishes or is cancelled. MinePanel lists these as they happen, in singleplayer and on servers. It doesn't see jobs started by other players.
+- **Crafting CPUs:** AE2 sends the CPU list and the selected CPU's items only while its **Crafting Status** screen is open. MinePanel shows them live while it's open, and as last seen after you close it.
+- Jobs are kept in memory only, not saved. MinePanel never sends anything to the server and never changes your network.

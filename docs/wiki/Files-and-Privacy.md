@@ -20,17 +20,17 @@ Paths are relative to your Minecraft instance's game directory (the folder with 
 
 | Path | What's in it |
 |---|---|
-| `config/minepanel/layout.json` | Your whole dashboard: panels, profiles, settings, pinned windows, update rate and rules |
+| `config/minepanel/layout.json` | Your whole dashboard: panels, profiles, settings, pinned windows, update rate, rules and the names you gave backpacks and Ender Storage chests on the dashboard |
 | `config/minepanel/layout.v1-backup.json` | A copy of a layout from an older MinePanel version, made once when it was upgraded. Never overwritten |
 | `config/minepanel/layout.rejected.json` | A copy of a layout file that couldn't be read, made before anything replaces it |
-| `config/minepanel/worlds/` | Per world or server: the villagers you've traded with, your ender chest's last-seen contents, and the last-seen contents of up to 64 [backpacks](Integrations.md#sophisticated-backpacks) you opened |
+| `config/minepanel/worlds/` | Per world or server: the villagers you've traded with, your ender chest's last-seen contents, the last-seen contents of up to 64 [backpacks](Integrations.md#sophisticated-backpacks) you opened, and up to 64 [Ender Storage](Integrations.md#ender-storage) chests with their last 500 changes each |
 | `minepanel/history/<session start>.jsonl` | The full activity log of each session, one event per line |
 
 ### Deleting data
 
 - **Activity history:** delete the files in `minepanel/history/`. The dashboard's Activity log only shows the current session anyway.
 - **One villager:** click **×** on it in [Villager trades](Panels.md#villager-trades).
-- **All villagers, ender chests and backpacks:** delete `config/minepanel/worlds/` while the game is closed.
+- **All villagers, ender chests, backpacks and Ender Storage chests and logs:** delete `config/minepanel/worlds/` while the game is closed.
 - **Your whole layout:** delete `config/minepanel/layout.json` while the game is closed. You'll start with the default dashboard. Consider **Download all rules** first (see [Import / export](Rule-Sets.md#import--export)).
 
 ## What your browser keeps

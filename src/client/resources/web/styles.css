@@ -113,8 +113,9 @@ button, input, select { font: inherit; }
 /* Backpack: the worn backpack's slots, sized in features.js so every slot fits without scrolling. */
 .backpack-grid { display: grid; grid-template-columns: repeat(var(--columns, 9), var(--slot, 32px)); grid-auto-rows: var(--slot, 32px); gap: 2px; align-content: start; }
 /* Backpacks: search, a short list of known backpacks, then the selected one's slots in the space left. */
+.backpacks-picker { flex: none; max-height: 45%; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
 .backpacks-tools { align-items: end; }
-.backpacks-list { flex: none; max-height: 40%; display: grid; gap: 2px; align-content: start; }
+.backpacks-list { flex: 1; min-height: 0; display: grid; gap: 2px; align-content: start; }
 .backpacks-list:empty { display: none; }
 .backpacks-row { display: grid; grid-template-columns: 1fr auto; gap: 0 8px; padding: 4px 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .backpacks-row:hover { border-color: #2c363c; }
@@ -122,7 +123,20 @@ button, input, select { font: inherit; }
 .backpacks-row .label { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .backpacks-row .meta { grid-column: 1; color: var(--muted); font-size: 10px; }
 .backpacks-row .fill { grid-row: 1 / span 2; grid-column: 2; align-self: center; color: var(--muted); font-size: 11px; }
+.backpacks-name { width: 10em; min-width: 0; font-size: 11px; padding: 2px 6px; }
 .backpacks-view { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+/* Ender Storage: a chest's three colours as swatches, and its log of changes under the slots. */
+.ender-colours { display: inline-flex; gap: 2px; align-items: center; }
+.ender-swatch { width: 10px; height: 10px; border-radius: 2px; border: 1px solid #0008; }
+.backpacks-row .ender-colours { margin-right: 6px; vertical-align: -1px; }
+.ender-log { flex: none; max-height: 40%; min-height: 0; display: flex; flex-direction: column; gap: 4px; }
+.ender-log-list { min-height: 0; display: grid; gap: 2px; align-content: start; }
+.ender-log-row { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.ender-log-row .slot { flex: none; width: 24px; }
+.ender-log-row .delta { min-width: 3.5em; text-align: right; font-variant-numeric: tabular-nums; color: #73e0b1; }
+.ender-log-row.loss .delta { color: var(--danger); }
+.ender-log-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ender-log-row .when { color: var(--muted); font-size: 10px; }
 .head-actions { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .chip.small { padding: 1px 8px; font-size: 10px; }
 .icon-button { display: inline-grid; place-items: center; width: 22px; height: 22px; border: 1px solid #2c363c; border-radius: 6px; background: transparent; color: #9aa5aa; font-size: 12px; cursor: pointer; text-decoration: none; }

@@ -71,6 +71,7 @@ processResources {
 }
 
 processClientResources {
+    exclude 'minepanel.ae2.mixins.json' // NeoForge only: AE2 has no Fabric build for these versions
     // Mixins whose target classes don't exist on this Minecraft version (their sources are //? if'd out too).
     def excludedMixins = project.findProperty('excluded_mixins')?.toString()?.tokenize(',') ?: []
     inputs.property 'java', javaVersion

@@ -12,6 +12,10 @@ description='''A client-side Minecraft companion dashboard served locally.'''
 [[mixins]]
 config="minepanel.client.mixins.json"
 
+# Only applied when AE2 is installed (its plugin checks); every target is an AE2 class.
+[[mixins]]
+config="minepanel.ae2.mixins.json"
+
 [[dependencies.minepanel]]
 modId="neoforge"
 type="required"
@@ -43,7 +47,28 @@ ordering="NONE"
 side="CLIENT"
 
 [[dependencies.minepanel]]
+modId="sophisticatedstorage"
+type="optional"
+versionRange="[0,)"
+ordering="NONE"
+side="CLIENT"
+
+[[dependencies.minepanel]]
 modId="curios"
+type="optional"
+versionRange="[0,)"
+ordering="NONE"
+side="CLIENT"
+
+[[dependencies.minepanel]]
+modId="ae2"
+type="optional"
+versionRange="[0,)"
+ordering="NONE"
+side="CLIENT"
+
+[[dependencies.minepanel]]
+modId="enderstorage"
 type="optional"
 versionRange="[0,)"
 ordering="NONE"

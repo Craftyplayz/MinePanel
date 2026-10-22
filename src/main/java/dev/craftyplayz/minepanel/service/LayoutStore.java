@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
+import dev.craftyplayz.minepanel.telemetry.EnderStorageSnapshot;
 import dev.craftyplayz.minepanel.telemetry.FrameStats;
 import dev.craftyplayz.minepanel.telemetry.SensorNeeds;
 import dev.craftyplayz.minepanel.telemetry.StatisticsSnapshot;
@@ -53,7 +54,9 @@ public final class LayoutStore {
     private static final Pattern ID = Pattern.compile("[a-z0-9-]{1,32}");
     private static final Pattern ITEM_ID = Pattern.compile("[a-z0-9_.-]+:[a-z0-9/._-]+");
     public static final List<String> TILE_IDS = List.of("player", "inventory", "statistics", "history", "map", "build",
-            "movement", "xp", "pickups", "advancements", "villagers", "performance", "afk", "model", "backpack", "backpacks");
+            "movement", "xp", "pickups", "advancements", "villagers", "performance", "afk", "model", "backpack", "backpacks",
+            "backpacks2", "backpacks3", "backpacks4", "crafting", "enderStorage", "enderStorage2", "enderStorage3",
+            "enderStorage4");
     /** The 3D render panel's spin axes (vertical, head over heels, cartwheel) and speeds in degrees per second. */
     public static final List<String> MODEL_AXES = List.of("y", "x", "z");
     public static final List<Integer> MODEL_SPEEDS = List.of(15, 30, 60, 120);
@@ -76,8 +79,15 @@ public final class LayoutStore {
     private volatile Set<String> backpackSelections = Set.of();
     /** How many selected backpacks the game reads in full for the Backpacks panels. */
     static final int MAX_WATCHED_BACKPACKS = 7;
+    static final int MAX_BACKPACK_NAMES = 256;
+    /** The Backpacks panels; each picks its own backpack with a "selected" setting. */
+    static final List<String> BACKPACKS_PANELS = List.of("backpacks", "backpacks2", "backpacks3", "backpacks4");
     private static final Pattern BACKPACK_UUID =
             Pattern.compile("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
+    private volatile Set<String> enderStorageSelections = Set.of();
+    /** The Ender Storage panels; each picks its own chest (a frequency key, or "last") with a "selected" setting. */
+    static final List<String> ENDER_STORAGE_PANELS = List.of("enderStorage", "enderStorage2", "enderStorage3",
+            "enderStorage4");
 
     public LayoutStore(Path file) {
         this.file = file;
@@ -92,6 +102,11 @@ public final class LayoutStore {
     /** Backpacks the saved layout's Backpacks panels select, which the game reads in full (any thread). */
     public Set<String> backpackSelections() {
         return backpackSelections;
+    }
+
+    /** Ender Storage chests (frequency keys) the saved layout's Ender Storage panels select (any thread). */
+    public Set<String> enderStorageSelections() {
+        return enderStorageSelections;
     }
 
     public SensorNeeds sensorNeeds() {
@@ -110,6 +125,7 @@ public final class LayoutStore {
             updateIntervalMillis = updateInterval(normalized);
             sensorNeeds = LayoutRules.needs(JsonParser.parseString(normalized).getAsJsonObject());
             backpackSelections = backpackSelections(JsonParser.parseString(normalized).getAsJsonObject());
+            enderStorageSelections = enderStorageSelections(JsonParser.parseString(normalized).getAsJsonObject());
             return normalized;
         } catch (IOException | RuntimeException invalid) {
             keepRejected(invalid);
@@ -133,6 +149,7 @@ public final class LayoutStore {
         updateIntervalMillis = updateInterval(normalized);
         sensorNeeds = LayoutRules.needs(JsonParser.parseString(normalized).getAsJsonObject());
         backpackSelections = backpackSelections(JsonParser.parseString(normalized).getAsJsonObject());
+        enderStorageSelections = enderStorageSelections(JsonParser.parseString(normalized).getAsJsonObject());
     }
 
     /** The file beside the layout named {@code layout.<suffix>.json}. */
@@ -222,6 +239,7 @@ public final class LayoutStore {
         }
         if (root.has("pinned")) result.add("pinned", pinned(root.getAsJsonArray("pinned")));
         if (root.has("updates")) result.add("updates", updates(root.getAsJsonObject("updates")));
+        if (root.has("backpackNames")) result.add("backpackNames", backpackNames(root.getAsJsonObject("backpackNames")));
         return result.toString();
     }
 
@@ -239,6 +257,23 @@ public final class LayoutStore {
                     LayoutRules.ids(toggles), new HashSet<>());
             result.add("rules", LayoutRules.rules(root.get("rules"), refs));
         }
+    }
+
+    /**
+     * Dashboard-only nicknames for backpacks and storages (by UUID) and Ender Storage chests (by frequency key); global,
+     * not per profile. Never sent to the game.
+     */
+    private static JsonObject backpackNames(JsonObject source) {
+        if (source.size() > MAX_BACKPACK_NAMES) throw new IllegalArgumentException("too many backpack names");
+        JsonObject result = new JsonObject();
+        for (Map.Entry<String, JsonElement> entry : source.entrySet()) {
+            if (!BACKPACK_UUID.matcher(entry.getKey()).matches()
+                    && !EnderStorageSnapshot.KEY.matcher(entry.getKey()).matches()) {
+                throw new IllegalArgumentException("invalid backpack id");
+            }
+            result.addProperty(entry.getKey(), text(entry.getValue(), 64));
+        }
+        return result;
     }
 
     /** Global, not per profile: the game samples at one rate whichever profile the browser shows. */
@@ -395,8 +430,9 @@ public final class LayoutStore {
             if (afk.has("hidden")) normalized.add("hidden", statisticIds(afk.getAsJsonArray("hidden")));
             result.add("afk", normalized);
         }
-        if (source.has("backpacks")) {
-            JsonObject backpacks = source.getAsJsonObject("backpacks");
+        for (String panel : BACKPACKS_PANELS) {
+            if (!source.has(panel)) continue;
+            JsonObject backpacks = source.getAsJsonObject(panel);
             JsonObject normalized = new JsonObject();
             if (backpacks.has("selected")) {
                 String selected = text(backpacks.get("selected"), 36);
@@ -405,20 +441,44 @@ public final class LayoutStore {
                 }
                 normalized.addProperty("selected", selected);
             }
-            result.add("backpacks", normalized);
+            result.add(panel, normalized);
+        }
+        for (String panel : ENDER_STORAGE_PANELS) {
+            if (!source.has(panel)) continue;
+            JsonObject chest = source.getAsJsonObject(panel);
+            JsonObject normalized = new JsonObject();
+            if (chest.has("selected")) {
+                String selected = text(chest.get("selected"), 140);
+                if (!selected.equals("last") && !EnderStorageSnapshot.KEY.matcher(selected).matches()) {
+                    throw new IllegalArgumentException("selected ender storage chest must be \"last\" or a frequency");
+                }
+                normalized.addProperty("selected", selected);
+            }
+            result.add(panel, normalized);
         }
         return result;
     }
 
     /**
-     * The backpacks a normalized layout's Backpacks panels may show: every UUID a profile's {@code backpacks.selected}
+     * The backpacks a normalized layout's Backpacks panels may show: every UUID a profile's {@code <panel>.selected}
      * setting or a rule's set action names (not "last"), at most {@value #MAX_WATCHED_BACKPACKS}.
      */
     static Set<String> backpackSelections(JsonObject layout) {
+        return selections(layout, BACKPACKS_PANELS, MAX_WATCHED_BACKPACKS);
+    }
+
+    /** The chests a normalized layout's Ender Storage panels may show, as {@link #backpackSelections}. */
+    static Set<String> enderStorageSelections(JsonObject layout) {
+        return selections(layout, ENDER_STORAGE_PANELS, MAX_WATCHED_BACKPACKS);
+    }
+
+    private static Set<String> selections(JsonObject layout, List<String> panels, int max) {
         Set<String> selected = new java.util.LinkedHashSet<>();
         java.util.function.Consumer<JsonObject> fromSettings = settings -> {
-            if (settings != null && settings.has("backpacks") && settings.getAsJsonObject("backpacks").has("selected")) {
-                selected.add(settings.getAsJsonObject("backpacks").get("selected").getAsString());
+            for (String panel : panels) {
+                if (settings != null && settings.has(panel) && settings.getAsJsonObject(panel).has("selected")) {
+                    selected.add(settings.getAsJsonObject(panel).get("selected").getAsString());
+                }
             }
         };
         if (layout.has("settings")) fromSettings.accept(layout.getAsJsonObject("settings"));
@@ -435,7 +495,8 @@ public final class LayoutStore {
                     for (JsonElement action : rule.getAsJsonObject().getAsJsonArray(branch)) {
                         JsonObject value = action.getAsJsonObject();
                         // Only set actions carry a panel and setting; profile and notify actions have neither.
-                        if ("set".equals(value.get("do").getAsString()) && "backpacks".equals(value.get("panel").getAsString())
+                        if ("set".equals(value.get("do").getAsString())
+                                && panels.contains(value.get("panel").getAsString())
                                 && "selected".equals(value.get("setting").getAsString())) {
                             selected.add(value.get("value").getAsString());
                         }
@@ -444,7 +505,7 @@ public final class LayoutStore {
             }
         }
         selected.remove("last");
-        return selected.stream().limit(MAX_WATCHED_BACKPACKS).collect(java.util.stream.Collectors.toUnmodifiableSet());
+        return selected.stream().limit(max).collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 
     /** Version 1 rules: every group needs one matching condition. Read only, to be converted by the browser. */

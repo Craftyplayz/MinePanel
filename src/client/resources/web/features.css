@@ -329,6 +329,12 @@
   .rules-docked .tile.focused { right: 16px; bottom: calc(55vh + 16px); }
 }
 
+/* AE2 crafting */
+.crafting-heading { margin: 4px 0 0; font-size: 12px; color: var(--muted); font-weight: 600; }
+.crafting-bar { flex: none; margin-top: 3px; }
+.crafting-fill, #crafting-detail-fill { display: block; height: 100%; width: 0;
+  background: linear-gradient(90deg, #4fa3e0, #7ec850); transition: width .25s; }
+
 /* Build progress */
 .build-name { margin: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .build-progress { display: flex; align-items: center; gap: 10px; }

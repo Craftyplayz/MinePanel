@@ -331,6 +331,7 @@ public final class MinePanelClient {
         sensors.reset();
         registries.reset();
         appearance.reset();
+        Ae2.reset();
     }
 
     /** Client thread: items were added to (positive count) or removed from (negative count) the inventory. */
@@ -412,7 +413,8 @@ public final class MinePanelClient {
                     MinecraftInventoryCollector.icons(client, player, icons),
                     sensors.collect(client, level, player, layouts.sensorNeeds(), millis), registries.collect(level, icons),
                     appearance.collect(client, player, icons),
-                    Backpacks.collect(client, icons, layouts.backpackSelections()));
+                    Backpacks.collect(client, icons, layouts.backpackSelections()), Ae2.collect(client, icons, millis),
+                    EnderStorage.collect(client, icons, layouts.enderStorageSelections()));
             telemetry.updatePlayer(
                     millis,
                     (now - sessionStartedNanos) / 1_000_000_000L,

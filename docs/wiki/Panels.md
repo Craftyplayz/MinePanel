@@ -24,6 +24,14 @@ Every panel, what it shows and how to configure it. Settings marked **⚙** are 
 | [Build progress](#build-progress) | `build` | no | 2 × 2 | — |
 | [Personal backpack](#personal-backpack) | `backpack` | no | 3 × 3 | — |
 | [Backpacks](#backpacks) | `backpacks` | no | 4 × 4 | selected backpack |
+| [Backpacks 2](#backpacks) | `backpacks2` | no | 4 × 4 | selected backpack |
+| [Backpacks 3](#backpacks) | `backpacks3` | no | 4 × 4 | selected backpack |
+| [Backpacks 4](#backpacks) | `backpacks4` | no | 4 × 4 | selected backpack |
+| [AE2 crafting](#ae2-crafting) | `crafting` | no | 3 × 3 | — |
+| [Ender Storage](#ender-storage) | `enderStorage` | no | 4 × 4 | selected chest |
+| [Ender Storage 2](#ender-storage) | `enderStorage2` | no | 4 × 4 | selected chest |
+| [Ender Storage 3](#ender-storage) | `enderStorage3` | no | 4 × 4 | selected chest |
+| [Ender Storage 4](#ender-storage) | `enderStorage4` | no | 4 × 4 | selected chest |
 
 Sizes are in grid cells: the grid is 12 columns wide and each row is 40 px. The **id** is what rules and rule set files use.
 
@@ -47,7 +55,8 @@ Click your **player head** for the [player menu](Dashboard.md#player-menu).
 A read-only copy of your inventory: the hotbar (selected slot highlighted), the 27 main slots, armour, offhand and an ender chest slot. The line at the top names the item you're holding.
 
 - **Armor** (chip in the title bar) shows or hides the armour and offhand slots. Setting: `showArmor` (default on).
-- **Hover** an item for its tooltip; **click** a shulker box, bundle, [backpack](Integrations.md#sophisticated-backpacks) or the ender chest to open an [item window](Dashboard.md#item-windows).
+- **Hover** an item for its tooltip; **click** a shulker box, bundle, [backpack](Integrations.md#sophisticated-backpacks), [Ender Storage pouch](Integrations.md#ender-storage) or the ender chest to open an [item window](Dashboard.md#item-windows).
+- With [Ender Storage](Integrations.md#ender-storage), the ender chest slot shows Ender Storage's chest and opens the Ender Storage chest you opened last.
 - When the panel is small it shows only the whole rows that fit, hotbar first, instead of scrolling or cutting rows in half.
 - With [Curios](Integrations.md#curios) (NeoForge), items in your extra slots (back, rings, belt and so on) show in a row under the inventory, only while you wear something there. Click a backpack there to open it.
 
@@ -215,10 +224,15 @@ The backpack you're wearing, laid out slot by slot like its screen in game. Only
 
 Every backpack MinePanel knows of, and the contents of the one you pick. Only on **Minecraft 1.21.1** with [Sophisticated Backpacks](Integrations.md#sophisticated-backpacks): on other versions it isn't in the **Tiles** list, and without the mod it says *Needs Sophisticated Backpacks.*
 
+There are four of these panels: **Backpacks**, **Backpacks 2**, **Backpacks 3** and **Backpacks 4**. They share the same list, but each one picks, searches and folds on its own, so you can watch up to four backpacks side by side. All four are off until you turn them on in the **Tiles** list.
+
 - **Which backpacks are listed:** in singleplayer, every backpack in your world, whoever opened it. On a server, only the backpacks you've opened yourself, as you last saw them; the panel says so under the search box.
 - **The list** shows each backpack's name (**Backpack** if it has none), who opened it last and how long ago, and how many of its slots hold something (for example **12/54**). The most recently opened is at the top.
-- **Search backpacks or items** narrows the list by backpack name, by who opened it, or by an item inside (its name or id, such as `diamond` or `minecraft:diamond`).
+- **Placed storages:** with [Sophisticated Storage](Integrations.md#sophisticated-storage), its chests, barrels and other storage blocks are listed too, after the backpacks. Their row says **Storage** and where the block is, for example **Storage · 120, 64, -340**. You pick and view them like a backpack.
+- **Search backpacks, storage or items** narrows the list by name, by who opened it, or by an item inside (its name or id, such as `diamond` or `minecraft:diamond`). Type `storage` to list only placed storages, or part of their coordinates (`64, -340`) to find one.
 - **Click a backpack** in the list to show it below. **Last opened** goes back to showing whichever backpack was opened most recently, and stays pressed while it's chosen. The title bar names the backpack shown, or says **None**.
+- Once a backpack is shown, the search box and list fold away so the backpack gets the space. Click **☰** in the title bar to bring them back (and again to hide them).
+- **Rename:** click **✎** in the title bar to give the shown backpack or storage your own name. Press **Enter** (or click away) to keep it, **Escape** to cancel. Clear the name to get the game's name back. The new name shows in every Backpacks panel's list and title bar, and search finds it as well as the game's name. It only changes the name on the dashboard: the backpack keeps its name in game. Nicknames are saved with your layout, for all profiles. The [Personal backpack](#personal-backpack) panel always shows the game's name.
 - The chosen backpack is drawn slot by slot like the [Personal backpack](#personal-backpack) panel, and follows changes about four times a second in singleplayer. Hover an item for its tooltip.
 - Just after you pick a backpack, the panel says *Loading…* until the game sends its contents. *Contents not known yet. Open the backpack once in game.* means MinePanel hasn't seen inside it yet. *No backpacks found yet.* means it knows of none.
 - Nothing here changes a backpack: you can only look.
@@ -227,7 +241,53 @@ Every backpack MinePanel knows of, and the contents of the one you pick. Only on
 |---|---|---|---|
 | Selected backpack | `selected` | `last` shows the backpack opened most recently; a backpack's UUID (lowercase) always shows that backpack | `last` |
 
-The choice is saved per [profile](Customizing.md#profiles), so a rule can switch to a profile, or use [Set panel setting](Rule-Actions.md#set-panel-setting), to show a particular backpack.
+Each panel has its own setting. The choice is saved per [profile](Customizing.md#profiles), so a rule can switch to a profile, or use [Set panel setting](Rule-Actions.md#set-panel-setting), to show a particular backpack. At most 7 chosen backpacks (plus the last opened) are read in full at once, across all panels and profiles.
+
+> New and not tested in game yet.
+
+## AE2 crafting
+
+Your [Applied Energistics 2](Integrations.md#applied-energistics-2) autocrafting: the jobs you start and the network's crafting CPUs. Only on **Minecraft 1.21.1**; it shows anything only on NeoForge with AE2 installed (otherwise it says *Needs Applied Energistics 2.*).
+
+- **Your jobs** lists the crafting jobs you start, running ones first, then the most recently ended. Each row shows the item and amount, and:
+  - **Crafting**, with how far along it is (when the CPU crafting it is known) and how long it has been running.
+  - **Done**, how long ago, and how long it took.
+  - **Cancelled**, and how long ago.
+- Jobs show from the moment you start them, without any screen open. MinePanel keeps your last 16 jobs until you leave the world. Jobs that were already running when you joined appear when they end.
+- **Crafting CPUs** lists every crafting CPU on the network. A busy CPU shows the item, amount, percent done and time running, with a progress bar. An idle one shows **Idle**, its storage in bytes and its co-processors.
+- **Selected CPU** shows the CPU picked in AE2's Crafting Status screen: overall percent done (with **paused** if the job is suspended) and, for each item, how many are **crafting**, **scheduled** and **stored**. The busiest items come first, up to 64.
+- The CPUs and the selected CPU come from AE2's **Crafting Status** screen. Open it in game (from an ME terminal, also a wireless one) to fill them in. While it's open the title bar says **Live**. After you close it, the panel keeps what it last saw and the title bar says how long ago (**Seen 2m ago**).
+- Until you open Crafting Status, the panel says *Open Crafting Status in an ME terminal to see your crafting CPUs here.*
+- Nothing here changes your AE2 network: you can only look.
+
+> New and not tested in game yet.
+
+## Ender Storage
+
+Every [Ender Storage](Integrations.md#ender-storage) chest MinePanel knows of, the contents of the one you pick, and a log of what was put in and taken out. Only on **Minecraft 1.21.1**: on other versions it isn't in the **Tiles** list. It shows anything only on NeoForge with Ender Storage installed; otherwise it says *Needs Ender Storage.*
+
+There are four of these panels: **Ender Storage**, **Ender Storage 2**, **Ender Storage 3** and **Ender Storage 4**. They share the same list, but each one picks, searches and folds on its own, so you can watch up to four chests side by side. All four are off until you turn them on in the **Tiles** list.
+
+An Ender Storage chest is one colour code: the three colours on its lid, left to right. Every chest, pouch and tank with the same colours shares the same items. A chest can also be personal (owned by one player).
+
+- **Which chests are listed:** in singleplayer, every Ender Storage chest in your world, whoever uses it. On a server, only the chests you've opened yourself, as you last saw them; the panel says so under the search box.
+- **The list** shows each chest's colour code as three coloured squares, then its colours in words (for example **White / Red / Light Blue**), then **public** or **personal** with the owner's name, and when you last saw it change or opened it. On the right, how many of its slots hold something (for example **12/27**). The chests you've seen most recently are at the top.
+- **Search colours, owners or items** narrows the list by colour (`light blue` or `light_blue`), by owner, or by an item inside (its name or id, such as `diamond` or `minecraft:diamond`).
+- **Click a chest** in the list to show it below. **Last opened** goes back to showing whichever chest you opened most recently, and stays pressed while it's chosen. The title bar shows the chest's colour code and name, or says **None**.
+- Once a chest is shown, the search box and list fold away so the chest gets the space. Click **☰** in the title bar to bring them back (and again to hide them).
+- **Rename:** click **✎** in the title bar to give the shown chest your own name, the same way as in the [Backpacks](#backpacks) panels. It only changes the name on the dashboard.
+- The chosen chest is drawn slot by slot (9, 27 or 54 slots, depending on how the server set up Ender Storage). In singleplayer it follows changes about twice a second; on a server, while you have it open in game. Hover an item for its tooltip.
+- **Changes**, under the slots, lists what went in and out, newest first: for example **+12 Cobblestone** or **−3 Diamond**, with how long ago. Items taken out are in red. See [Ender Storage](Integrations.md#ender-storage) for when changes are noticed.
+- Just after you pick a chest, the panel says *Loading…* until the game sends its contents. *Contents not known yet. Open the chest once in game.* means MinePanel hasn't seen inside it yet. *No ender chests found yet. Open one in game.* means it knows of none.
+- Nothing here changes a chest: you can only look.
+
+| Setting | Id | What it does | Default |
+|---|---|---|---|
+| Selected chest | `selected` | `last` shows the chest opened most recently; a colour code shows that chest | `last` |
+
+A colour code is the three colours in lowercase, left to right, joined with dots, such as `white.red.light_blue`. Colours are `white`, `orange`, `magenta`, `light_blue`, `yellow`, `lime`, `pink`, `gray`, `light_gray`, `cyan`, `purple`, `blue`, `brown`, `green`, `red` and `black`. A personal chest adds a dot and the owner's UUID in lowercase: `white.red.light_blue.8667ba71-b85a-4004-af54-457a9734eed7`.
+
+Each panel has its own setting. The choice is saved per [profile](Customizing.md#profiles), so a rule can switch to a profile, or use [Set panel setting](Rule-Actions.md#set-panel-setting), to show a particular chest. At most 7 chosen chests (plus the last opened) are watched at once, across all panels and profiles.
 
 > New and not tested in game yet.
 

@@ -567,12 +567,22 @@ public final class LocalDashboardServerTest {
         invalid(() -> new WorldStore.Backpack("not-a-uuid", 1, java.util.List.of()));
         invalid(() -> new WorldStore.Backpack(uuid, 1, java.util.List.of(com.google.gson.JsonNull.INSTANCE)));
         invalid(() -> new WorldStore.Backpack(uuid, 1, java.util.Collections.nCopies(ItemSnapshot.MAX_CONTENTS + 1, item)));
+        String ender = "white.red.light_blue.8667ba71-b85a-4004-af54-457a9734eed7";
+        var change = new WorldStore.EnderChange(60, -2, item);
+        worlds.putEnderStorage(new WorldStore.EnderStorage(ender, "Steve", 60, java.util.List.of(item,
+                com.google.gson.JsonNull.INSTANCE), java.util.List.of(change)));
+        invalid(() -> new WorldStore.EnderStorage("White.red.blue", null, 1, java.util.List.of(), java.util.List.of()));
+        invalid(() -> new WorldStore.EnderStorage(ender, "", 1, java.util.List.of(), java.util.List.of()));
+        invalid(() -> new WorldStore.EnderStorage(ender, null, 1, java.util.List.of(),
+                java.util.Collections.nCopies(WorldStore.MAX_ENDER_LOG + 1, change)));
+        invalid(() -> new WorldStore.EnderChange(1, 0, item));
         worlds.save();
         WorldStore reloadedWorlds = new WorldStore(directory);
         reloadedWorlds.open("server:play.example.net");
         check(reloadedWorlds.villagers().equals(worlds.villagers()) && reloadedWorlds.enderChest().equals(worlds.enderChest())
-                        && reloadedWorlds.backpack(uuid).equals(worlds.backpack(uuid)),
-                "villagers, the ender chest and backpacks survive a restart");
+                        && reloadedWorlds.backpack(uuid).equals(worlds.backpack(uuid))
+                        && reloadedWorlds.enderStorage(ender).equals(worlds.enderStorage(ender)),
+                "villagers, the ender chest, backpacks and Ender Storage chests with their logs survive a restart");
         reloadedWorlds.open("singleplayer:Other World");
         check(reloadedWorlds.villagers().isEmpty() && reloadedWorlds.enderChest() == null
                 && reloadedWorlds.backpack(uuid) == null, "each world has its own data");

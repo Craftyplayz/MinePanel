@@ -62,6 +62,7 @@ final class WorldDataCollector {
         tradingScreen = null;
         lastTrades = null;
         Backpacks.reset();
+        EnderStorage.reset();
     }
 
     /** Fabric's entity-use callback: remember the villager in case its trading screen opens next. */
@@ -95,6 +96,7 @@ final class WorldDataCollector {
             }
         }
         Backpacks.tick(minecraft, store);
+        EnderStorage.tick(minecraft, store);
         if (++ticks % POSITION_INTERVAL_TICKS == 0) trackNearby(level, now);
     }
 

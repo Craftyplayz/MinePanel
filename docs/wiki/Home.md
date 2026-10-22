@@ -24,7 +24,7 @@ The dashboard updates live. Nothing you do on it can change your game: it only r
 | [Rule actions](Rule-Actions.md) | Every action a rule can take |
 | [Templates and rule sets](Rule-Sets.md) | Ready-made rules, sharing rules, importing and exporting whole setups |
 | [Ready-made rule sets](Ready-Made-Rule-Sets.md) | Every rule set file you can download and import: farms, AFK, advancement hunting, trading and more |
-| [Integrations](Integrations.md) | JourneyMap web map, Litematica build progress, Curios slots and Sophisticated Backpacks |
+| [Integrations](Integrations.md) | JourneyMap web map, Litematica build progress, Curios slots, Sophisticated Backpacks, Sophisticated Storage, AE2 crafting and Ender Storage |
 | [Files and privacy](Files-and-Privacy.md) | What MinePanel saves, where, and what leaves your PC |
 | [Troubleshooting](Troubleshooting.md) | Common problems and questions |
 
@@ -49,16 +49,18 @@ MinePanel works on its own. Two panels need another mod:
 - **JourneyMap** with its **Webmap** addon, for the [map panel](Integrations.md#journeymap).
 - **Litematica** (with MaLiLib), or **Forgematica** (with MaFgLib) on NeoForge, for the [Build progress panel](Integrations.md#litematica-build-progress).
 
-Both panels are off until you turn them on. On NeoForge, **Sophisticated Backpacks** adds [backpack contents](Integrations.md#sophisticated-backpacks) to item windows and fills the [Personal backpack](Panels.md#personal-backpack) and [Backpacks](Panels.md#backpacks) panels, and **Curios** adds your [extra slots](Integrations.md#curios) to the Inventory panel.
+Both panels are off until you turn them on. On NeoForge, **Sophisticated Backpacks** adds [backpack contents](Integrations.md#sophisticated-backpacks) to item windows and fills the [Personal backpack](Panels.md#personal-backpack) and [Backpacks](Panels.md#backpacks) panels, and **Curios** adds your [extra slots](Integrations.md#curios) to the Inventory panel, and **Applied Energistics 2** fills the [AE2 crafting](Panels.md#ae2-crafting) panel, and **Ender Storage** fills the [Ender Storage](Panels.md#ender-storage) panels.
 
 ## Minecraft versions
 
-MinePanel comes in three versions: **Fabric 26.1.2**, **Fabric 1.21.1** and **NeoForge 1.21.1**. Use the one that matches your game and mod loader. All three have the same panels, settings and rules, except the two backpack panels (see below). Items, armor, effects and entities from other mods show with the textures your game uses, including your resource packs. On 1.21.1 (Fabric and NeoForge), a few things differ because the game itself is older:
+MinePanel comes in three versions: **Fabric 26.1.2**, **Fabric 1.21.1** and **NeoForge 1.21.1**. Use the one that matches your game and mod loader. All three have the same panels, settings and rules, except the backpack, AE2 crafting and Ender Storage panels (see below). Items, armor, effects and entities from other mods show with the textures your game uses, including your resource packs. On 1.21.1 (Fabric and NeoForge), a few things differ because the game itself is older:
 
 | What | On 1.21.1 |
 |---|---|
 | [Using an item](Rule-Conditions.md) condition | **Using a spear** and **bundle** never match: there are no spears yet, and bundles can't be used yet |
 | [Build progress](Integrations.md#litematica-build-progress) panel | Needs Litematica 0.19.61 and MaLiLib 0.21.10 or newer (on NeoForge: Forgematica and MaFgLib 0.4.3 or newer). These have no option for ignoring crop age, so a crop at the wrong age counts as wrong |
-| Backpacks | Only on NeoForge: [Sophisticated Backpacks](Integrations.md#sophisticated-backpacks) contents show in item windows. The [Personal backpack](Panels.md#personal-backpack) and [Backpacks](Panels.md#backpacks) panels exist only on 1.21.1; on 26.1.2 they aren't in the **Tiles** list |
+| Backpacks | Only on NeoForge: [Sophisticated Backpacks](Integrations.md#sophisticated-backpacks) contents show in item windows. The [Personal backpack](Panels.md#personal-backpack) and [Backpacks](Panels.md#backpacks) panels (Backpacks 2 to 4 too) exist only on 1.21.1; on 26.1.2 they aren't in the **Tiles** list |
+| AE2 crafting | The [AE2 crafting](Panels.md#ae2-crafting) panel exists only on 1.21.1, and shows anything only on NeoForge with [Applied Energistics 2](Integrations.md#applied-energistics-2) |
+| Ender Storage | The [Ender Storage](Panels.md#ender-storage) panels (1 to 4) exist only on 1.21.1, and show anything only on NeoForge with [Ender Storage](Integrations.md#ender-storage) |
 
 The 1.21.1 versions haven't been tested in game yet.

@@ -13,17 +13,38 @@ import java.util.UUID;
  * registries (for the rule editor's pickers), and what the 3D render panel draws. Each part is sent as a top-level
  * snapshot field and replaced whole when it changes.
  * {@code advancements} is null until the server has sent them; {@code enderChest} is null until the player opens
- * their ender chest in this world. {@code backpacks} is null without a supported backpack mod.
+ * their ender chest in this world. {@code backpacks} is null without a supported backpack mod, {@code ae2} without
+ * Applied Energistics 2, {@code enderStorage} without Ender Storage.
  */
 public record PlayerDetails(WorldInfo world, Motion motion, XpTracker.Experience xp, PortalTracker.State portal,
                             List<PickupTracker.Pickup> pickups, AdvancementsSnapshot advancements,
                             List<VillagerSnapshot> villagers, EnderChest enderChest,
                             FrameStats.Performance performance, BuildProgress build, Icons icons,
                             Sensors sensors, Registries registries, Appearance appearance,
-                            BackpacksSnapshot backpacks) {
+                            BackpacksSnapshot backpacks, Ae2Snapshot ae2, EnderStorageSnapshot enderStorage) {
     public static final List<String> FIELDS = List.of("world", "motion", "xp", "portal", "pickups", "advancements",
             "villagers", "enderChest", "performance", "build", "icons", "sensors", "registries", "appearance",
-            "backpacks");
+            "backpacks", "ae2", "enderStorage");
+
+    /** Details without Ender Storage (not installed). */
+    public PlayerDetails(WorldInfo world, Motion motion, XpTracker.Experience xp, PortalTracker.State portal,
+                         List<PickupTracker.Pickup> pickups, AdvancementsSnapshot advancements,
+                         List<VillagerSnapshot> villagers, EnderChest enderChest, FrameStats.Performance performance,
+                         BuildProgress build, Icons icons, Sensors sensors, Registries registries, Appearance appearance,
+                         BackpacksSnapshot backpacks, Ae2Snapshot ae2) {
+        this(world, motion, xp, portal, pickups, advancements, villagers, enderChest, performance, build, icons,
+                sensors, registries, appearance, backpacks, ae2, null);
+    }
+
+    /** Details without AE2 crafting (Applied Energistics 2 not installed). */
+    public PlayerDetails(WorldInfo world, Motion motion, XpTracker.Experience xp, PortalTracker.State portal,
+                         List<PickupTracker.Pickup> pickups, AdvancementsSnapshot advancements,
+                         List<VillagerSnapshot> villagers, EnderChest enderChest, FrameStats.Performance performance,
+                         BuildProgress build, Icons icons, Sensors sensors, Registries registries, Appearance appearance,
+                         BackpacksSnapshot backpacks) {
+        this(world, motion, xp, portal, pickups, advancements, villagers, enderChest, performance, build, icons,
+                sensors, registries, appearance, backpacks, null);
+    }
 
     /** Details without backpacks (no supported backpack mod). */
     public PlayerDetails(WorldInfo world, Motion motion, XpTracker.Experience xp, PortalTracker.State portal,
@@ -153,6 +174,8 @@ public record PlayerDetails(WorldInfo world, Motion motion, XpTracker.Experience
             case "registries" -> details.registries.toJson();
             case "appearance" -> details.appearance.toJson();
             case "backpacks" -> details.backpacks == null ? "null" : details.backpacks.toJson();
+            case "ae2" -> details.ae2 == null ? "null" : details.ae2.toJson();
+            case "enderStorage" -> details.enderStorage == null ? "null" : details.enderStorage.toJson();
             default -> throw new IllegalArgumentException(field);
         };
     }
@@ -175,6 +198,8 @@ public record PlayerDetails(WorldInfo world, Motion motion, XpTracker.Experience
             case "registries" -> details.registries;
             case "appearance" -> details.appearance;
             case "backpacks" -> details.backpacks;
+            case "ae2" -> details.ae2;
+            case "enderStorage" -> details.enderStorage;
             default -> throw new IllegalArgumentException(field);
         };
     }

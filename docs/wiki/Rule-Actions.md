@@ -72,7 +72,8 @@ Changes one panel setting while the rule applies, using the panel's own controls
 | Advancements | Pop-up seconds, Hidden tabs, Pinned | 0–300; lists |
 | 3D render | Spin, Axis, Speed | on/off; turntable / head over heels / cartwheel; 15–120 °/s |
 | AFK | Text size, Speed, Hidden | 11–32 px; slow / normal / fast / very fast; statistic list |
-| Backpacks | Selected (`selected`) | `last` (the backpack opened most recently) or one backpack's UUID, in lowercase |
+| Backpacks, Backpacks 2, Backpacks 3, Backpacks 4 | Selected (`selected`) | `last` (the backpack opened most recently) or one backpack's or storage's UUID, in lowercase |
+| Ender Storage, Ender Storage 2, Ender Storage 3, Ender Storage 4 | Selected (`selected`) | `last` (the chest opened most recently) or one chest's [colour code](Panels.md#ender-storage), such as `white.red.light_blue` |
 
 See [Panels](Panels.md) for what each setting does and its default.
 
